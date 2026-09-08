@@ -5,12 +5,12 @@ WebAssembly, for use in browsers, Deno, and wazero. The initial direction is
 WASI Preview 1 command modules with C++, Rust, Go, and eventually Zig
 generation.
 
-The first working slice builds `capnp.wasm`, `capnpc-c++.wasm`, and
-`capnpc-capnp.wasm`. The same modules compile schemas and generate C++ in
-Wasmtime, wazero (compiler and interpreter), and Deno using the pinned browser
-WASI shim. Tests compare them with native upstream output. Browser execution,
-public SDKs, Rust/Go/Zig generator guests, and release packaging are still
-ahead.
+The build produces `capnp.wasm`, `capnpc-c++.wasm`, `capnpc-capnp.wasm`,
+`capnpc-rust.wasm`, and `capnpc-go.wasm`. The same modules compile schemas and
+generate C++, Rust, and Go in Wasmtime, wazero (compiler and interpreter), and
+Deno using the pinned browser WASI shim. Tests compare them with native upstream
+output and compile the generated source. Browser execution, public SDKs, the Zig
+generator guest, and release packaging are still ahead.
 
 ## Bootstrap
 
@@ -47,16 +47,17 @@ mise run check        # adds formatting, lint, type, and environment checks
 
 Native tools are in `build/native/bin/`; Wasm commands are in `build/wasm/bin/`.
 Wasm builds export the compiler sources into `build/src/`, apply the project
-patch there, and leave `ref/` pristine. Test requests, generated C++, and
+patch there, and leave `ref/` pristine. Test requests, generated source, and
 canonical comparison data remain in `build/test/` for inspection after a
 failure.
 
 Tests cover standard annotations, relative imports, unions, enums, interfaces,
-byte-identical C++ output, native compilation of generated files, schema
-inspection, random IDs, malformed schemas/requests, and explicit rejection of
-guest process launching. The native test oracle sorts only the request's `nodes`
-and `sourceInfo` maps before comparing canonical binary messages; all other
-ordering and pointer values are preserved.
+byte-identical C++/Rust/Go output, native compilation of generated files, Rust
+and Go serialization roundtrips against pinned runtimes, schema inspection,
+random IDs, malformed schemas/requests, and explicit rejection of guest process
+launching. The native test oracle sorts only the request's `nodes` and
+`sourceInfo` maps before comparing canonical binary messages; all other ordering
+and pointer values are preserved.
 
 The current [port and runtime profile](patches/capnproto/README.md) requires
 standardized Wasm exception handling. Wasmtime uses `-W exceptions=y`; the
@@ -72,6 +73,7 @@ the generator in a separate output directory:
 mkdir -p build/example/input/src build/example/input/include/capnp build/example/output
 cp -R tests/fixtures/schemas/. build/example/input/src/
 cp ref/capnproto/c++/src/capnp/c++.capnp build/example/input/include/capnp/
+cp ref/go-capnp/std/go.capnp build/example/input/include/
 mise exec -- wasmtime run -W exceptions=y --dir build/example/input::/ \
   build/wasm/bin/capnp.wasm compile --no-standard-import -I/include \
   --src-prefix=/src -o- /src/person.capnp /src/types/common.capnp > build/example/request.bin
@@ -79,8 +81,12 @@ mise exec -- wasmtime run -W exceptions=y --dir build/example/output::/ \
   build/wasm/bin/capnpc-c++.wasm < build/example/request.bin
 ```
 
+The same request can be passed to `capnpc-rust.wasm` and `capnpc-go.wasm`, each
+with its own output directory. See [generator details](generators/README.md) for
+language annotations, options, and dependency conventions.
+
 Each guest sees its staged root directory. Input schemas include the pinned
-standard annotation file explicitly. Generate into a fresh output directory and
+standard annotation files explicitly. Generate into a fresh output directory and
 publish the output only after success.
 
 ## Tools
@@ -109,16 +115,17 @@ For CMake cross builds, use
 
 ## Layout and references
 
-| Path       | Contents                                                        |
-| ---------- | --------------------------------------------------------------- |
-| `ref/`     | Upstream Git submodules and their [source map](ref/README.md)   |
-| `scripts/` | Project setup, build, and verification scripts                  |
-| `cmake/`   | Minimal synchronous C++ command build for WASI                  |
-| `patches/` | Documented upstream porting changes                             |
-| `tests/`   | Schema fixtures, native oracle, and development host runners    |
-| `build/`   | Ignored build trees, scratch source copies, and generated files |
-| `dist/`    | Ignored distributable output                                    |
-| `.cache/`  | Ignored project caches                                          |
+| Path          | Contents                                                        |
+| ------------- | --------------------------------------------------------------- |
+| `ref/`        | Upstream Git submodules and their [source map](ref/README.md)   |
+| `scripts/`    | Project setup, build, and verification scripts                  |
+| `cmake/`      | Minimal synchronous C++ command build for WASI                  |
+| `patches/`    | Documented upstream porting changes                             |
+| `generators/` | Rust command wrapper and pinned Rust/Go dependency manifests    |
+| `tests/`      | Schema fixtures, native oracle, and development host runners    |
+| `build/`      | Ignored build trees, scratch source copies, and generated files |
+| `dist/`       | Ignored distributable output                                    |
+| `.cache/`     | Ignored project caches                                          |
 
 `mise run refs:sync` initializes only the top-level references at the commits
 recorded by this repository. Their nested compiler sources, demos, and test
@@ -127,8 +134,9 @@ ordinary setup; a recursive WASI SDK checkout also fetches LLVM.
 
 `mise run refs:status` shows the authoritative source revisions. The existing
 Cap'n Proto revision is preserved; the WASI SDK source matches the SDK release.
-Other references are development snapshots for investigation, not a tested
-compatibility matrix or runtime package dependency declaration.
+The tests exercise the pinned C++, Rust, and Go revisions together. The
+remaining references provide source material for host integration and the Zig
+port; they do not imply a broader compatibility matrix.
 
 When intentionally updating a tool, edit its pin, run `mise install` and
 `mise lock`, then run `mise run check` and review the lockfile diff. When

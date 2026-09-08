@@ -2,6 +2,9 @@
 
 using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("fixture");
+using Go = import "/go.capnp";
+$Go.package("fixture");
+$Go.import("capnp-wasm/fixture");
 using Common = import "types/common.capnp";
 
 struct Person {

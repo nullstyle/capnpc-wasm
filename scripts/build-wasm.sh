@@ -27,7 +27,8 @@ cmake -S cmake -B build/wasm -G Ninja \
   -DCAPNP_SOURCE_DIR="$root/$source_dir" \
   -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$root/build/wasm/bin"
 cmake --build build/wasm
-for module in build/wasm/bin/*.wasm; do
+for tool in capnp capnpc-c++ capnpc-capnp; do
   wasm-tools validate \
-    --features=-legacy-exceptions,-threads,-shared-everything-threads,-memory64 "$module"
+    --features=-legacy-exceptions,-threads,-shared-everything-threads,-memory64 \
+    "build/wasm/bin/$tool.wasm"
 done

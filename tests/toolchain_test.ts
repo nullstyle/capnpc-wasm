@@ -11,10 +11,12 @@ async function run(
   command: string[],
   input?: Uint8Array,
   cwd = root,
+  env?: Record<string, string>,
 ): Promise<Deno.CommandOutput> {
   const child = new Deno.Command(command[0], {
     args: command.slice(1),
     cwd,
+    env,
     stdin: input ? "piped" : "null",
     stdout: "piped",
     stderr: "piped",
@@ -108,7 +110,7 @@ async function prepare() {
   await Deno.mkdir(`${root}/build/test`, { recursive: true });
   const work = await Deno.makeTempDir({
     dir: `${root}/build/test`,
-    prefix: "first-slice-",
+    prefix: "toolchain-",
   });
   const compilerRoot = `${work}/input`;
   await copyTree(`${root}/tests/fixtures/schemas`, `${compilerRoot}/src`);
@@ -121,6 +123,10 @@ async function prepare() {
   await Deno.copyFile(
     `${root}/ref/capnproto/c++/src/capnp/c++.capnp`,
     `${compilerRoot}/include/capnp/c++.capnp`,
+  );
+  await Deno.copyFile(
+    `${root}/ref/go-capnp/std/go.capnp`,
+    `${compilerRoot}/include/go.capnp`,
   );
   const request = success(
     await run([
@@ -146,6 +152,18 @@ async function prepare() {
     (await files(expected)).size === 4,
     "expected two generated header/source pairs",
   );
+  for (const language of ["rust", "go"]) {
+    const directory = `${work}/native-${language}`;
+    await Deno.mkdir(directory);
+    success(
+      await run([`${native}/capnpc-${language}`], request, directory),
+      `native ${language} generator`,
+    );
+    assert(
+      (await files(directory)).size === 2,
+      `expected two ${language} files`,
+    );
+  }
   return {
     work,
     compilerRoot,
@@ -181,7 +199,15 @@ const hosts = [
 ];
 
 Deno.test("Wasm artifacts import only WASI Preview 1 and export command entrypoints", async () => {
-  for (const name of ["capnp", "capnpc-c++", "capnpc-capnp"]) {
+  for (
+    const name of [
+      "capnp",
+      "capnpc-c++",
+      "capnpc-capnp",
+      "capnpc-rust",
+      "capnpc-go",
+    ]
+  ) {
     const path = `${wasm}/${name}.wasm`;
     success(
       await run([
@@ -198,8 +224,12 @@ Deno.test("Wasm artifacts import only WASI Preview 1 and export command entrypoi
         imported.module === "wasi_snapshot_preview1",
         `unexpected import ${JSON.stringify(imported)}`,
       );
+      // Go's standard WASI runtime retains these two imports even in programs
+      // with no networking. None of our hosts gives the guest a socket FD.
+      const goRuntimeImport = name === "capnpc-go" &&
+        ["sock_accept", "sock_shutdown"].includes(imported.name);
       assert(
-        !/^(sock_|thread_)/.test(imported.name),
+        goRuntimeImport || !/^(sock_|thread_)/.test(imported.name),
         `unsupported import ${imported.name}`,
       );
     }
@@ -314,6 +344,100 @@ for (const host of hosts) {
       );
     }
 
+    for (const language of ["rust", "go"]) {
+      for (
+        const [source, request] of [["native", data.request], [
+          "wasm",
+          compiled,
+        ]] as const
+      ) {
+        await t.step(
+          `${source} request produces byte-identical ${language}`,
+          async () => {
+            assert(request.length > 0, "compiler produced no request");
+            const output = `${data.work}/${host.name}-${source}-${language}`;
+            await Deno.mkdir(output);
+            const result = await run(
+              guest(`capnpc-${language}`, output),
+              request,
+            );
+            success(result, `${host.name} ${language} generator`);
+            assert(
+              result.stdout.length === 0,
+              `${language} generator wrote to binary stdout`,
+            );
+            await equalFiles(output, `${data.work}/native-${language}`);
+          },
+        );
+      }
+      await t.step(
+        `generated ${language} compiles and roundtrips with its pinned runtime`,
+        async () => {
+          const output = `${data.work}/${host.name}-wasm-${language}`;
+          if (language === "rust") {
+            success(
+              await run(
+                [
+                  "cargo",
+                  "test",
+                  "--locked",
+                  "--manifest-path",
+                  `${root}/tests/consumers/rust/Cargo.toml`,
+                ],
+                undefined,
+                root,
+                { CAPNP_WASM_GENERATED_DIR: output },
+              ),
+              "generated Rust roundtrip",
+            );
+          } else {
+            // Preserve the byte-comparison tree; the consumer owns a separate copy.
+            const consumer = `${data.work}/${host.name}-go-consumer`;
+            await copyTree(output, consumer);
+            await copyTree(`${root}/tests/consumers/go`, consumer);
+            success(
+              await run([
+                "go",
+                "-C",
+                consumer,
+                "mod",
+                "edit",
+                `-replace=capnproto.org/go/capnp/v3=${root}/ref/go-capnp`,
+              ]),
+              "select pinned Go runtime",
+            );
+            success(
+              await run([
+                "go",
+                "-C",
+                consumer,
+                "test",
+                "-mod=readonly",
+                "./...",
+              ]),
+              "generated Go roundtrip",
+            );
+          }
+        },
+      );
+    }
+
+    await t.step(
+      "Rust output-directory option stages all files beneath the requested path",
+      async () => {
+        const output = `${data.work}/${host.name}-rust-output-option`;
+        await Deno.mkdir(output);
+        success(
+          await run(
+            guest("capnpc-rust", output, ["--output-directory", "/generated"]),
+            data.request,
+          ),
+          "Rust explicit output directory",
+        );
+        await equalFiles(`${output}/generated`, `${data.work}/native-rust`);
+      },
+    );
+
     await t.step("schema inspection matches native output", async () => {
       const expected = success(
         await run([`${native}/capnpc-capnp`], data.request),
@@ -385,20 +509,29 @@ for (const host of hosts) {
         ],
       ] as const
     ) {
-      await t.step(
-        `${name} generator input fails without output files`,
-        async () => {
-          const output = `${data.work}/${host.name}-${name}`;
-          await Deno.mkdir(output);
-          const result = await run(guest("capnpc-c++", output), input);
-          assert(!result.success, `${name} unexpectedly succeeded`);
-          assert(result.stderr.length > 0, `${name} produced no diagnostic`);
-          assert(
-            (await files(output)).size === 0,
-            `${name} left generated output`,
-          );
-        },
-      );
+      for (const language of ["c++", "rust", "go"]) {
+        await t.step(
+          `${name} ${language} generator input fails without output files`,
+          async () => {
+            const output = `${data.work}/${host.name}-${language}-${name}`;
+            await Deno.mkdir(output);
+            const result = await run(
+              guest(`capnpc-${language}`, output),
+              input,
+            );
+            assert(!result.success, `${name} unexpectedly succeeded`);
+            assert(
+              result.stdout.length === 0,
+              `${name} produced stdout despite failure`,
+            );
+            assert(result.stderr.length > 0, `${name} produced no diagnostic`);
+            assert(
+              (await files(output)).size === 0,
+              `${name} left generated output`,
+            );
+          },
+        );
+      }
     }
 
     await t.step("guest generator launching fails explicitly", async () => {

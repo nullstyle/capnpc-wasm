@@ -1,9 +1,9 @@
 # Working in capnp-wasm
 
 This repository ports the reference Cap'n Proto tools and language generators to
-Wasm commands for browsers, Deno, and wazero. The first slice builds the
-compiler and C++/schema-inspection generators and compares them with native
-upstream behavior; public SDKs and other language guests are still pending.
+Wasm commands for browsers, Deno, and wazero. The compiler and C++, Rust, Go,
+and schema-inspection generators run across the development hosts and match
+native output. Public SDKs, real browser tests, and the Zig guest are pending.
 
 - Read [README.md](README.md) for bootstrap commands and workspace conventions.
   When working on a compiler, generator, or WASI boundary, use the relevant
@@ -24,6 +24,10 @@ upstream behavior; public SDKs and other language guests are still pending.
   `mise run test`. Tests compare canonical requests and generated files across
   actual host engines, including invalid-input failures. Keep test harnesses
   under `tests/hosts/` separate from future public SDK code.
+- For Rust and Go generators, read [generators/README.md](generators/README.md).
+  Keep language dependencies locked and resolved to the pinned references. Run
+  `mise run test` after generator changes; generated-code consumers exercise the
+  pinned runtimes as well as comparing source output.
 - The target is WASI Preview 1 command modules (`wasm32-wasip1`). Cap'n Proto v2
   requires C++ exceptions: use standardized Wasm EH and retain error
   propagation. Preserve the standard binary `CodeGeneratorRequest` boundary and
