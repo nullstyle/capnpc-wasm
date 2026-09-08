@@ -1,4 +1,4 @@
-export type Language = "cpp" | "rust" | "go";
+export type Language = "cpp" | "rust" | "go" | "zig";
 export type Files = Readonly<Record<string, string | Uint8Array>>;
 export type WasmModule = Uint8Array | WebAssembly.Module;
 

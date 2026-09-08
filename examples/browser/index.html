@@ -29,7 +29,7 @@
   }
   </style>
   <h1>Cap'n Proto in a browser</h1>
-  <p>Compile a schema once, then generate C++, Rust, or Go in a browser worker.</p>
+  <p>Compile a schema once, then generate C++, Rust, Go, or Zig in a browser worker.</p>
   <div id="launch" hidden>
     <p>Start the example from the repository root:</p>
     <pre>mise run example:browser</pre>
@@ -53,6 +53,7 @@ struct Person {
       <option value="cpp">C++</option>
       <option value="rust">Rust</option>
       <option value="go">Go</option>
+      <option value="zig">Zig (capnp-zig)</option>
     </select>
     <button id="generate" disabled>Generate</button>
     <button id="cancel" disabled>Cancel</button>

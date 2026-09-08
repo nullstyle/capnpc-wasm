@@ -74,3 +74,32 @@ func TestFilesystemOutputLimitAndTruncation(t *testing.T) {
 		t.Fatal("closed handle remains writable")
 	}
 }
+
+func TestFilesystemReadlinkProbes(t *testing.T) {
+	m := newMemoryFS(map[string][]byte{"nested/file.zig": []byte("generated")}, false)
+	for _, test := range []struct {
+		path string
+		want exsys.Errno
+	}{
+		{".", exsys.EINVAL},
+		{"nested", exsys.EINVAL},
+		{"nested/file.zig", exsys.EINVAL},
+		{"nested/missing", exsys.ENOENT},
+		{"missing/child", exsys.ENOENT},
+		{"nested/file.zig/child", exsys.ENOTDIR},
+		{"nested/file.zig/", exsys.ENOTDIR},
+		{"", exsys.ENOENT},
+		{"../outside", exsys.EPERM},
+		{"bad\x00name", exsys.EPERM},
+	} {
+		t.Run(test.path, func(t *testing.T) {
+			target, errno := m.Readlink(test.path)
+			if errno != test.want || target != "" {
+				t.Fatalf("Readlink(%q) = (%q, %v), want empty target and %v", test.path, target, errno, test.want)
+			}
+		})
+	}
+	if !bytes.Equal(m.snapshot()["nested/file.zig"], []byte("generated")) {
+		t.Fatal("Readlink mutated output")
+	}
+}

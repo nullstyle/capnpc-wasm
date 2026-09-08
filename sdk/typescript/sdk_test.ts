@@ -38,7 +38,7 @@ function equalOutputs(
       JSON.stringify(Object.keys(expected.outputs).sort()),
     "output languages differ",
   );
-  for (const language of ["cpp", "rust", "go"] as const) {
+  for (const language of ["cpp", "rust", "go", "zig"] as const) {
     const actualFiles = actual.outputs[language];
     const expectedFiles = expected.outputs[language];
     if (!actualFiles || !expectedFiles) continue;
@@ -114,6 +114,7 @@ function fixture() {
       cpp,
       rust,
       go,
+      zig,
       person,
       common,
       cxxAnnotations,
@@ -123,13 +124,14 @@ function fixture() {
       read("build/wasm/bin/capnpc-c++.wasm"),
       read("build/wasm/bin/capnpc-rust.wasm"),
       read("build/wasm/bin/capnpc-go.wasm"),
+      read("build/wasm/bin/capnpc-zig.wasm"),
       read("tests/fixtures/schemas/person.capnp"),
       read("tests/fixtures/schemas/types/common.capnp"),
       read("ref/capnproto/c++/src/capnp/c++.capnp"),
       read("ref/go-capnp/std/go.capnp"),
     ]);
     return {
-      modules: { compiler, generators: { cpp, rust, go } },
+      modules: { compiler, generators: { cpp, rust, go, zig } },
       request: {
         files: { "person.capnp": person, "types/common.capnp": common },
         includeFiles: {
@@ -137,7 +139,7 @@ function fixture() {
           "go.capnp": goAnnotations,
         },
         entrypoints: ["person.capnp", "types/common.capnp"],
-        generators: ["cpp", "rust", "go"],
+        generators: ["cpp", "rust", "go", "zig"],
       },
     };
   })();
@@ -175,8 +177,9 @@ Deno.test("SDK generates all languages from one workspace", async () => {
     ],
     rust: ["person_capnp.rs", "types/common_capnp.rs"],
     go: ["person.capnp.go", "types/common.capnp.go"],
+    zig: ["person.zig", "types/common.zig"],
   };
-  for (const language of ["cpp", "rust", "go"] as const) {
+  for (const language of ["cpp", "rust", "go", "zig"] as const) {
     const files = result.outputs[language]!;
     assert(
       JSON.stringify(Object.keys(files).sort()) ===
@@ -387,7 +390,7 @@ Deno.test("SDK reports compiler, generator, and trap failures without outputs", 
     "CompileError",
     "unexpectedly wrote to stdout",
   );
-  for (const language of ["cpp", "rust", "go"] as const) {
+  for (const language of ["cpp", "rust", "go", "zig"] as const) {
     const malformed = await createCompiler({
       ...modules,
       compiler: malformedRequestGuest,
@@ -485,7 +488,7 @@ Deno.test("SDK generates from saved requests without running the frontend", asyn
     expected,
   );
 
-  for (const generators of [[], ["cpp", "cpp"], ["zig"]]) {
+  for (const generators of [[], ["cpp", "cpp"], ["python"]]) {
     await rejects(() =>
       generator.generate({
         request: expected.request,

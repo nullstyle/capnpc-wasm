@@ -20,8 +20,13 @@ export {
   type WorkerCompiler,
 } from "./worker-client.ts";
 
-const languages: readonly Language[] = ["cpp", "rust", "go"];
-const commands = { cpp: "capnpc-c++", rust: "capnpc-rust", go: "capnpc-go" };
+const languages: readonly Language[] = ["cpp", "rust", "go", "zig"];
+const commands = {
+  cpp: "capnpc-c++",
+  rust: "capnpc-rust",
+  go: "capnpc-go",
+  zig: "capnpc-zig",
+};
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 

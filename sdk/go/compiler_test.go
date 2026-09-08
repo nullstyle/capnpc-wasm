@@ -47,7 +47,7 @@ func fixture(t *testing.T) capnpwasm.Request {
 			"go.capnp":        read(t, r+"/ref/go-capnp/std/go.capnp"),
 		},
 		Entrypoints: []string{"person.capnp", "types/common.capnp"},
-		Generators:  []string{"cpp", "rust", "go"},
+		Generators:  []string{"cpp", "rust", "go", "zig"},
 	}
 }
 
@@ -60,6 +60,7 @@ func loadModules(t *testing.T) capnpwasm.Modules {
 			"cpp":  read(t, dir+"capnpc-c++.wasm"),
 			"rust": read(t, dir+"capnpc-rust.wasm"),
 			"go":   read(t, dir+"capnpc-go.wasm"),
+			"zig":  read(t, dir+"capnpc-zig.wasm"),
 		},
 	}
 }
@@ -210,6 +211,7 @@ func TestCompiler(t *testing.T) {
 
 	t.Run("later generator failure discards all outputs", func(t *testing.T) {
 		req := fixture(t)
+		req.Generators = []string{"cpp", "rust", "zig", "go"}
 		req.Files["person.capnp"] = bytes.Replace(req.Files["person.capnp"], []byte(`$Go.package("fixture");`), nil, 1)
 		got, err := c.Compile(t.Context(), req)
 		var failure *capnpwasm.Error
@@ -236,7 +238,7 @@ func TestCompiler(t *testing.T) {
 			func(r *capnpwasm.Request) { r.Entrypoints = nil },
 			func(r *capnpwasm.Request) { r.Entrypoints = []string{"missing.capnp"} },
 			func(r *capnpwasm.Request) { r.Entrypoints = []string{"person.capnp", "person.capnp"} },
-			func(r *capnpwasm.Request) { r.Generators = []string{"zig"} },
+			func(r *capnpwasm.Request) { r.Generators = []string{"python"} },
 			func(r *capnpwasm.Request) { r.Generators = []string{"go", "go"} },
 			func(r *capnpwasm.Request) { r.Files["types"] = []byte{} },
 		} {
@@ -343,7 +345,7 @@ func TestModuleValidation(t *testing.T) {
 	for _, modules := range []capnpwasm.Modules{
 		{},
 		{Compiler: []byte("not wasm")},
-		{Compiler: []byte("not wasm"), Generators: map[string][]byte{"zig": {1}}},
+		{Compiler: []byte("not wasm"), Generators: map[string][]byte{"python": {1}}},
 		{Compiler: []byte("not wasm"), Generators: map[string][]byte{"rust": nil}},
 	} {
 		c, err := capnpwasm.New(t.Context(), modules)

@@ -152,7 +152,7 @@ async function prepare() {
     (await files(expected)).size === 4,
     "expected two generated header/source pairs",
   );
-  for (const language of ["rust", "go"]) {
+  for (const language of ["rust", "go", "zig"]) {
     const directory = `${work}/native-${language}`;
     await Deno.mkdir(directory);
     success(
@@ -163,6 +163,15 @@ async function prepare() {
       (await files(directory)).size === 2,
       `expected two ${language} files`,
     );
+    if (language === "zig") {
+      const upstream = `${work}/upstream-zig`;
+      await Deno.mkdir(upstream);
+      success(
+        await run([`${native}/capnpc-zig-upstream`], request, upstream),
+        "unmodified upstream Zig generator",
+      );
+      await equalFiles(directory, upstream);
+    }
   }
   return {
     work,
@@ -206,6 +215,7 @@ Deno.test("Wasm artifacts import only WASI Preview 1 and export command entrypoi
       "capnpc-capnp",
       "capnpc-rust",
       "capnpc-go",
+      "capnpc-zig",
     ]
   ) {
     const path = `${wasm}/${name}.wasm`;
@@ -344,7 +354,7 @@ for (const host of hosts) {
       );
     }
 
-    for (const language of ["rust", "go"]) {
+    for (const language of ["rust", "go", "zig"]) {
       for (
         const [source, request] of [["native", data.request], [
           "wasm",
@@ -390,7 +400,7 @@ for (const host of hosts) {
               ),
               "generated Rust roundtrip",
             );
-          } else {
+          } else if (language === "go") {
             // Preserve the byte-comparison tree; the consumer owns a separate copy.
             const consumer = `${data.work}/${host.name}-go-consumer`;
             await copyTree(output, consumer);
@@ -416,6 +426,25 @@ for (const host of hosts) {
                 "./...",
               ]),
               "generated Go roundtrip",
+            );
+          } else {
+            success(
+              await run([
+                "zig",
+                "test",
+                "--cache-dir",
+                `${root}/.cache/zig-local`,
+                "--dep",
+                "capnpc-zig",
+                "--dep",
+                "generated",
+                `-Mroot=${root}/tests/consumers/zig/roundtrip.zig`,
+                "--dep",
+                "capnpc-zig",
+                `-Mgenerated=${output}/person.zig`,
+                `-Mcapnpc-zig=${root}/ref/capnp-zig/src/lib_core.zig`,
+              ]),
+              "generated Zig roundtrip",
             );
           }
         },
@@ -509,7 +538,7 @@ for (const host of hosts) {
         ],
       ] as const
     ) {
-      for (const language of ["c++", "rust", "go"]) {
+      for (const language of ["c++", "rust", "go", "zig"]) {
         await t.step(
           `${name} ${language} generator input fails without output files`,
           async () => {

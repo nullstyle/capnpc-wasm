@@ -8,7 +8,12 @@ const root = Deno.cwd();
 const native = `${root}/build/native/bin`;
 const fixtures = `${root}/tests/fixtures/features`;
 const decoder = new TextDecoder();
-const tools = { cpp: "capnpc-c++", rust: "capnpc-rust", go: "capnpc-go" };
+const tools = {
+  cpp: "capnpc-c++",
+  rust: "capnpc-rust",
+  go: "capnpc-go",
+  zig: "capnpc-zig",
+};
 const manifest: {
   files: string[];
   scenarios: { name: string; entrypoints: string[]; generators: Language[] }[];
@@ -93,6 +98,7 @@ function compiler() {
         cpp: await Deno.readFile(`${wasm}/capnpc-c++.wasm`),
         rust: await Deno.readFile(`${wasm}/capnpc-rust.wasm`),
         go: await Deno.readFile(`${wasm}/capnpc-go.wasm`),
+        zig: await Deno.readFile(`${wasm}/capnpc-zig.wasm`),
       },
     });
   })();
@@ -158,6 +164,24 @@ for (const scenario of manifest.scenarios) {
         );
         assert(stdout.length === 0, `${language}: unexpected native stdout`);
         const expected = await outputFiles(nativeOutput);
+        if (language === "zig" && scenario.name === "values") {
+          const upstream = `${work}/upstream-zig`;
+          await Deno.mkdir(upstream);
+          await command(
+            [`${native}/capnpc-zig-upstream`],
+            upstream,
+            nativeRequest,
+          );
+          const unmodified = await outputFiles(upstream);
+          assert(
+            JSON.stringify(Object.keys(unmodified).sort()) ===
+              JSON.stringify(Object.keys(expected).sort()),
+            "Zig patch changed upstream output paths",
+          );
+          for (const [path, bytes] of Object.entries(unmodified)) {
+            equalBytes(expected[path], bytes, `unmodified Zig/${path}`);
+          }
+        }
         const actual = result.outputs[language]!;
         assert(
           Object.keys(expected).length ===
@@ -196,5 +220,41 @@ for (const scenario of manifest.scenarios) {
       ], work);
       await command([executable], work);
     });
+
+    if (scenario.generators.includes("zig")) {
+      await t.step(
+        "generated Zig defaults and pointers roundtrip",
+        async () => {
+          const output = `${work}/sdk-zig`;
+          await writeFiles(output, result.outputs.zig!);
+          // Keep nested generated imports inside the Zig module's root.
+          await Deno.writeTextFile(
+            `${output}/root.zig`,
+            `pub const schema = @import("${
+              scenario.entrypoints[0].replace(/\.capnp$/, ".zig")
+            }");\n`,
+          );
+          await command([
+            "zig",
+            "test",
+            "--cache-dir",
+            `${root}/.cache/zig-local`,
+            "--dep",
+            "capnpc-zig",
+            "--dep",
+            "generated",
+            `-Mroot=${root}/tests/consumers/zig/${scenario.name}.zig`,
+            "--dep",
+            "capnpc-zig",
+            `-Mgenerated=${
+              scenario.name === "values"
+                ? `${output}/values.zig`
+                : `${output}/root.zig`
+            }`,
+            `-Mcapnpc-zig=${root}/ref/capnp-zig/src/lib_core.zig`,
+          ], root);
+        },
+      );
+    }
   });
 }

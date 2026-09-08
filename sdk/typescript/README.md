@@ -1,6 +1,6 @@
 # Browser and Deno SDK
 
-The SDK compiles schemas and generates C++, Rust, and Go from supplied Wasm
+The SDK compiles schemas and generates C++, Rust, Go, and Zig from supplied Wasm
 modules. It performs no filesystem or network operations. Build it with
 `mise run build:sdk`: `dist/typescript/mod.js` is a standalone ES module with
 TypeScript declarations, and `worker.js` is its bundled worker entrypoint.
@@ -74,11 +74,11 @@ workspace they represent.
 ## Workspace and results
 
 `compile` accepts `files`, optional `includeFiles`, `entrypoints`, and a list of
-generator names (`cpp`, `rust`, `go`). An empty generator list returns just the
-compiler request. Paths are case-sensitive, relative POSIX paths: no empty, `.`
-or `..` segments, backslashes, NUL, or malformed Unicode. A file cannot also be
-a directory prefix. Entrypoints must be present in `files`; duplicate
-entrypoints and generators fail before execution.
+generator names (`cpp`, `rust`, `go`, `zig`). An empty generator list returns
+just the compiler request. Paths are case-sensitive, relative POSIX paths: no
+empty, `.` or `..` segments, backslashes, NUL, or malformed Unicode. A file
+cannot also be a directory prefix. Entrypoints must be present in `files`;
+duplicate entrypoints and generators fail before execution.
 
 The compiler sees a read-only `/src` and `/include`. Relative schema imports
 resolve normally within this snapshot. Absolute imports resolve through
@@ -86,6 +86,11 @@ resolve normally within this snapshot. Absolute imports resolve through
 `import "/capnp/c++.capnp"`. Go schemas need `"go.capnp"` and their upstream
 `$Go.package`/`$Go.import` annotations. Dependencies must be present before the
 job starts.
+
+For Zig, supply `generators: { zig: moduleBytes }` with `capnpc-zig.wasm` and
+request `generators: ["zig"]`. Output uses `.zig` filenames and imports the
+`capnpc-zig` runtime module. Bind that name to the pinned library, as shown in
+[the Zig generator guide](../../generators/zig/README.md).
 
 Each generator receives a fresh writable in-memory root and the compiler's
 unpacked `CodeGeneratorRequest` on stdin. Results contain `request` bytes,

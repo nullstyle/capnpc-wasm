@@ -26,7 +26,7 @@ const maxBytes = 64 << 20
 const maxFiles = 4096
 
 // Modules contains the built compiler and the desired generators. Generator
-// keys are "cpp", "rust", or "go". No modules are downloaded by the SDK.
+// keys are "cpp", "rust", "go", or "zig". No modules are downloaded by the SDK.
 type Modules struct {
 	Compiler   []byte
 	Generators map[string][]byte
@@ -366,7 +366,7 @@ func (c *Compiler) validateGenerators(languages []string) error {
 }
 
 func supported(language string) bool {
-	return language == "cpp" || language == "rust" || language == "go"
+	return language == "cpp" || language == "rust" || language == "go" || language == "zig"
 }
 
 func validPath(name string) bool {

@@ -1,8 +1,9 @@
-# Rust and Go generators
+# Rust, Go, and Zig generators
 
-`mise run build:rust` and `mise run build:go` build native reference commands
-under `build/native/bin/` and WASI Preview 1 commands under `build/wasm/bin/`.
-Both are also part of `mise run build` and `mise run test`.
+`mise run build:rust`, `mise run build:go`, and `mise run build:zig` build
+native reference commands under `build/native/bin/` and WASI Preview 1 commands
+under `build/wasm/bin/`. All are also part of `mise run build` and
+`mise run test`.
 
 Each generator reads an unpacked `CodeGeneratorRequest` from stdin and writes
 source files beneath its working directory. The host stages a fresh output
@@ -39,11 +40,20 @@ even though the generator does not use networking. Artifact checks allow those
 two imports only for this command; the development hosts grant no socket file
 descriptors.
 
+## Zig
+
+The [Zig command](zig/README.md) builds the existing `capnp-zig` generator for
+native and WASI hosts with the exact upstream Zig pin. Generated `name.zig`
+files import the `capnpc-zig` module. Bind that name to the pinned library;
+serialization consumers use its `src/lib_core.zig` entry point. No language
+annotations are required. The SDK uses the upstream full API and schema manifest
+defaults.
+
 ## Verification
 
 `tests/toolchain_test.ts` compares native and Wasm generation from both native
 and Wasm compiler requests in Wasmtime, wazero's compiler and interpreter, and
-Deno with the browser WASI shim. Rust and Go output must match the native
+Deno with the browser WASI shim. Rust, Go, and Zig output must match the native
 generator byte for byte. Malformed requests must fail without output files.
 
 The consumer fixtures under `tests/consumers/` compile Wasm-generated source

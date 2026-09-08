@@ -2,17 +2,16 @@
 
 Workspace for porting the reference Cap'n Proto tools and code generators to
 WebAssembly, for use in browsers, Deno, and wazero. The initial direction is
-WASI Preview 1 command modules with C++, Rust, Go, and eventually Zig
-generation.
+WASI Preview 1 command modules with C++, Rust, Go, and Zig generation.
 
 The build produces `capnp.wasm`, `capnpc-c++.wasm`, `capnpc-capnp.wasm`,
-`capnpc-rust.wasm`, and `capnpc-go.wasm`. The same modules compile schemas and
-generate C++, Rust, and Go in Wasmtime, wazero (compiler and interpreter), and
-Deno, Chromium, Firefox, and WebKit using the pinned browser WASI shim. The
-TypeScript and Go SDKs accept in-memory workspaces and return generated files.
-Tests compare them with native upstream output and compile the generated source.
-The Zig generator, broader resource controls, and published releases are still
-ahead.
+`capnpc-rust.wasm`, `capnpc-go.wasm`, and `capnpc-zig.wasm`. The same modules
+compile schemas and generate C++, Rust, Go, and Zig in Wasmtime, wazero
+(compiler and interpreter), and Deno, Chromium, Firefox, and WebKit using the
+pinned browser WASI shim. The TypeScript and Go SDKs accept in-memory workspaces
+and return generated files. Tests compare them with native upstream output and
+compile the generated source. Zig output targets the pinned `capnp-zig` library.
+Broader resource controls and published releases are still ahead.
 
 ## Bootstrap
 
@@ -59,12 +58,12 @@ failure. The build also stages a standalone TypeScript module, worker, identical
 Wasm commands, and standard include schemas under `dist/`.
 
 Tests cover standard annotations, relative imports, unions, enums, interfaces,
-byte-identical C++/Rust/Go output, native compilation of generated files, Rust
-and Go serialization roundtrips against pinned runtimes, schema inspection,
-random IDs, malformed schemas/requests, and explicit rejection of guest process
-launching. The native test oracle sorts only the request's `nodes` and
-`sourceInfo` maps before comparing canonical binary messages; all other ordering
-and pointer values are preserved.
+byte-identical C++/Rust/Go/Zig output, native compilation of generated files,
+Rust, Go, and Zig serialization roundtrips against pinned runtimes, schema
+inspection, random IDs, malformed schemas/requests, and explicit rejection of
+guest process launching. The native test oracle sorts only the request's `nodes`
+and `sourceInfo` maps before comparing canonical binary messages; all other
+ordering and pointer values are preserved.
 
 The current [port and runtime profile](patches/capnproto/README.md) requires
 standardized Wasm exception handling. Wasmtime uses `-W exceptions=y`; the
@@ -88,9 +87,9 @@ mise run example:deno      # Rust generation using the bundled SDK
 mise run example:browser   # local worker example at http://127.0.0.1:8080/examples/browser/
 ```
 
-The browser test compares C++, Rust, and Go output against native generation
-after disabling network access and native process creation. SDK tests also
-exercise invalid paths, diagnostic preservation, failed-job isolation, and
+The browser test compares C++, Rust, Go, and Zig output against native
+generation after disabling network access and native process creation. SDK tests
+also exercise invalid paths, diagnostic preservation, failed-job isolation, and
 cancellation of an infinite Wasm command. The shared
 [feature corpus](tests/fixtures/features/README.md) covers binary embeds, 64-bit
 limits, generic brands, pointer defaults, groups, and relative imports. The
@@ -115,9 +114,10 @@ mise exec -- wasmtime run -W exceptions=y --dir build/example/output::/ \
   build/wasm/bin/capnpc-c++.wasm < build/example/request.bin
 ```
 
-The same request can be passed to `capnpc-rust.wasm` and `capnpc-go.wasm`, each
-with its own output directory. See [generator details](generators/README.md) for
-language annotations, options, and dependency conventions.
+The same request can be passed to `capnpc-rust.wasm`, `capnpc-go.wasm`, and
+`capnpc-zig.wasm`, each with its own output directory. See
+[generator details](generators/README.md) for language annotations, options, and
+dependency conventions.
 
 Each guest sees its staged root directory. Input schemas include the pinned
 standard annotation files explicitly. Generate into a fresh output directory and
@@ -149,19 +149,19 @@ For CMake cross builds, use
 
 ## Layout and references
 
-| Path          | Contents                                                        |
-| ------------- | --------------------------------------------------------------- |
-| `ref/`        | Upstream Git submodules and their [source map](ref/README.md)   |
-| `scripts/`    | Project setup, build, and verification scripts                  |
-| `cmake/`      | Minimal synchronous C++ command build for WASI                  |
-| `patches/`    | Documented upstream porting changes                             |
-| `generators/` | Rust command wrapper and pinned Rust/Go dependency manifests    |
-| `sdk/`        | TypeScript worker/in-memory SDK and Go wazero SDK               |
-| `examples/`   | Browser worker and Deno SDK examples                            |
-| `tests/`      | Schema fixtures, native oracle, and development host runners    |
-| `build/`      | Ignored build trees, scratch source copies, and generated files |
-| `dist/`       | Ignored SDK bundles, command modules, and standard schemas      |
-| `.cache/`     | Ignored project caches                                          |
+| Path          | Contents                                                           |
+| ------------- | ------------------------------------------------------------------ |
+| `ref/`        | Upstream Git submodules and their [source map](ref/README.md)      |
+| `scripts/`    | Project setup, build, and verification scripts                     |
+| `cmake/`      | Minimal synchronous C++ command build for WASI                     |
+| `patches/`    | Documented upstream porting changes                                |
+| `generators/` | Language command builds, wrappers, and pinned dependency manifests |
+| `sdk/`        | TypeScript worker/in-memory SDK and Go wazero SDK                  |
+| `examples/`   | Browser worker and Deno SDK examples                               |
+| `tests/`      | Schema fixtures, native oracle, and development host runners       |
+| `build/`      | Ignored build trees, scratch source copies, and generated files    |
+| `dist/`       | Ignored SDK bundles, command modules, and standard schemas         |
+| `.cache/`     | Ignored project caches                                             |
 
 `mise run refs:sync` initializes only the top-level references at the commits
 recorded by this repository. Their nested compiler sources, demos, and test
@@ -170,9 +170,8 @@ ordinary setup; a recursive WASI SDK checkout also fetches LLVM.
 
 `mise run refs:status` shows the authoritative source revisions. The existing
 Cap'n Proto revision is preserved; the WASI SDK source matches the SDK release.
-The tests exercise the pinned C++, Rust, and Go revisions together. The
-remaining references provide source material for host integration and the Zig
-port; they do not imply a broader compatibility matrix.
+The tests exercise the pinned C++, Rust, Go, and Zig revisions together. The
+references do not imply compatibility with other upstream versions.
 
 When intentionally updating a tool, edit its pin, run `mise install` and
 `mise lock`, then run `mise run check` and review the lockfile diff. When

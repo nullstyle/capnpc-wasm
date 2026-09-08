@@ -10,12 +10,12 @@
     {
       "name": "values",
       "entrypoints": ["values.capnp", "shared/common.capnp"],
-      "generators": ["cpp", "rust", "go"]
+      "generators": ["cpp", "rust", "go", "zig"]
     },
     {
       "name": "brands",
       "entrypoints": ["nested/brands.capnp", "shared/common.capnp"],
-      "generators": ["cpp", "rust", "go"]
+      "generators": ["cpp", "rust", "go", "zig"]
     }
   ]
 }

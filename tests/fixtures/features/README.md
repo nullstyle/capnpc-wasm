@@ -12,16 +12,17 @@ annotations are supplied from their pinned references as include files.
   workspace, nested generic parameters, bound and unbound brands, aliases,
   AnyPointer, AnyStruct, AnyList, and typed pointer constants and defaults.
 
-Both scenarios generate with the pinned native and Wasm C++, Rust, and Go
+Both scenarios generate with the pinned native and Wasm C++, Rust, Go, and Zig
 generators. Go represents generic parameters as dynamic pointers in its upstream
 API; the test compares that actual upstream output. No generator is skipped.
 
 Each host compares the complete canonical binary `CodeGeneratorRequest` and
 every generated source byte against fresh native output. The TypeScript test
-also compiles its generated C++ and runs the consumers in `consumers/`, checking
-defaults and serialization roundtrips against the pinned native runtime. The
-binary fixture `workspace/assets/bytes.bin` is exactly the byte sequence 0–255;
-it is read as bytes throughout, without text decoding.
+also compiles its generated C++ and Zig and runs consumers in `consumers/` and
+`tests/consumers/zig/`, checking defaults and serialization roundtrips against
+the pinned native runtimes. The binary fixture `workspace/assets/bytes.bin` is
+exactly the byte sequence 0–255; it is read as bytes throughout, without text
+decoding.
 
 Run through `mise run test`, or after building:
 

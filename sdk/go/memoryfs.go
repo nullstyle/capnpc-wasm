@@ -153,6 +153,30 @@ func (m *memoryFS) Stat(name string) (sys.Stat_t, exsys.Errno) {
 
 func (m *memoryFS) Lstat(name string) (sys.Stat_t, exsys.Errno) { return m.Stat(name) }
 
+func (m *memoryFS) Readlink(name string) (string, exsys.Errno) {
+	if name == "" {
+		return "", exsys.ENOENT
+	}
+	trailingSlash := strings.HasSuffix(name, "/")
+	name, errno := guestPath(name)
+	if errno != 0 {
+		return "", errno
+	}
+	parts := strings.Split(name, "/")
+	for i := range parts {
+		node := m.nodes[strings.Join(parts[:i+1], "/")]
+		if node == nil {
+			return "", exsys.ENOENT
+		}
+		if (i < len(parts)-1 || trailingSlash) && !node.mode.IsDir() {
+			return "", exsys.ENOTDIR
+		}
+	}
+	// This filesystem has no links. The Zig generator probes output paths to
+	// reject symlinks and relies on EINVAL to identify existing regular nodes.
+	return "", exsys.EINVAL
+}
+
 func (m *memoryFS) Mkdir(name string, perm fs.FileMode) exsys.Errno {
 	if m.readOnly {
 		return exsys.EROFS

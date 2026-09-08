@@ -33,18 +33,19 @@ download.onclick = () => {
 };
 
 try {
-  const [compilerWasm, cpp, rust, go, cxxAnnotations, goAnnotations] =
+  const [compilerWasm, cpp, rust, go, zig, cxxAnnotations, goAnnotations] =
     await Promise.all([
       bytes("wasm/capnp.wasm"),
       bytes("wasm/capnpc-c++.wasm"),
       bytes("wasm/capnpc-rust.wasm"),
       bytes("wasm/capnpc-go.wasm"),
+      bytes("wasm/capnpc-zig.wasm"),
       bytes("include/capnp/c++.capnp"),
       bytes("include/go.capnp"),
     ]);
   const compiler = await createWorkerCompiler(
     new URL("../../dist/typescript/worker.js", import.meta.url),
-    { compiler: compilerWasm, generators: { cpp, rust, go } },
+    { compiler: compilerWasm, generators: { cpp, rust, go, zig } },
   );
   let cachedSchema;
   let cachedRequest;
@@ -57,7 +58,9 @@ try {
     const options = { signal: controller.signal };
     const schema = document.querySelector("#schema").value;
     const language = document.querySelector("#language").value;
-    const targets = language === "all" ? ["cpp", "rust", "go"] : [language];
+    const targets = language === "all"
+      ? ["cpp", "rust", "go", "zig"]
+      : [language];
     generate.disabled = true;
     cancel.disabled = false;
     files.disabled = download.disabled = true;
@@ -99,7 +102,9 @@ try {
       }
       files.disabled = download.disabled = generated.size === 0;
       if (generated.size) showFile();
-      status.textContent = `Generated ${generated.size} files.`;
+      status.textContent = `Generated ${generated.size} file${
+        generated.size === 1 ? "" : "s"
+      }.`;
     } catch (error) {
       status.textContent = error.name === "AbortError"
         ? "Cancelled."

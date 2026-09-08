@@ -36,7 +36,7 @@ archives.
 driver to independently revoke permissions. `test.ts` first compiles the fixture
 workspace with native upstream tools to prepare its oracle. It reads the shipped
 modules and annotation schemas from `dist/`, serves only the SDK bundles and
-four Wasm guests over a temporary loopback server, then loads a direct compiler
+five Wasm guests over a temporary loopback server, then loads a direct compiler
 and a worker compiler in real browser engines. The worker uses a preloaded Blob
 URL so cancellation and restart also work offline.
 
@@ -46,15 +46,17 @@ permissions. Chromium and Firefox also enable browser offline emulation.
 Playwright's WebKit offline emulation blocks even local Blob worker reloads;
 that engine uses request interception instead, allowing only preloaded Blob
 URLs. The task uses `--no-prompt` to prevent permissions from being requested
-again. Both browser paths must produce byte-identical C++, Rust, and Go files
-for ordinary and Unicode schema paths, preserve malformed-schema diagnostics,
-and make no new network requests. The shared feature corpus also covers
-binary/text embeds, generic brands, AnyPointer defaults, groups, integer limits,
-and parent-directory imports. Saved native requests generate identical source
-through the standalone `generate` API in both direct and worker execution.
-Worker abort and timeout must terminate a job and allow reuse with identical
-output. Native output and temporary browser profiles stay under
-`build/test/browser-*`; the output remains available for inspection.
+again. Both browser paths must produce byte-identical C++, Rust, Go, and Zig
+files for ordinary and Unicode schema paths, preserve malformed-schema
+diagnostics, and make no new network requests. The shared feature corpus also
+covers binary/text embeds, generic brands, AnyPointer defaults, groups, integer
+limits, and parent-directory imports. Saved native requests generate identical
+source through the standalone `generate` API in both direct and worker
+execution. Malformed and truncated Zig requests must exit unsuccessfully with
+preserved diagnostics and no exposed output files. Worker abort and timeout must
+terminate a job and allow reuse with identical output. Native output and
+temporary browser profiles stay under `build/test/browser-*`; the output remains
+available for inspection.
 
 Published package installation and application-specific Content Security
 Policies are outside this suite's current coverage. Browser versions follow the

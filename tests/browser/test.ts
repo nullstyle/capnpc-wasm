@@ -11,7 +11,7 @@ if (Deno.args.length !== 1 || Deno.args[0] === "all") {
 }
 const engine = selectedEngines(Deno.args)[0];
 const browserType = { chromium, firefox, webkit }[engine];
-const languages = ["cpp", "rust", "go"] as const;
+const languages = ["cpp", "rust", "go", "zig"] as const;
 type Language = typeof languages[number];
 type FileMap = Record<string, string | Uint8Array>;
 type Input = {
@@ -67,10 +67,10 @@ function equalOutputs(
 ): void {
   assert(
     JSON.stringify(Object.keys(actual).sort()) ===
-      JSON.stringify([...languages].sort()),
+      JSON.stringify(Object.keys(expected).sort()),
     `${label} omitted generator output`,
   );
-  for (const language of languages) {
+  for (const language of Object.keys(expected)) {
     assert(
       JSON.stringify(Object.keys(actual[language]).sort()) ===
         JSON.stringify(Object.keys(expected[language]).sort()),
@@ -217,7 +217,7 @@ async function prepare() {
       ...input.entrypoints.map((path) => `${directory}/src/${path}`),
     ], root);
     const expected: Record<string, FileMap> = {};
-    for (const language of languages) {
+    for (const language of input.generators) {
       const output = `${directory}/${language}`;
       await Deno.mkdir(output);
       const generator = language === "cpp" ? "c++" : language;
@@ -248,7 +248,15 @@ for (const name of ["mod", "worker"]) {
     type: "text/javascript",
   });
 }
-for (const name of ["capnp", "capnpc-c++", "capnpc-rust", "capnpc-go"]) {
+for (
+  const name of [
+    "capnp",
+    "capnpc-c++",
+    "capnpc-rust",
+    "capnpc-go",
+    "capnpc-zig",
+  ]
+) {
   assets.set(`/wasm/${name}.wasm`, {
     bytes: await Deno.readFile(`${root}/dist/wasm/${name}.wasm`),
     type: "application/wasm",
@@ -297,6 +305,7 @@ try {
         cpp: await read("capnpc-c++"),
         rust: await read("capnpc-rust"),
         go: await read("capnpc-go"),
+        zig: await read("capnpc-zig"),
       },
     };
     const workerSource = await (await fetch("/sdk/worker.js")).text();
@@ -374,7 +383,9 @@ try {
         `${host} ${scenario.name}`,
       );
       console.log(
-        `PASS ${engine} ${host}: ${scenario.name} matches native C++/Rust/Go`,
+        `PASS ${engine} ${host}: ${scenario.name} matches native ${
+          scenario.input.generators.join("/")
+        }`,
       );
 
       const replayed = await page.evaluate(
@@ -404,7 +415,9 @@ try {
         `${host} replay ${scenario.name}`,
       );
       console.log(
-        `PASS ${engine} ${host}: saved ${scenario.name} request matches native C++/Rust/Go`,
+        `PASS ${engine} ${host}: saved ${scenario.name} request matches native ${
+          scenario.input.generators.join("/")
+        }`,
       );
     }
 
@@ -444,6 +457,48 @@ try {
         }`,
       );
       console.log(`PASS ${engine} ${host}: ${name} reports compiler failure`);
+    }
+
+    for (
+      const [name, request] of [
+        ["invalid segment table", new Uint8Array([255, 255, 255, 255])],
+        ["truncated", data.scenarios[0].request.slice(0, -1)],
+      ] as const
+    ) {
+      const failure = await page.evaluate(async ({ host, request }) => {
+        try {
+          await (globalThis as BrowserGlobal).capnpTest[host].generate({
+            request,
+            generators: ["zig"],
+          });
+          return null;
+        } catch (error) {
+          const failure = error as Error & {
+            stage?: string;
+            exitCode?: number;
+            diagnostics?: { stage: string; stderr: string }[];
+          };
+          return {
+            stage: failure.stage,
+            exitCode: failure.exitCode,
+            diagnostics: failure.diagnostics,
+            hasOutputs: "outputs" in failure,
+          };
+        }
+      }, { host, request });
+      assert(
+        failure?.stage === "zig" &&
+          typeof failure.exitCode === "number" && failure.exitCode !== 0 &&
+          failure.diagnostics?.some((item) =>
+            item.stage === "zig" && item.stderr.length > 0
+          ) && !failure.hasOutputs,
+        `${host} did not preserve Zig ${name} failure: ${
+          JSON.stringify(failure)
+        }`,
+      );
+      console.log(
+        `PASS ${engine} ${host}: Zig rejects ${name} request without outputs`,
+      );
     }
   }
 

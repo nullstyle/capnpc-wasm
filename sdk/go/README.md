@@ -1,9 +1,10 @@
 # Go host SDK
 
-`capnpwasm` compiles schema workspaces and runs C++, Rust, and Go generators in
-wazero. The API accepts module bytes and schema bytes and returns the standard
-unpacked `CodeGeneratorRequest`, generated file bytes, and stderr diagnostics.
-Execution needs no native compiler, network access, or host filesystem access.
+`capnpwasm` compiles schema workspaces and runs C++, Rust, Go, and Zig
+generators in wazero. The API accepts module bytes and schema bytes and returns
+the standard unpacked `CodeGeneratorRequest`, generated file bytes, and stderr
+diagnostics. Execution needs no native compiler, network access, or host
+filesystem access.
 
 ```go
 compiler, err := capnpwasm.New(ctx, capnpwasm.Modules{
@@ -12,6 +13,7 @@ compiler, err := capnpwasm.New(ctx, capnpwasm.Modules{
 		"cpp": cppGeneratorWasm,
 		"rust": rustGeneratorWasm,
 		"go": goGeneratorWasm,
+		"zig": zigGeneratorWasm,
 	},
 })
 if err != nil {
@@ -26,7 +28,7 @@ result, err := compiler.Compile(ctx, capnpwasm.Request{
 		"go.capnp": goAnnotationBytes,
 	},
 	Entrypoints: []string{"person.capnp"},
-	Generators: []string{"cpp", "rust", "go"},
+	Generators: []string{"cpp", "rust", "go", "zig"},
 })
 if err != nil {
 	return err
@@ -49,6 +51,10 @@ standard schemas that your inputs import; C++ annotations are in
 `ref/go-capnp/std/go.capnp`. Go generation requires the upstream `$Go.package`
 and `$Go.import` annotations, as shown in the repository fixtures. An empty
 `Generators` list runs only the compiler.
+
+The `zig` generator emits source for the pinned `ref/capnp-zig` runtime. Its
+module is `build/wasm/bin/capnpc-zig.wasm`; generated files retain schema paths
+with the `.capnp` suffix replaced by `.zig`.
 
 Keep that request to generate additional languages without compiling the
 workspace again:
@@ -123,7 +129,7 @@ Run from the repository root:
 
 ```sh
 mise run build
-mise exec -- go -C sdk/go test ./...
+mise exec -- go -C sdk/go test -count=1 ./...
 mise exec -- go -C sdk/go vet -stdmethods=false ./...
 ```
 
@@ -133,6 +139,9 @@ Unicode paths, compile-once request reuse, validation, read-only inputs,
 filesystem bounds, diagnostic preservation, transactional generator failures,
 and cancellation of a running infinite Wasm loop. Native tools are used only by
 the test oracle.
+
+Use `-count=1` because Wasm modules and shared fixtures live outside the Go
+module; Go's test cache does not reliably track their changes.
 
 The `stdmethods` vet analyzer is disabled for this package because wazero's
 experimental filesystem requires `Seek(int64, int) (int64, sys.Errno)`, which

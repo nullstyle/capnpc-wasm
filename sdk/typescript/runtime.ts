@@ -2,10 +2,14 @@ import WASI from "../../ref/browser_wasi_shim/src/wasi.ts";
 import {
   Directory,
   File,
+  OpenDirectory,
   OpenFile,
   PreopenDirectory,
 } from "../../ref/browser_wasi_shim/src/fs_mem.ts";
 import {
+  ERRNO_BADF,
+  ERRNO_INVAL,
+  ERRNO_NOTDIR,
   ERRNO_ROFS,
   OFLAGS_CREAT,
   OFLAGS_TRUNC,
@@ -165,6 +169,23 @@ export async function runCommand(
     new PreopenDirectory("/", root.contents),
   ], { debug: false });
   protectFiles(wasi, readonly);
+
+  // The in-memory filesystem has no symlinks. Zig checks each output path
+  // with readlink before writing; preserve lookup failures and report INVAL
+  // for existing non-links instead of the shim's default NOTSUP.
+  wasi.wasiImport.path_readlink = (
+    fd: number,
+    path: number,
+    length: number,
+  ) => {
+    const descriptor = wasi.fds[fd];
+    if (!descriptor) return ERRNO_BADF;
+    if (!(descriptor instanceof OpenDirectory)) return ERRNO_NOTDIR;
+    const bytes = new Uint8Array(wasi.inst.exports.memory.buffer);
+    const name = new TextDecoder().decode(bytes.subarray(path, path + length));
+    const { ret } = descriptor.path_filestat_get(0, name);
+    return ret || ERRNO_INVAL;
+  };
 
   // args_get writes UTF-8, whereas the pinned shim's sizing counts UTF-16.
   const encoder = new TextEncoder();

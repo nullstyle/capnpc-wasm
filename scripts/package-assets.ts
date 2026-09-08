@@ -6,6 +6,7 @@ const modules = [
   "capnpc-capnp",
   "capnpc-rust",
   "capnpc-go",
+  "capnpc-zig",
 ];
 const schemas = [
   "c++.capnp",
@@ -42,6 +43,7 @@ for (
     ["capnproto", "LICENSE"],
     ["capnproto-rust", "LICENSE"],
     ["go-capnp", "LICENSE"],
+    ["capnp-zig", "LICENSE"],
     ["browser_wasi_shim", "LICENSE-MIT"],
     ["browser_wasi_shim", "LICENSE-APACHE"],
   ]

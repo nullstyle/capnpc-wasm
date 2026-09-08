@@ -1,0 +1,97 @@
+--- a/src/capnpc-zig/generator.zig
++++ b/src/capnpc-zig/generator.zig
+@@ -286,7 +286,7 @@
+         for (requested_file.imports) |imp| {
+             if (!self.used_import_file_ids.contains(imp.id)) continue;
+             const mod_name = self.import_modules.get(imp.id) orelse continue;
+-            const import_path = try self.importPathFromCapnpName(imp.name);
++            const import_path = try self.importPathRelativeToFile(imp.name, requested_file.filename);
+             defer self.allocator.free(import_path);
+             try writer.print("pub const {s} = @import(\"{f}\");\n", .{ mod_name, std.zig.fmtString(import_path) });
+         }
+@@ -1415,7 +1415,40 @@
+             if (!gop.found_existing) return candidate;
+ 
+             self.allocator.free(candidate);
++        }
++    }
++
++    /// Resolve schema imports within the output workspace, then express them
++    /// relative to the generated file. Parent components are valid in imports
++    /// as long as they do not escape the workspace; output paths stay strict.
++    fn importPathRelativeToFile(self: *Generator, capnp_name: []const u8, filename: []const u8) ![]const u8 {
++        try validateRelativeSchemaPath(filename);
++        if (capnp_name.len == 0 or std.mem.indexOfAny(u8, capnp_name, "\\\\\x00") != null or hasWindowsDriveRoot(capnp_name)) {
++            return error.InvalidSchemaPath;
++        }
++        const from_dir = std.fs.path.dirnamePosix(filename) orelse "";
++        const absolute = capnp_name[0] == '/';
++        var components: std.ArrayList([]const u8) = .empty;
++        defer components.deinit(self.allocator);
++        if (!absolute and from_dir.len != 0) {
++            var parents = std.mem.splitScalar(u8, from_dir, '/');
++            while (parents.next()) |part| try components.append(self.allocator, part);
+         }
++        var parts = std.mem.splitScalar(u8, if (absolute) capnp_name[1..] else capnp_name, '/');
++        while (parts.next()) |part| {
++            if (part.len == 0) return error.InvalidSchemaPath;
++            if (std.mem.eql(u8, part, ".") or std.mem.eql(u8, part, "..")) {
++                if (parts.rest().len == 0) return error.InvalidSchemaPath;
++                if (part.len == 2 and components.pop() == null) return error.InvalidSchemaPath;
++            } else {
++                try components.append(self.allocator, part);
++            }
++        }
++        const root_path = try std.mem.join(self.allocator, "/", components.items);
++        defer self.allocator.free(root_path);
++        const zig_path = try self.importPathFromCapnpName(root_path);
++        defer self.allocator.free(zig_path);
++        return std.fs.path.relativePosix(self.allocator, "/", from_dir, zig_path);
+     }
+ 
+     /// Derive the .zig import path from a .capnp import name.
+@@ -2181,6 +2214,44 @@
+     try std.testing.expectEqualStrings("foo", r);
+ }
+ 
++test "Generator.importPathRelativeToFile resolves imports inside workspace" {
++    var gen = try Generator.init(std.testing.allocator, &.{});
++    defer gen.deinit();
++    const cases = [_][3][]const u8{
++        .{ "types/common.capnp", "person.capnp", "types/common.zig" },
++        .{ "../shared/common.capnp", "nested/brands.capnp", "../shared/common.zig" },
++        .{ "/shared/common.capnp", "nested/brands.capnp", "../shared/common.zig" },
++        .{ "./common.capnp", "nested/brands.capnp", "common.zig" },
++        .{ "sub/../common.capnp", "nested/brands.capnp", "common.zig" },
++        .{ "../../shared/common.capnp", "nested/deep/brands.capnp", "../../shared/common.zig" },
++    };
++    for (cases) |case| {
++        const path = try gen.importPathRelativeToFile(case[0], case[1]);
++        defer std.testing.allocator.free(path);
++        try std.testing.expectEqualStrings(case[2], path);
++    }
++}
++
++test "Generator.importPathRelativeToFile rejects workspace escapes" {
++    var gen = try Generator.init(std.testing.allocator, &.{});
++    defer gen.deinit();
++    const cases = [_][2][]const u8{
++        .{ "../escape.capnp", "person.capnp" },
++        .{ "../../escape.capnp", "nested/person.capnp" },
++        .{ "/../escape.capnp", "nested/person.capnp" },
++        .{ "C:/escape.capnp", "nested/person.capnp" },
++        .{ "sub\\\\file.capnp", "nested/person.capnp" },
++        .{ "sub//file.capnp", "nested/person.capnp" },
++        .{ "file.capnp", "../person.capnp" },
++        .{ "..", "nested/person.capnp" },
++        .{ ".", "nested/person.capnp" },
++        .{ "", "nested/person.capnp" },
++    };
++    for (cases) |case| {
++        try std.testing.expectError(error.InvalidSchemaPath, gen.importPathRelativeToFile(case[0], case[1]));
++    }
++}
++
+ test "Generator.importPathFromCapnpName replaces .capnp with .zig" {
+     const alloc = std.testing.allocator;
+     var gen = Generator.init(alloc, &.{}) catch unreachable;
