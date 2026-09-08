@@ -2,6 +2,7 @@
 // Playwright authoritative for platform/revision selection, but extract its
 // official archives with the already-managed CMake binary.
 import { fileURLToPath } from "node:url";
+import { selectedEngines } from "./engines.ts";
 
 const root = Deno.cwd();
 const cache = `${root}/.cache/playwright`;
@@ -18,7 +19,7 @@ const plan = await new Deno.Command(Deno.execPath(), {
     "--allow-sys",
     imports.playwright,
     "install",
-    "chromium",
+    ...selectedEngines(Deno.args),
     "--only-shell",
     "--dry-run",
   ],

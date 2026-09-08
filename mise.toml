@@ -80,7 +80,7 @@ run = [
   "go -C generators/go vet capnproto.org/go/capnp/v3/capnpc-go",
   "go -C sdk/go vet -stdmethods=false ./...",
   "deno check --config sdk/typescript/deno.json --unstable-sloppy-imports sdk/typescript/mod.ts sdk/typescript/worker.ts",
-  "deno check --config tests/browser/deno.json --frozen tests/browser/test.ts tests/browser/install.ts",
+  "deno check --config tests/browser/deno.json --frozen tests/browser/test.ts tests/browser/install.ts tests/browser/run.ts",
   "cargo fmt --manifest-path generators/rust/Cargo.toml -- --check",
   "cargo fmt --manifest-path tests/consumers/rust/Cargo.toml -- --check",
   "cargo clippy --locked --manifest-path generators/rust/Cargo.toml --all-targets -- -D warnings",
@@ -118,6 +118,7 @@ depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:wazero
 run = [
   "deno test --allow-read --allow-write=build --allow-run tests/toolchain_test.ts",
   "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts",
+  "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read --allow-write=build --allow-run tests/schema_features_test.ts",
   "go -C sdk/go test -mod=readonly ./...",
 ]
 
@@ -127,13 +128,13 @@ depends = ["build:wasm", "build:rust", "build:go"]
 run = "bash scripts/build-sdk.sh"
 
 [tasks."browser:install"]
-description = "Install pinned Chromium for browser tests into the project cache"
+description = "Install pinned Chromium, Firefox, and WebKit into the project cache"
 run = "deno run --config tests/browser/deno.json --frozen --allow-read --allow-write=.cache/playwright --allow-env --allow-sys --allow-net --allow-run=deno,cmake tests/browser/install.ts"
 
 [tasks."test:browser"]
-description = "Run SDK parity and worker cancellation offline in real Chromium"
+description = "Run offline SDK parity and cancellation in Chromium, Firefox, and WebKit"
 depends = ["build:native", "build:sdk"]
-run = "deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/test.ts"
+run = "deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/run.ts"
 
 [tasks."example:deno"]
 description = "Generate Rust through the bundled SDK with no execution permissions"

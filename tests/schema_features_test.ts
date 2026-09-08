@@ -1,0 +1,200 @@
+import {
+  type Compiler,
+  createCompiler,
+  type Language,
+} from "../sdk/typescript/mod.ts";
+
+const root = Deno.cwd();
+const native = `${root}/build/native/bin`;
+const fixtures = `${root}/tests/fixtures/features`;
+const decoder = new TextDecoder();
+const tools = { cpp: "capnpc-c++", rust: "capnpc-rust", go: "capnpc-go" };
+const manifest: {
+  files: string[];
+  scenarios: { name: string; entrypoints: string[]; generators: Language[] }[];
+} = JSON.parse(await Deno.readTextFile(`${fixtures}/manifest.json`));
+
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(message);
+}
+
+function equalBytes(actual: Uint8Array, expected: Uint8Array, name: string) {
+  assert(actual.length === expected.length, `${name}: byte length differs`);
+  const offset = actual.findIndex((byte, i) => byte !== expected[i]);
+  assert(offset === -1, `${name}: bytes differ at offset ${offset}`);
+}
+
+async function command(
+  args: string[],
+  cwd: string,
+  stdin?: Uint8Array,
+): Promise<Uint8Array> {
+  const child = new Deno.Command(args[0], {
+    args: args.slice(1),
+    cwd,
+    stdin: stdin ? "piped" : "null",
+    stdout: "piped",
+    stderr: "piped",
+    signal: AbortSignal.timeout(60_000),
+  }).spawn();
+  const output = child.output();
+  if (stdin) {
+    const writer = child.stdin.getWriter();
+    try {
+      await writer.write(stdin);
+      await writer.close();
+    } catch (error) {
+      if (!(error instanceof Deno.errors.BrokenPipe)) throw error;
+    } finally {
+      writer.releaseLock();
+    }
+  }
+  const result = await output;
+  assert(
+    result.success,
+    `${args[0]} exited ${result.code}: ${decoder.decode(result.stderr)}`,
+  );
+  return result.stdout;
+}
+
+async function writeFiles(
+  directory: string,
+  files: Record<string, Uint8Array>,
+) {
+  for (const [name, bytes] of Object.entries(files)) {
+    const path = `${directory}/${name}`;
+    await Deno.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+    await Deno.writeFile(path, bytes);
+  }
+}
+
+async function outputFiles(directory: string, prefix = "") {
+  const files: Record<string, Uint8Array> = {};
+  for await (const entry of Deno.readDir(directory)) {
+    const path = `${directory}/${entry.name}`;
+    const name = `${prefix}${entry.name}`;
+    if (entry.isDirectory) {
+      Object.assign(files, await outputFiles(path, `${name}/`));
+    } else {
+      assert(entry.isFile, `unexpected generated entry ${path}`);
+      files[name] = await Deno.readFile(path);
+    }
+  }
+  return files;
+}
+
+let compilerPromise: Promise<Compiler>;
+function compiler() {
+  return compilerPromise ??= (async () => {
+    const wasm = `${root}/build/wasm/bin`;
+    return await createCompiler({
+      compiler: await Deno.readFile(`${wasm}/capnp.wasm`),
+      generators: {
+        cpp: await Deno.readFile(`${wasm}/capnpc-c++.wasm`),
+        rust: await Deno.readFile(`${wasm}/capnpc-rust.wasm`),
+        go: await Deno.readFile(`${wasm}/capnpc-go.wasm`),
+      },
+    });
+  })();
+}
+
+for (const scenario of manifest.scenarios) {
+  Deno.test(`TypeScript SDK schema features: ${scenario.name}`, async (t) => {
+    await Deno.mkdir(`${root}/build/test`, { recursive: true });
+    const work = await Deno.makeTempDir({
+      dir: `${root}/build/test`,
+      prefix: `features-${scenario.name}-`,
+    });
+    const files: Record<string, Uint8Array> = {};
+    for (const name of manifest.files) {
+      files[name] = await Deno.readFile(`${fixtures}/workspace/${name}`);
+    }
+    const includeFiles = {
+      "capnp/c++.capnp": await Deno.readFile(
+        `${root}/ref/capnproto/c++/src/capnp/c++.capnp`,
+      ),
+      "go.capnp": await Deno.readFile(`${root}/ref/go-capnp/std/go.capnp`),
+    };
+    await writeFiles(`${work}/src`, files);
+    await writeFiles(`${work}/include`, includeFiles);
+    const nativeRequest = await command([
+      `${native}/capnp`,
+      "compile",
+      "--no-standard-import",
+      `-I${work}/include`,
+      `--src-prefix=${work}/src`,
+      "-o-",
+      ...scenario.entrypoints.map((name) => `${work}/src/${name}`),
+    ], work);
+    const result = await (await compiler()).compile({
+      files,
+      includeFiles,
+      entrypoints: scenario.entrypoints,
+      generators: scenario.generators,
+    });
+    assert(result.diagnostics.length === 0, "unexpected SDK diagnostics");
+    await Deno.writeFile(`${work}/native-request.bin`, nativeRequest);
+    await Deno.writeFile(`${work}/sdk-request.bin`, result.request);
+
+    await t.step(
+      "canonical full CodeGeneratorRequest equals native",
+      async () => {
+        equalBytes(
+          await command([`${native}/normalize-request`], work, result.request),
+          await command([`${native}/normalize-request`], work, nativeRequest),
+          `${scenario.name}: canonical request`,
+        );
+      },
+    );
+
+    for (const language of scenario.generators) {
+      await t.step(`${language} generated bytes equal native`, async () => {
+        const nativeOutput = `${work}/native-${language}`;
+        await Deno.mkdir(nativeOutput);
+        const stdout = await command(
+          [`${native}/${tools[language]}`],
+          nativeOutput,
+          nativeRequest,
+        );
+        assert(stdout.length === 0, `${language}: unexpected native stdout`);
+        const expected = await outputFiles(nativeOutput);
+        const actual = result.outputs[language]!;
+        assert(
+          Object.keys(expected).length ===
+            scenario.entrypoints.length * (language === "cpp" ? 2 : 1),
+          `${language}: unexpected native output count`,
+        );
+        assert(
+          JSON.stringify(Object.keys(actual).sort()) ===
+            JSON.stringify(Object.keys(expected).sort()),
+          `${language}: output paths differ`,
+        );
+        for (const [path, bytes] of Object.entries(expected)) {
+          equalBytes(actual[path], bytes, `${language}/${path}`);
+        }
+      });
+    }
+
+    await t.step("generated C++ defaults and pointers roundtrip", async () => {
+      const output = `${work}/sdk-cpp`;
+      await writeFiles(output, result.outputs.cpp!);
+      const executable = `${work}/consumer`;
+      await command([
+        "clang++",
+        "-std=c++23",
+        `-I${root}/ref/capnproto/c++/src`,
+        `-I${output}`,
+        `${fixtures}/consumers/${scenario.name}.c++`,
+        ...Object.keys(result.outputs.cpp!).filter((path) =>
+          path.endsWith(".c++")
+        ).map((path) => `${output}/${path}`),
+        `${root}/build/native/lib/libcapnp.a`,
+        `${root}/build/native/lib/libkj.a`,
+        "-pthread",
+        "-o",
+        executable,
+      ], work);
+      await command([executable], work);
+    });
+  });
+}

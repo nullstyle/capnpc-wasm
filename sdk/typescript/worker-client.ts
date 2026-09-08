@@ -2,15 +2,26 @@ import {
   CompileError,
   type CompileRequest,
   type CompileResult,
+  type GenerationRequest,
+  type GenerationResult,
   type Modules,
 } from "./types.ts";
+
+export interface JobOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
 
 export interface WorkerCompiler {
   /** One active job per client. Cancellation terminates its worker. */
   compile(
     request: CompileRequest,
-    options?: { signal?: AbortSignal; timeoutMs?: number },
+    options?: JobOptions,
   ): Promise<CompileResult>;
+  generate(
+    request: GenerationRequest,
+    options?: JobOptions,
+  ): Promise<GenerationResult>;
   /** Terminate the worker and reject any pending operation. */
   dispose(): void;
 }
@@ -22,6 +33,16 @@ export async function createWorkerCompiler(
 ): Promise<WorkerCompiler> {
   // Keep private copies for restarting after cancellation; caller ownership stays intact.
   const snapshot = structuredClone(modules);
+  // Structured cloning preserves SharedArrayBuffer storage. Copy every byte
+  // view explicitly so queued jobs and restarted workers own their snapshots.
+  if (snapshot.compiler instanceof Uint8Array) {
+    snapshot.compiler = new Uint8Array(snapshot.compiler);
+  }
+  for (const [language, module] of Object.entries(snapshot.generators)) {
+    if (module instanceof Uint8Array) {
+      snapshot.generators[language] = new Uint8Array(module);
+    }
+  }
   let worker: Worker | undefined;
   let ready = false;
   let disposed = false;
@@ -104,47 +125,76 @@ export async function createWorkerCompiler(
     });
   }
 
+  async function runJob(
+    kind: "compile" | "generate",
+    request: CompileRequest | GenerationRequest,
+    { signal, timeoutMs = 30_000 }: JobOptions = {},
+  ): Promise<unknown> {
+    if (disposed) throw new Error("worker compiler is disposed");
+    if (busy) throw new Error("worker compiler already has an active job");
+    if (
+      !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
+      timeoutMs > 2_147_483_647
+    ) {
+      throw new TypeError(
+        "timeoutMs must be positive and at most 2147483647",
+      );
+    }
+    if (signal?.aborted) throw signal.reason;
+    // Clone before any restart await so edits to caller data cannot change a job.
+    const job = structuredClone(request);
+    if (kind === "generate") {
+      const generation = job as GenerationRequest;
+      if (generation.request instanceof Uint8Array) {
+        generation.request = new Uint8Array(generation.request);
+      }
+    } else {
+      const compilation = job as CompileRequest;
+      for (const files of [compilation.files, compilation.includeFiles]) {
+        if (!files) continue;
+        for (const [path, bytes] of Object.entries(files)) {
+          if (bytes instanceof Uint8Array) {
+            Object.defineProperty(files, path, {
+              value: new Uint8Array(bytes),
+            });
+          }
+        }
+      }
+    }
+    busy = true;
+    const deadline = performance.now() + timeoutMs;
+    try {
+      if (!ready) {
+        await exchange(
+          { kind: "init", modules: snapshot },
+          signal,
+          timeoutMs,
+        );
+        ready = true;
+      }
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) {
+        stop();
+        throw new DOMException("compilation timed out", "TimeoutError");
+      }
+      return await exchange(
+        { kind, request: job },
+        signal,
+        remaining,
+      );
+    } finally {
+      busy = false;
+    }
+  }
+
   await exchange({ kind: "init", modules: snapshot }, undefined, 30_000);
   ready = true;
   return {
-    async compile(request, { signal, timeoutMs = 30_000 } = {}) {
-      if (disposed) throw new Error("worker compiler is disposed");
-      if (busy) throw new Error("worker compiler already has an active job");
-      if (
-        !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
-        timeoutMs > 2_147_483_647
-      ) {
-        throw new TypeError(
-          "timeoutMs must be positive and at most 2147483647",
-        );
-      }
-      if (signal?.aborted) throw signal.reason;
-      // Clone before any restart await so edits to caller data cannot change a job.
-      const job = structuredClone(request);
-      busy = true;
-      const deadline = performance.now() + timeoutMs;
-      try {
-        if (!ready) {
-          await exchange(
-            { kind: "init", modules: snapshot },
-            signal,
-            timeoutMs,
-          );
-          ready = true;
-        }
-        const remaining = deadline - performance.now();
-        if (remaining <= 0) {
-          stop();
-          throw new DOMException("compilation timed out", "TimeoutError");
-        }
-        return await exchange(
-          { kind: "compile", request: job },
-          signal,
-          remaining,
-        ) as CompileResult;
-      } finally {
-        busy = false;
-      }
+    async compile(request, options) {
+      return await runJob("compile", request, options) as CompileResult;
+    },
+    async generate(request, options) {
+      return await runJob("generate", request, options) as GenerationResult;
     },
     dispose() {
       disposed = true;

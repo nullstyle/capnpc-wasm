@@ -50,6 +50,35 @@ standard schemas that your inputs import; C++ annotations are in
 and `$Go.import` annotations, as shown in the repository fixtures. An empty
 `Generators` list runs only the compiler.
 
+Keep that request to generate additional languages without compiling the
+workspace again:
+
+```go
+compiled, err := compiler.Compile(ctx, capnpwasm.Request{
+	Files: schemaFiles,
+	IncludeFiles: standardSchemas,
+	Entrypoints: []string{"person.capnp"},
+})
+if err != nil {
+	return err
+}
+generated, err := compiler.Generate(ctx, capnpwasm.GenerationRequest{
+	Request: compiled.Request,
+	Generators: []string{"rust", "go"},
+})
+if err != nil {
+	return err
+}
+// generated.Outputs["rust"]["person_capnp.rs"] contains generated source.
+```
+
+`Generate` also accepts an unpacked `CodeGeneratorRequest` produced by the
+native compiler or another SDK host. It requires at least one generator and
+returns a `GenerationResult` containing `Outputs` and `Diagnostics`. The
+generators parse the supplied request; the SDK does not interpret or rewrite it.
+`New` still requires the compiler module even when the application only calls
+`Generate`.
+
 ## Execution and ownership
 
 `New` validates that every module exports `memory` and a `_start` function with
@@ -66,17 +95,20 @@ with no `.` or `..` components, empty components, backslashes, or NUL bytes.
 Duplicate entrypoints, duplicate generators, missing entrypoints, unavailable
 generators, and file/directory collisions fail before guest execution. Paths are
 limited to 4,096 bytes. Workspace contents are limited to 64 MiB and 4,096 files
-and directories. Each generator filesystem is limited to 64 MiB of file contents
-and 4,096 entries. A command can emit at most 64 MiB on stdout and 1 MiB on
-stderr; each Wasm instance has a 256 MiB linear-memory ceiling. These are
-per-job limits, not a process-wide memory budget.
+and directories. An existing generation request must be nonempty and at most 64
+MiB. Each generator filesystem is limited to 64 MiB of file contents and 4,096
+entries. A command can emit at most 64 MiB on stdout and 1 MiB on stderr; each
+Wasm instance has a 256 MiB linear-memory ceiling. These are per-job limits, not
+a process-wide memory budget.
 
-Do not mutate request maps or their byte slices while `Compile` runs. Returned
-maps and bytes belong to the caller and do not alias inputs or later jobs. The
-SDK returns a zero `Result` on every error, including a later generator failure
-after earlier generators succeeded. Inspect `*capnpwasm.Error` for the failing
-stage, generator language, raw stderr, and wrapped error. Successful stderr is
-retained in `Result.Diagnostics` without parsing upstream diagnostic syntax.
+Do not mutate request maps, generator lists, or byte slices while `Compile` or
+`Generate` runs. `Generate` takes a private copy of the supplied request.
+Returned maps and bytes belong to the caller and do not alias inputs or later
+jobs. The SDK returns a zero result on every error, including a later generator
+failure after earlier generators succeeded. Inspect `*capnpwasm.Error` for the
+failing stage, generator language, raw stderr, and wrapped error. Successful
+stderr is retained in `Result.Diagnostics` without parsing upstream diagnostic
+syntax.
 
 Pass a cancellable context or deadline to interrupt guest execution.
 `errors.Is(err, context.Canceled)` and `context.DeadlineExceeded` work through
@@ -97,9 +129,10 @@ mise exec -- go -C sdk/go vet -stdmethods=false ./...
 
 Tests run the actual built modules, compare canonical requests and generated
 source with native upstream tools, run concurrent and repeated jobs, and cover
-Unicode paths, validation, read-only inputs, filesystem bounds, diagnostic
-preservation, transactional generator failures, and cancellation of a running
-infinite Wasm loop. Native tools are used only by the test oracle.
+Unicode paths, compile-once request reuse, validation, read-only inputs,
+filesystem bounds, diagnostic preservation, transactional generator failures,
+and cancellation of a running infinite Wasm loop. Native tools are used only by
+the test oracle.
 
 The `stdmethods` vet analyzer is disabled for this package because wazero's
 experimental filesystem requires `Seek(int64, int) (int64, sys.Errno)`, which

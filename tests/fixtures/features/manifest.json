@@ -1,0 +1,21 @@
+{
+  "files": [
+    "values.capnp",
+    "shared/common.capnp",
+    "nested/brands.capnp",
+    "assets/bytes.bin",
+    "assets/unicode.txt"
+  ],
+  "scenarios": [
+    {
+      "name": "values",
+      "entrypoints": ["values.capnp", "shared/common.capnp"],
+      "generators": ["cpp", "rust", "go"]
+    },
+    {
+      "name": "brands",
+      "entrypoints": ["nested/brands.capnp", "shared/common.capnp"],
+      "generators": ["cpp", "rust", "go"]
+    }
+  ]
+}

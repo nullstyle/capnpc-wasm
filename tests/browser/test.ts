@@ -1,8 +1,16 @@
-import { chromium } from "playwright";
+import { chromium, firefox, webkit } from "playwright";
+import { selectedEngines } from "./engines.ts";
 
 // This driver deliberately prepares its native oracle before browser execution,
 // then revokes its own process/network permissions for the offline SDK tests.
 const root = Deno.cwd();
+if (Deno.args.length !== 1 || Deno.args[0] === "all") {
+  throw new TypeError(
+    "Pass one browser to test.ts; use run.ts for the full matrix",
+  );
+}
+const engine = selectedEngines(Deno.args)[0];
+const browserType = { chromium, firefox, webkit }[engine];
 const languages = ["cpp", "rust", "go"] as const;
 type Language = typeof languages[number];
 type FileMap = Record<string, string | Uint8Array>;
@@ -12,17 +20,22 @@ type Input = {
   entrypoints: string[];
   generators: Language[];
 };
-type Result = {
-  request: Uint8Array;
+type GenerationResult = {
   outputs: Record<Language, Record<string, Uint8Array>>;
   diagnostics: { stage: string; stderr: string }[];
 };
-type Compiler = { compile(input: Input): Promise<Result> };
+type Result = GenerationResult & { request: Uint8Array };
+type GenerationInput = { request: Uint8Array; generators: Language[] };
+type Compiler = {
+  compile(input: Input): Promise<Result>;
+  generate(input: GenerationInput): Promise<GenerationResult>;
+};
 type WorkerCompiler = {
   compile(
     input: Input,
     options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<Result>;
+  generate(input: GenerationInput): Promise<GenerationResult>;
   dispose(): void;
 };
 type Modules = {
@@ -116,7 +129,7 @@ async function files(directory: string, prefix = ""): Promise<FileMap> {
       );
     } else {
       assert(entry.isFile, `unsupported fixture entry ${path}`);
-      result[path] = await Deno.readTextFile(`${directory}/${entry.name}`);
+      result[path] = await Deno.readFile(`${directory}/${entry.name}`);
     }
   }
   return result;
@@ -139,7 +152,7 @@ async function prepare() {
   await Deno.mkdir(`${root}/build/test`, { recursive: true });
   const work = await Deno.makeTempDir({
     dir: `${root}/build/test`,
-    prefix: "browser-",
+    prefix: `browser-${engine}-`,
   });
   const source = await files(`${root}/tests/fixtures/schemas`);
   const includes = {
@@ -148,7 +161,7 @@ async function prepare() {
     ),
     "go.capnp": await Deno.readTextFile(`${root}/dist/include/go.capnp`),
   };
-  const scenarios = [];
+  const inputs: { name: string; input: Input }[] = [];
   for (const name of ["person.capnp", "pérson.capnp"]) {
     const input: Input = {
       files: {
@@ -159,6 +172,38 @@ async function prepare() {
       entrypoints: [name, "types/common.capnp"],
       generators: [...languages],
     };
+    inputs.push({ name, input });
+  }
+  const featureRoot = `${root}/tests/fixtures/features`;
+  const manifest = JSON.parse(
+    await Deno.readTextFile(`${featureRoot}/manifest.json`),
+  ) as {
+    files: string[];
+    scenarios: {
+      name: string;
+      entrypoints: string[];
+      generators: Language[];
+    }[];
+  };
+  const featureFiles: FileMap = {};
+  for (const path of manifest.files) {
+    featureFiles[path] = await Deno.readFile(
+      `${featureRoot}/workspace/${path}`,
+    );
+  }
+  for (const scenario of manifest.scenarios) {
+    inputs.push({
+      name: `features-${scenario.name}`,
+      input: {
+        files: featureFiles,
+        includeFiles: includes,
+        entrypoints: scenario.entrypoints,
+        generators: scenario.generators,
+      },
+    });
+  }
+  const scenarios = [];
+  for (const { name, input } of inputs) {
     const directory = `${work}/${name}`;
     await writeFiles(`${directory}/src`, input.files);
     await writeFiles(`${directory}/include`, includes);
@@ -183,7 +228,7 @@ async function prepare() {
       );
       expected[language] = await files(output);
     }
-    scenarios.push({ name, input, expected });
+    scenarios.push({ name, input, request, expected });
   }
   return {
     work,
@@ -229,11 +274,11 @@ const server = Deno.serve(
       : new Response("Not found", { status: 404 });
   },
 );
-let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+let browser: Awaited<ReturnType<typeof browserType.launch>> | undefined;
 try {
-  browser = await chromium.launch();
-  console.log(`Testing Chromium ${browser.version()}`);
-  const context = await browser.newContext();
+  browser = await browserType.launch();
+  console.log(`Testing ${engine} ${browser.version()}`);
+  const context = await browser.newContext({ serviceWorkers: "block" });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -273,9 +318,24 @@ try {
   });
 
   let networkRequests = 0;
-  context.on("request", () => networkRequests++);
-  await context.route("**/*", (route) => route.abort());
-  await context.setOffline(true);
+  context.on("request", (request) => {
+    if (!request.url().startsWith("blob:")) networkRequests++;
+  });
+  await context.route(
+    "**/*",
+    (route) =>
+      route.request().url().startsWith("blob:")
+        ? route.continue()
+        : route.abort(),
+  );
+  await context.routeWebSocket("**/*", (socket) => {
+    networkRequests++;
+    socket.close();
+  });
+  // WebKit's offline emulation also blocks its local Blob worker reloads.
+  // Routing still blocks all network access; Blob URLs read preloaded memory.
+  if (engine !== "webkit") await context.setOffline(true);
+  await server.shutdown();
   await Deno.permissions.revoke({ name: "run" });
   await Deno.permissions.revoke({ name: "net" });
   assert(
@@ -314,7 +374,37 @@ try {
         `${host} ${scenario.name}`,
       );
       console.log(
-        `PASS Chromium ${host}: ${scenario.name} matches native C++/Rust/Go`,
+        `PASS ${engine} ${host}: ${scenario.name} matches native C++/Rust/Go`,
+      );
+
+      const replayed = await page.evaluate(
+        async ({ host, request, generators }) => {
+          const result = await (globalThis as BrowserGlobal).capnpTest[host]
+            .generate({ request, generators });
+          return Object.fromEntries(
+            Object.entries(result.outputs).map(([language, files]) => [
+              language,
+              Object.fromEntries(
+                Object.entries(files).map((
+                  [path, bytes],
+                ) => [path, Array.from(bytes)]),
+              ),
+            ]),
+          );
+        },
+        {
+          host,
+          request: scenario.request,
+          generators: scenario.input.generators,
+        },
+      );
+      equalOutputs(
+        replayed,
+        scenario.expected,
+        `${host} replay ${scenario.name}`,
+      );
+      console.log(
+        `PASS ${engine} ${host}: saved ${scenario.name} request matches native C++/Rust/Go`,
       );
     }
 
@@ -349,9 +439,11 @@ try {
           failure.diagnostics?.some((item) =>
             item.stage === "compiler" && item.stderr.length > 0
           ),
-        `${host} dropped compiler diagnostics for ${name}`,
+        `${host} dropped compiler diagnostics for ${name}: ${
+          JSON.stringify(failure)
+        }`,
       );
-      console.log(`PASS Chromium ${host}: ${name} reports compiler failure`);
+      console.log(`PASS ${engine} ${host}: ${name} reports compiler failure`);
     }
   }
 
@@ -396,7 +488,7 @@ try {
       `worker recovery after ${mode}`,
     );
     console.log(
-      `PASS Chromium worker: ${mode} terminates the job and permits reuse`,
+      `PASS ${engine} worker: ${mode} terminates the job and permits reuse`,
     );
   }
 
@@ -411,7 +503,7 @@ try {
     URL.revokeObjectURL(state.workerURL);
   });
   console.log(
-    `Browser suite passed offline with process spawning disabled; fixtures: ${data.work}`,
+    `${engine} suite passed offline with process spawning disabled; fixtures: ${data.work}`,
   );
 } finally {
   await browser?.close();

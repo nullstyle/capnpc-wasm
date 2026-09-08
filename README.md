@@ -8,10 +8,11 @@ generation.
 The build produces `capnp.wasm`, `capnpc-c++.wasm`, `capnpc-capnp.wasm`,
 `capnpc-rust.wasm`, and `capnpc-go.wasm`. The same modules compile schemas and
 generate C++, Rust, and Go in Wasmtime, wazero (compiler and interpreter), and
-Deno and Chromium using the pinned browser WASI shim. The TypeScript and Go SDKs
-accept in-memory workspaces and return generated files. Tests compare them with
-native upstream output and compile the generated source. The Zig generator,
-additional browser engines, and published releases are still ahead.
+Deno, Chromium, Firefox, and WebKit using the pinned browser WASI shim. The
+TypeScript and Go SDKs accept in-memory workspaces and return generated files.
+Tests compare them with native upstream output and compile the generated source.
+The Zig generator, broader resource controls, and published releases are still
+ahead.
 
 ## Bootstrap
 
@@ -22,7 +23,7 @@ the repository root:
 mise install
 mise run setup
 mise run check
-# For real browser tests (downloads Chromium into .cache/playwright):
+# For real browser tests (downloads pinned engines into .cache/playwright):
 mise run browser:install
 mise run test:browser
 ```
@@ -47,7 +48,7 @@ runner is required for this setup.
 mise run build        # native reference tools and WASI modules
 mise run test         # builds as needed, then runs the host comparison suite
 mise run check        # adds formatting, lint, type, and environment checks
-mise run test:browser # real Chromium, offline execution and worker cancellation
+mise run test:browser # Chromium, Firefox, WebKit: offline execution and cancellation
 ```
 
 Native tools are in `build/native/bin/`; Wasm commands are in `build/wasm/bin/`.
@@ -69,8 +70,8 @@ The current [port and runtime profile](patches/capnproto/README.md) requires
 standardized Wasm exception handling. Wasmtime uses `-W exceptions=y`; the
 wazero hosts enable its experimental EH feature. The SDKs use isolated memory
 filesystems; the older command runners under `tests/hosts/` remain development
-harnesses over trusted staging directories. Real browser coverage currently uses
-pinned Chromium; Firefox and WebKit remain unverified.
+harnesses over trusted staging directories. Real browser coverage uses the
+Chromium, Firefox, and WebKit revisions pinned by Playwright.
 
 ## Host SDKs
 
@@ -79,7 +80,8 @@ The [Go SDK](sdk/go/README.md) embeds wazero. Both compile modules once, use
 fresh instances per command, and return generated files only after every
 requested generator succeeds. Callers supply all module and schema bytes before
 execution. Worker termination and Go context cancellation interrupt running
-jobs.
+jobs. Both SDKs also expose standalone generation from saved compiler requests,
+so an application can compile once and generate different target sets later.
 
 ```sh
 mise run example:deno      # Rust generation using the bundled SDK
@@ -89,8 +91,12 @@ mise run example:browser   # local worker example at http://127.0.0.1:8080/examp
 The browser test compares C++, Rust, and Go output against native generation
 after disabling network access and native process creation. SDK tests also
 exercise invalid paths, diagnostic preservation, failed-job isolation, and
-cancellation of an infinite Wasm command. These are initial workspace SDKs;
-package publication and a stable release interface are pending.
+cancellation of an infinite Wasm command. The shared
+[feature corpus](tests/fixtures/features/README.md) covers binary embeds, 64-bit
+limits, generic brands, pointer defaults, groups, and relative imports. The
+browser example supports language selection, viewing and downloading files, and
+reuse of the compiled request when its schema is unchanged. These are initial
+workspace SDKs; package publication and a stable release interface are pending.
 
 ## Command modules
 

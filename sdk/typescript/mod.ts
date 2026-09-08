@@ -6,13 +6,19 @@ import {
   type CompileResult,
   type Diagnostic,
   type Files,
+  type GenerationRequest,
+  type GenerationResult,
   type Language,
   type Modules,
   type WasmModule,
 } from "./types.ts";
 
 export * from "./types.ts";
-export { createWorkerCompiler, type WorkerCompiler } from "./worker-client.ts";
+export {
+  createWorkerCompiler,
+  type JobOptions,
+  type WorkerCompiler,
+} from "./worker-client.ts";
 
 const languages: readonly Language[] = ["cpp", "rust", "go"];
 const commands = { cpp: "capnpc-c++", rust: "capnpc-rust", go: "capnpc-go" };
@@ -70,13 +76,107 @@ export async function createCompiler(modules: Modules): Promise<Compiler> {
     }
   }
 
+  function targets(requested: readonly Language[]): Language[] {
+    const selected = [...requested];
+    if (new Set(selected).size !== selected.length) {
+      throw new TypeError("duplicate generators");
+    }
+    for (const target of selected) {
+      if (!generators.has(target)) {
+        throw new TypeError(`generator was not supplied: ${target}`);
+      }
+    }
+    return selected;
+  }
+
+  async function execute(
+    stage: "compiler" | Language,
+    module: WebAssembly.Module,
+    args: string[],
+    stdin: Uint8Array,
+    files: Record<string, Uint8Array>,
+    readonly: boolean,
+    diagnostics: Diagnostic[],
+  ) {
+    let result;
+    try {
+      result = await runCommand(module, args, stdin, files, readonly);
+    } catch (cause) {
+      if (cause instanceof CommandError && cause.stderr) {
+        diagnostics.push({ stage, stderr: cause.stderr });
+      }
+      throw new CompileError(
+        `${stage} trapped: ${cause instanceof Error ? cause.message : cause}`,
+        stage,
+        diagnostics,
+        undefined,
+        { cause },
+      );
+    }
+    if (result.stderr) diagnostics.push({ stage, stderr: result.stderr });
+    if (result.code !== 0) {
+      throw new CompileError(
+        `${stage} exited with status ${result.code}`,
+        stage,
+        diagnostics,
+        result.code,
+      );
+    }
+    return result;
+  }
+
+  async function generate(
+    request: Uint8Array,
+    selected: Language[],
+    diagnostics: Diagnostic[],
+  ): Promise<GenerationResult> {
+    const outputs: GenerationResult["outputs"] = Object.create(null);
+    for (const language of selected) {
+      const generated = await execute(
+        language,
+        generators.get(language)!,
+        [commands[language]],
+        request,
+        {},
+        false,
+        diagnostics,
+      );
+      if (generated.stdout.length !== 0) {
+        throw new CompileError(
+          `${language} generator unexpectedly wrote to stdout`,
+          language,
+          diagnostics,
+        );
+      }
+      outputs[language] = generated.files;
+    }
+    return { outputs, diagnostics };
+  }
+
   return {
+    async generate(input: GenerationRequest): Promise<GenerationResult> {
+      const selected = targets(input.generators);
+      if (selected.length === 0) {
+        throw new TypeError("at least one generator is required");
+      }
+      if (
+        !(input.request instanceof Uint8Array) || input.request.length === 0
+      ) {
+        throw new TypeError(
+          "request must contain unpacked CodeGeneratorRequest bytes",
+        );
+      }
+      if (input.request.length > 64 * 1024 * 1024) {
+        throw new TypeError("request exceeds 64 MiB");
+      }
+      return await generate(new Uint8Array(input.request), selected, []);
+    },
     async compile(input: CompileRequest): Promise<CompileResult> {
       // Snapshot and validate the whole job before yielding to guest execution.
       const files = snapshot(input.files, "src");
       const includes = snapshot(input.includeFiles ?? {}, "include");
       const entrypoints = [...input.entrypoints];
-      const targets = [...input.generators];
+      const selected = targets(input.generators);
       if (entrypoints.length === 0) {
         throw new TypeError("at least one entrypoint is required");
       }
@@ -89,51 +189,7 @@ export async function createCompiler(modules: Modules): Promise<Compiler> {
       if (new Set(entrypoints).size !== entrypoints.length) {
         throw new TypeError("duplicate entrypoints");
       }
-      if (new Set(targets).size !== targets.length) {
-        throw new TypeError("duplicate generators");
-      }
-      for (const target of targets) {
-        if (!generators.has(target)) {
-          throw new TypeError(`generator was not supplied: ${target}`);
-        }
-      }
       const diagnostics: Diagnostic[] = [];
-      async function execute(
-        stage: "compiler" | Language,
-        module: WebAssembly.Module,
-        args: string[],
-        stdin: Uint8Array,
-        files: Record<string, Uint8Array>,
-        readonly: boolean,
-      ) {
-        let result;
-        try {
-          result = await runCommand(module, args, stdin, files, readonly);
-        } catch (cause) {
-          if (cause instanceof CommandError && cause.stderr) {
-            diagnostics.push({ stage, stderr: cause.stderr });
-          }
-          throw new CompileError(
-            `${stage} trapped: ${
-              cause instanceof Error ? cause.message : cause
-            }`,
-            stage,
-            diagnostics,
-            undefined,
-            { cause },
-          );
-        }
-        if (result.stderr) diagnostics.push({ stage, stderr: result.stderr });
-        if (result.code !== 0) {
-          throw new CompileError(
-            `${stage} exited with status ${result.code}`,
-            stage,
-            diagnostics,
-            result.code,
-          );
-        }
-        return result;
-      }
       const compiled = await execute(
         "compiler",
         compiler,
@@ -149,6 +205,7 @@ export async function createCompiler(modules: Modules): Promise<Compiler> {
         new Uint8Array(),
         { ...files, ...includes },
         true,
+        diagnostics,
       );
       if (compiled.stdout.length === 0) {
         throw new CompileError(
@@ -157,26 +214,10 @@ export async function createCompiler(modules: Modules): Promise<Compiler> {
           diagnostics,
         );
       }
-      const outputs: CompileResult["outputs"] = Object.create(null);
-      for (const language of targets) {
-        const generated = await execute(
-          language,
-          generators.get(language)!,
-          [commands[language]],
-          compiled.stdout,
-          {},
-          false,
-        );
-        if (generated.stdout.length !== 0) {
-          throw new CompileError(
-            `${language} generator unexpectedly wrote to stdout`,
-            language,
-            diagnostics,
-          );
-        }
-        outputs[language] = generated.files;
-      }
-      return { request: compiled.stdout, outputs, diagnostics };
+      return {
+        request: compiled.stdout,
+        ...await generate(compiled.stdout, selected, diagnostics),
+      };
     },
   };
 }

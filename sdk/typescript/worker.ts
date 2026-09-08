@@ -13,6 +13,8 @@ scope.onmessage = async ({ data }) => {
       compiler = await createCompiler(data.modules);
     } else if (data.kind === "compile" && compiler) {
       result = await compiler.compile(data.request);
+    } else if (data.kind === "generate" && compiler) {
+      result = await compiler.generate(data.request);
     } else throw new Error("worker is not initialized or message is invalid");
     scope.postMessage({ id: data.id, result });
   } catch (cause) {

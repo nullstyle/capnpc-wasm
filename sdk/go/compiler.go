@@ -44,6 +44,14 @@ type Request struct {
 	Generators   []string
 }
 
+// GenerationRequest runs generators on an existing standard unpacked
+// CodeGeneratorRequest. At least one generator is required. Do not mutate its
+// byte slice or generator list while Generate is running.
+type GenerationRequest struct {
+	Request    []byte
+	Generators []string
+}
+
 // Diagnostic preserves a command's stderr without interpreting upstream syntax.
 type Diagnostic struct {
 	Stage    string
@@ -59,8 +67,16 @@ type Result struct {
 	Diagnostics []Diagnostic
 }
 
+// GenerationResult is published only after every requested generator succeeds.
+// Outputs groups relative paths by language. All maps and bytes are caller-owned.
+type GenerationResult struct {
+	Outputs     map[string]map[string][]byte
+	Diagnostics []Diagnostic
+}
+
 // Error identifies a failed stage and preserves its stderr and underlying error.
-// On any failure Compile returns a zero Result, so no partial files escape.
+// On any failure Compile and Generate return zero results, so no partial files
+// escape.
 type Error struct {
 	Stage    string
 	Language string
@@ -81,9 +97,10 @@ func (e *Error) Error() string {
 
 func (e *Error) Unwrap() error { return e.Err }
 
-// Compiler owns reusable compiled Wasm modules. Compile supports concurrent
-// calls; each call and generator receives fresh memory, stdio and filesystems.
-// Close waits for active Compile calls, which callers can cancel with contexts.
+// Compiler owns reusable compiled Wasm modules. Compile and Generate support
+// concurrent calls; each call and generator receives fresh memory, stdio and
+// filesystems.
+// Close waits for active calls, which callers can cancel with contexts.
 type Compiler struct {
 	mu         sync.RWMutex
 	runtime    wazero.Runtime
@@ -206,18 +223,53 @@ func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error)
 	if err != nil {
 		return Result{}, &Error{Stage: "compile", Stderr: stderr, Err: err}
 	}
-	result := Result{Request: binary, Outputs: map[string]map[string][]byte{}}
+	generated, err := c.runGenerators(ctx, binary, request.Generators)
+	if err != nil {
+		return Result{}, err
+	}
+	result := Result{Request: binary, Outputs: generated.Outputs}
 	if stderr != "" {
 		result.Diagnostics = append(result.Diagnostics, Diagnostic{Stage: "compile", Message: stderr})
 	}
-	for _, language := range request.Generators {
+	result.Diagnostics = append(result.Diagnostics, generated.Diagnostics...)
+	return result, nil
+}
+
+// Generate runs the selected generators on an existing unpacked
+// CodeGeneratorRequest, without invoking the compiler. Each generator receives
+// a fresh instance and an empty writable memory filesystem. Malformed requests
+// are diagnosed by the generators, not parsed by the host SDK.
+func (c *Compiler) Generate(ctx context.Context, request GenerationRequest) (GenerationResult, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return GenerationResult{}, &Error{Stage: "validate", Err: errors.New("compiler is closed")}
+	}
+	if err := ctx.Err(); err != nil {
+		return GenerationResult{}, &Error{Stage: "validate", Err: err}
+	}
+	if len(request.Request) == 0 || len(request.Request) > maxBytes {
+		return GenerationResult{}, &Error{Stage: "validate", Err: errors.New("CodeGeneratorRequest must contain between 1 byte and 64 MiB")}
+	}
+	if len(request.Generators) == 0 {
+		return GenerationResult{}, &Error{Stage: "validate", Err: errors.New("at least one generator is required")}
+	}
+	if err := c.validateGenerators(request.Generators); err != nil {
+		return GenerationResult{}, &Error{Stage: "validate", Err: err}
+	}
+	return c.runGenerators(ctx, bytes.Clone(request.Request), request.Generators)
+}
+
+func (c *Compiler) runGenerators(ctx context.Context, binary []byte, languages []string) (GenerationResult, error) {
+	result := GenerationResult{Outputs: map[string]map[string][]byte{}}
+	for _, language := range languages {
 		output := newMemoryFS(nil, false)
 		stdout, stderr, err := c.run(ctx, c.generators[language], mount(wazero.NewFSConfig(), output, "/"), []string{"capnpc-" + language}, binary)
 		if err == nil && len(stdout) != 0 {
 			err = errors.New("generator unexpectedly wrote to stdout")
 		}
 		if err != nil {
-			return Result{}, &Error{Stage: "generate", Language: language, Stderr: stderr, Err: err}
+			return GenerationResult{}, &Error{Stage: "generate", Language: language, Stderr: stderr, Err: err}
 		}
 		result.Outputs[language] = output.snapshot()
 		if stderr != "" {
@@ -299,12 +351,16 @@ func (c *Compiler) validate(request Request) error {
 		}
 		entries[entry] = true
 	}
-	languages := map[string]bool{}
-	for _, language := range request.Generators {
-		if c.generators[language] == nil || languages[language] {
+	return c.validateGenerators(request.Generators)
+}
+
+func (c *Compiler) validateGenerators(languages []string) error {
+	seen := map[string]bool{}
+	for _, language := range languages {
+		if !supported(language) || c.generators[language] == nil || seen[language] {
 			return fmt.Errorf("unavailable or duplicate generator %q", language)
 		}
-		languages[language] = true
+		seen[language] = true
 	}
 	return nil
 }

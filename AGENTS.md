@@ -3,8 +3,8 @@
 This repository ports the reference Cap'n Proto tools and language generators to
 Wasm commands for browsers, Deno, and wazero. The compiler and C++, Rust, Go,
 and schema-inspection generators run across the development hosts and match
-native output. Initial TypeScript and Go SDKs run in Deno, Chromium workers, and
-wazero. The Zig guest and a published release are pending.
+native output. Initial TypeScript and Go SDKs run in Deno, Chromium, Firefox,
+WebKit workers, and wazero. The Zig guest and a published release are pending.
 
 - Read [README.md](README.md) for bootstrap commands and workspace conventions.
   When working on a compiler, generator, or WASI boundary, use the relevant
@@ -29,6 +29,10 @@ wazero. The Zig guest and a published release are pending.
   Keep language dependencies locked and resolved to the pinned references. Run
   `mise run test` after generator changes; generated-code consumers exercise the
   pinned runtimes as well as comparing source output.
+- The [schema feature corpus](tests/fixtures/features/README.md) is shared by
+  the SDK and browser tests. Read embeds as bytes; compare the complete
+  canonical request and generated sources with native output when adding schema
+  coverage.
 - For host integration, read
   [sdk/typescript/README.md](sdk/typescript/README.md) or
   [sdk/go/README.md](sdk/go/README.md). Preserve byte-oriented workspaces, fresh
