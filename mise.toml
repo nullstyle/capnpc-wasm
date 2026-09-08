@@ -1,0 +1,77 @@
+min_version = "2026.9.1"
+
+[settings]
+lockfile = true
+lockfile_platforms = ["linux-x64", "linux-arm64", "macos-x64", "macos-arm64"]
+
+[settings.task]
+run_auto_install = false
+
+[tool_alias.wasi-sdk]
+backend = "github:WebAssembly/wasi-sdk"
+
+[tools]
+# Native bootstrap and generated C++ checks. clangxx supplies the C++ driver.
+clang = "23.1.0"
+"conda:clangxx" = "23.1.0"
+cmake = "4.4.3"
+ninja = "1.13.2"
+go = "1.27.1"
+deno = "2.9.6"
+# Match ref/capnp-zig/mise.toml when updating that reference.
+zig = "0.17.0-dev.1683+5ceec001b"
+wasm-tools = "1.258.0"
+wasmtime = "48.0.1"
+shellcheck = "0.11.0"
+# Rust exposes Cargo's user bin directory; put it after managed binaries so
+# previously installed Cargo commands cannot shadow wasm-tools or other pins.
+rust = { version = "1.98.1", profile = "minimal", components = ["rustfmt", "clippy"], targets = ["wasm32-wasip1"] }
+
+[tools.wasi-sdk]
+version = "34"
+version_prefix = "wasi-sdk-"
+strip_components = 1
+bin_path = "bin"
+# Keep the SDK's cross-compilers off PATH; use `mise where wasi-sdk` explicitly.
+filter_bins = ["wasm-ld"]
+
+[tools.wasi-sdk.platforms]
+# Static mappings also resolve correctly when locking for a different host.
+linux-x64 = { asset_pattern = "wasi-sdk-*-x86_64-linux.tar.gz" }
+linux-arm64 = { asset_pattern = "wasi-sdk-*-arm64-linux.tar.gz" }
+macos-x64 = { asset_pattern = "wasi-sdk-*-x86_64-macos.tar.gz" }
+macos-arm64 = { asset_pattern = "wasi-sdk-*-arm64-macos.tar.gz" }
+
+[env]
+CC = "clang"
+CXX = "clang++"
+CARGO_TARGET_DIR = "{{config_root}}/build/cargo"
+DENO_DIR = "{{config_root}}/.cache/deno"
+GOPATH = "{{config_root}}/.cache/go"
+GOCACHE = "{{config_root}}/.cache/go-build"
+GOTOOLCHAIN = "local"
+ZIG_GLOBAL_CACHE_DIR = "{{config_root}}/.cache/zig"
+
+[tasks.setup]
+description = "Initialize pinned references and verify installed tools (run mise install first)"
+run = [{ task = "refs:sync" }, { task = "doctor" }]
+
+[tasks."refs:sync"]
+description = "Initialize top-level reference submodules at their recorded commits"
+run = ["git submodule sync", "git -c submodule.recurse=false submodule update --init"]
+
+[tasks."refs:status"]
+description = "Show the exact reference checkouts"
+run = "git submodule status"
+
+[tasks.doctor]
+description = "Check tool availability, Rust WASI target, SDK layout, and reference pins"
+run = "bash scripts/doctor.sh"
+
+[tasks.check]
+description = "Validate the setup scripts, documentation formatting, and environment"
+run = [
+  "shellcheck scripts/doctor.sh",
+  "deno fmt --check README.md AGENTS.md ref/README.md",
+  { task = "doctor" },
+]

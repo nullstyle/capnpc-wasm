@@ -1,0 +1,14 @@
+# Local configuration and generated state.
+mise.local.toml
+mise.local.lock
+.env
+.env.*
+!.env.example
+/.cache/
+/build/
+/dist/
+/target/
+node_modules/
+.zig-cache/
+zig-out/
+.DS_Store

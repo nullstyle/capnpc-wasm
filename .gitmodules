@@ -1,0 +1,24 @@
+[submodule "ref/capnproto"]
+	path = ref/capnproto
+	url = https://github.com/capnproto/capnproto.git
+[submodule "ref/capnproto-rust"]
+	path = ref/capnproto-rust
+	url = https://github.com/capnproto/capnproto-rust.git
+[submodule "ref/go-capnp"]
+	path = ref/go-capnp
+	url = https://github.com/capnproto/go-capnp.git
+[submodule "ref/capnp-zig"]
+	path = ref/capnp-zig
+	url = https://github.com/nullstyle/capnp-zig.git
+[submodule "ref/wazero"]
+	path = ref/wazero
+	url = https://github.com/wazero/wazero.git
+[submodule "ref/browser_wasi_shim"]
+	path = ref/browser_wasi_shim
+	url = https://github.com/bjorn3/browser_wasi_shim.git
+[submodule "ref/wasi-sdk"]
+	path = ref/wasi-sdk
+	url = https://github.com/WebAssembly/wasi-sdk.git
+[submodule "ref/WASI"]
+	path = ref/WASI
+	url = https://github.com/WebAssembly/WASI.git
