@@ -44,4 +44,4 @@ if [[ -z "$ref_status" ]] || [[ "$ref_status" =~ (^|$'\n')[-+U] ]]; then
   exit 1
 fi
 
-echo "Setup checks passed. Compiler and host compatibility tests will follow implementation."
+echo "Toolchain and reference checks passed."

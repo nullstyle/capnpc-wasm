@@ -69,9 +69,34 @@ description = "Check tool availability, Rust WASI target, SDK layout, and refere
 run = "bash scripts/doctor.sh"
 
 [tasks.check]
-description = "Validate the setup scripts, documentation formatting, and environment"
+description = "Check formatting, tooling, and native/Wasm parity across the test hosts"
 run = [
-  "shellcheck scripts/doctor.sh",
-  "deno fmt --check README.md AGENTS.md ref/README.md",
+  "shellcheck scripts/*.sh",
+  "deno fmt --check README.md AGENTS.md ref/README.md patches/capnproto/README.md tests",
+  "deno lint tests",
+  "deno check --config tests/hosts/deno/deno.json --unstable-sloppy-imports tests/hosts/deno/main.ts",
+  "go -C tests/hosts/wazero vet ./...",
   { task = "doctor" },
+  { task = "test" },
 ]
+
+[tasks."build:native"]
+description = "Build the pristine upstream native tools and test oracle"
+run = "bash scripts/build-native.sh"
+
+[tasks."build:wasm"]
+description = "Apply the WASI port to a disposable source copy and build command modules"
+run = "bash scripts/build-wasm.sh"
+
+[tasks.build]
+description = "Build native reference tools and WASI command modules"
+depends = ["build:native", "build:wasm"]
+
+[tasks."build:wazero"]
+description = "Build the test host from the pinned wazero reference"
+run = "go -C tests/hosts/wazero build -mod=readonly -o ../../../build/hosts/wazero-run ."
+
+[tasks.test]
+description = "Compare compiler/generator behavior in Wasmtime, wazero, and the Deno browser shim"
+depends = ["build:native", "build:wasm", "build:wazero"]
+run = "deno test --allow-read --allow-write=build --allow-run tests/first_slice_test.ts"

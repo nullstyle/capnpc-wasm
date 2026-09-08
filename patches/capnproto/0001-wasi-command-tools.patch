@@ -1,0 +1,229 @@
+diff --git a/c++/src/capnp/compiler/capnp.c++ b/c++/src/capnp/compiler/capnp.c++
+--- a/c++/src/capnp/compiler/capnp.c++
++++ b/c++/src/capnp/compiler/capnp.c++
+@@ -62,7 +62,7 @@
+ #include <windows.h>
+ #include <kj/windows-sanity.h>
+ #undef CONST
+-#else
++#elif !__wasi__
+ #include <sys/wait.h>
+ #endif
+ 
+@@ -530,6 +530,10 @@
+         continue;
+       }
+ 
++#if __wasi__
++      context.exitError("WASI does not support launching generator processes; use -o- "
++                        "and run the generator in the host.");
++#else
+       int pipeFds[2]{};
+       KJ_SYSCALL(kj::miniposix::pipe(pipeFds));
+ 
+@@ -670,6 +674,7 @@
+         context.error(kj::str(output.name, ": plugin failed: exit code ", WEXITSTATUS(status)));
+       }
+ #endif  // _WIN32, else
++#endif
+     }
+ 
+     return true;
+diff --git a/c++/src/capnp/compiler/parser.c++ b/c++/src/capnp/compiler/parser.c++
+--- a/c++/src/capnp/compiler/parser.c++
++++ b/c++/src/capnp/compiler/parser.c++
+@@ -36,6 +36,10 @@
+ #include <sys/stat.h>
+ #include <fcntl.h>
+ 
++#if __wasi__
++#include <wasi/api.h>
++#endif
++
+ #if _WIN32
+ #include <windows.h>
+ #include <wincrypt.h>
+@@ -57,6 +61,9 @@
+ 
+   KJ_ASSERT(CryptGenRandom(handle, sizeof(result), reinterpret_cast<BYTE*>(&result)));
+ 
++#elif __wasi__
++  auto error = __wasi_random_get(reinterpret_cast<uint8_t*>(&result), sizeof(result));
++  KJ_REQUIRE(error == 0, "WASI random_get failed", error);
+ #else
+   auto fd = KJ_SYSCALL_FD(open("/dev/urandom", O_RDONLY));
+ 
+diff --git a/c++/src/capnp/message.h b/c++/src/capnp/message.h
+--- a/c++/src/capnp/message.h
++++ b/c++/src/capnp/message.h
+@@ -128,7 +128,7 @@
+ private:
+   ReaderOptions options;
+ 
+-#if defined(__EMSCRIPTEN__) || (defined(__APPLE__) && (defined(__ppc__) || defined(__i386__)))
++#if defined(__wasi__) || defined(__EMSCRIPTEN__) || (defined(__APPLE__) && (defined(__ppc__) || defined(__i386__)))
+   static constexpr size_t arenaSpacePadding = 15;
+ #else
+   static constexpr size_t arenaSpacePadding = 14;
+diff --git a/c++/src/kj/exception.c++ b/c++/src/kj/exception.c++
+--- a/c++/src/kj/exception.c++
++++ b/c++/src/kj/exception.c++
+@@ -43,9 +43,11 @@
+ #include <stdlib.h>
+ #include <exception>
+ #include <new>
++#if !__wasi__
+ #include <signal.h>
++#endif
+ #include <stdint.h>
+-#ifndef _WIN32
++#if !defined(_WIN32) && !defined(__wasi__)
+ #include <sys/mman.h>
+ #endif
+ #include "io.h"
+@@ -744,8 +746,8 @@
+   std::set_terminate(&terminateHandler);
+ }
+ 
+-#elif _WIN32
+-// Windows, but KJ_USE_WIN32_DBGHELP is not enabled. We can't print useful stack traces, so don't
++#elif _WIN32 || __wasi__
++// Windows or WASI, but KJ_USE_WIN32_DBGHELP is not enabled. We can't print useful stack traces, so don't
+ // try to catch SEH nor ctrl+C.
+ 
+ void printStackTraceOnCrash() {
+@@ -970,7 +972,7 @@
+ }
+ 
+ void resetCrashHandlers() {
+-#ifndef _WIN32
++#if !defined(_WIN32) && !defined(__wasi__)
+   struct sigaction action = {};
+ 
+   action.sa_handler = SIG_DFL;
+diff --git a/c++/src/kj/exception.h b/c++/src/kj/exception.h
+--- a/c++/src/kj/exception.h
++++ b/c++/src/kj/exception.h
+@@ -233,8 +233,12 @@
+ // KJ_RETURN_ADDRESS() returns a pointer to the code location within the current function's caller
+ // where execution will resume when the current function returns.
+ 
++#if __wasi__
++#define KJ_CALLING_ADDRESS() nullptr
++#else
+ #define KJ_CALLING_ADDRESS() \
+     reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(KJ_RETURN_ADDRESS()) - 1)
++#endif
+ // KJ_CALLING_ADDRESS() returns a pointer to the code that called the current function, suitable
+ // for passing to Exception::addTrace().
+ //
+diff --git a/c++/src/kj/filesystem-disk-unix.c++ b/c++/src/kj/filesystem-disk-unix.c++
+--- a/c++/src/kj/filesystem-disk-unix.c++
++++ b/c++/src/kj/filesystem-disk-unix.c++
+@@ -39,7 +39,11 @@
+ #include <fcntl.h>
+ #include <unistd.h>
+ #include <stdio.h>
++#if __wasi__
++#include <wasi/api.h>
++#else
+ #include <sys/mman.h>
++#endif
+ #include <errno.h>
+ #include <dirent.h>
+ #include <stdlib.h>
+@@ -229,6 +233,7 @@
+   return true;
+ }
+ 
++#if !__wasi__
+ struct MmapRange {
+   uint64_t offset;
+   uint64_t size;
+@@ -264,6 +269,8 @@
+ };
+ 
+ constexpr MmapDisposer mmapDisposer = MmapDisposer();
++
++#endif
+ 
+ class DiskHandle {
+   // We need to implement each of ReadableFile, AppendableFile, File, ReadableDirectory, and
+@@ -357,6 +364,20 @@
+     return total;
+   }
+ 
++#if __wasi__
++  // WASI has no file-backed mmap. Compiler inputs are immutable during a run,
++  // so read-only and private mappings can use independently owned snapshots.
++  Array<const byte> mmap(uint64_t offset, uint64_t size) const {
++    return mmapPrivate(offset, size);
++  }
++
++  Array<byte> mmapPrivate(uint64_t offset, uint64_t size) const {
++    KJ_REQUIRE(size <= static_cast<size_t>(kj::maxValue), "file mapping is too large");
++    auto bytes = heapArray<byte>(size);
++    KJ_REQUIRE(read(offset, bytes) == size, "file shortened while reading");
++    return bytes;
++  }
++#else
+   Array<const byte> mmap(uint64_t offset, uint64_t size) const {
+     if (size == 0) return nullptr;  // zero-length mmap() returns EINVAL, so avoid it
+     auto range = getMmapRange(offset, size);
+@@ -378,6 +399,8 @@
+     return Array<byte>(reinterpret_cast<byte*>(mapping) + (offset - range.offset),
+                        size, mmapDisposer);
+   }
++
++#endif
+ 
+   // File ----------------------------------------------------------------------
+ 
+@@ -460,6 +483,11 @@
+     KJ_SYSCALL(ftruncate(fd, size));
+   }
+ 
++#if __wasi__
++  Own<const WritableFileMapping> mmapWritable(uint64_t offset, uint64_t size) const {
++    KJ_FAIL_REQUIRE("WASI does not support writable file mappings");
++  }
++#else
+   class WritableFileMappingImpl final: public WritableFileMapping {
+   public:
+     WritableFileMappingImpl(Array<byte> bytes): bytes(kj::mv(bytes)) {}
+@@ -508,6 +536,8 @@
+                              size, mmapDisposer);
+     return heap<WritableFileMappingImpl>(kj::mv(array));
+   }
++
++#endif
+ 
+   size_t copyChunk(uint64_t offset, int fromFd, uint64_t fromOffset, uint64_t size) const {
+     // Copies a range of bytes from `fromFd` to this file in the most efficient way possible for
+@@ -904,7 +934,17 @@
+     }
+ 
+     static uint counter = 0;
++#if __wasi__
++    // Distinguish temporary names from concurrent command instances without PIDs.
++    static const uint64_t pid = []() {
++      uint64_t id;
++      auto error = __wasi_random_get(reinterpret_cast<uint8_t*>(&id), sizeof(id));
++      KJ_REQUIRE(error == 0, "WASI random_get failed", error);
++      return id;
++    }();
++#else
+     static const pid_t pid = getpid();
++#endif
+     String pathPrefix;
+     if (finalName.size() > 1) {
+       pathPrefix = kj::str(finalName.parent(), '/');
+@@ -1179,7 +1219,7 @@
+         if (S_ISDIR(stats.st_mode)) {
+           return mkdirat(fd, candidatePath.cStr(), 0700);
+         } else {
+-#if __APPLE__ || __FreeBSD__
++#if __APPLE__ || __FreeBSD__ || __wasi__
+           // - No mknodat() on OSX, gotta open() a file, ugh.
+           // - On a modern FreeBSD, mknodat() is reserved strictly for device nodes,
+           //   you cannot create a regular file using it (EINVAL).
