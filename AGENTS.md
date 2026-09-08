@@ -3,7 +3,8 @@
 This repository ports the reference Cap'n Proto tools and language generators to
 Wasm commands for browsers, Deno, and wazero. The compiler and C++, Rust, Go,
 and schema-inspection generators run across the development hosts and match
-native output. Public SDKs, real browser tests, and the Zig guest are pending.
+native output. Initial TypeScript and Go SDKs run in Deno, Chromium workers, and
+wazero. The Zig guest and a published release are pending.
 
 - Read [README.md](README.md) for bootstrap commands and workspace conventions.
   When working on a compiler, generator, or WASI boundary, use the relevant
@@ -28,6 +29,14 @@ native output. Public SDKs, real browser tests, and the Zig guest are pending.
   Keep language dependencies locked and resolved to the pinned references. Run
   `mise run test` after generator changes; generated-code consumers exercise the
   pinned runtimes as well as comparing source output.
+- For host integration, read
+  [sdk/typescript/README.md](sdk/typescript/README.md) or
+  [sdk/go/README.md](sdk/go/README.md). Preserve byte-oriented workspaces, fresh
+  guest instances, read-only inputs, and transactional outputs. Worker
+  cancellation must terminate execution; a rejected promise alone is
+  insufficient. Run `mise run test:browser` after TypeScript runtime or bundle
+  changes. Browser setup and its pinned dependencies live in
+  [tests/browser/README.md](tests/browser/README.md).
 - The target is WASI Preview 1 command modules (`wasm32-wasip1`). Cap'n Proto v2
   requires C++ exceptions: use standardized Wasm EH and retain error
   propagation. Preserve the standard binary `CodeGeneratorRequest` boundary and

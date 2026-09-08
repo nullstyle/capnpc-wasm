@@ -1,0 +1,107 @@
+# Go host SDK
+
+`capnpwasm` compiles schema workspaces and runs C++, Rust, and Go generators in
+wazero. The API accepts module bytes and schema bytes and returns the standard
+unpacked `CodeGeneratorRequest`, generated file bytes, and stderr diagnostics.
+Execution needs no native compiler, network access, or host filesystem access.
+
+```go
+compiler, err := capnpwasm.New(ctx, capnpwasm.Modules{
+	Compiler: compilerWasm,
+	Generators: map[string][]byte{
+		"cpp": cppGeneratorWasm,
+		"rust": rustGeneratorWasm,
+		"go": goGeneratorWasm,
+	},
+})
+if err != nil {
+	return err
+}
+defer compiler.Close(context.Background())
+
+result, err := compiler.Compile(ctx, capnpwasm.Request{
+	Files: map[string][]byte{"person.capnp": schemaBytes},
+	IncludeFiles: map[string][]byte{
+		"capnp/c++.capnp": cppAnnotationBytes,
+		"go.capnp": goAnnotationBytes,
+	},
+	Entrypoints: []string{"person.capnp"},
+	Generators: []string{"cpp", "rust", "go"},
+})
+if err != nil {
+	return err
+}
+// result.Outputs["rust"]["person_capnp.rs"] contains generated source.
+```
+
+Import `capnp-wasm/sdk/go` as `capnpwasm` from this checkout. This first SDK is
+source intended for workspace use; publication and release packaging remain
+pending. Its `go.mod` replacement selects `ref/wazero`, whose gitlink pins the
+experimental standardized Wasm exception support required by the C++ tools.
+Applications using a local module replacement must also replace
+`github.com/tetratelabs/wazero` with this checkout's `ref/wazero`: dependency
+module replacements are not inherited by Go consumers.
+
+Read modules from `build/wasm/bin/` or embed them in your application. The SDK
+does not download modules or supply annotation schemas. Include the pinned
+standard schemas that your inputs import; C++ annotations are in
+`ref/capnproto/c++/src/capnp/c++.capnp` and Go annotations in
+`ref/go-capnp/std/go.capnp`. Go generation requires the upstream `$Go.package`
+and `$Go.import` annotations, as shown in the repository fixtures. An empty
+`Generators` list runs only the compiler.
+
+## Execution and ownership
+
+`New` validates that every module exports `memory` and a `_start` function with
+no parameters or results, then retains the compiled modules. A compiler that
+exits successfully with empty stdout still fails the job because it did not
+produce a `CodeGeneratorRequest`. Reuse the returned compiler across concurrent
+jobs; every command receives a fresh module instance and private memory
+filesystem. The compiler sees read-only `/src` and `/include` directories. Each
+generator sees an empty writable root. There are no host mounts, symbolic links,
+sockets, inherited environment variables, or subprocesses.
+
+Input paths and entrypoints must be nonempty, valid UTF-8, relative POSIX paths
+with no `.` or `..` components, empty components, backslashes, or NUL bytes.
+Duplicate entrypoints, duplicate generators, missing entrypoints, unavailable
+generators, and file/directory collisions fail before guest execution. Paths are
+limited to 4,096 bytes. Workspace contents are limited to 64 MiB and 4,096 files
+and directories. Each generator filesystem is limited to 64 MiB of file contents
+and 4,096 entries. A command can emit at most 64 MiB on stdout and 1 MiB on
+stderr; each Wasm instance has a 256 MiB linear-memory ceiling. These are
+per-job limits, not a process-wide memory budget.
+
+Do not mutate request maps or their byte slices while `Compile` runs. Returned
+maps and bytes belong to the caller and do not alias inputs or later jobs. The
+SDK returns a zero `Result` on every error, including a later generator failure
+after earlier generators succeeded. Inspect `*capnpwasm.Error` for the failing
+stage, generator language, raw stderr, and wrapped error. Successful stderr is
+retained in `Result.Diagnostics` without parsing upstream diagnostic syntax.
+
+Pass a cancellable context or deadline to interrupt guest execution.
+`errors.Is(err, context.Canceled)` and `context.DeadlineExceeded` work through
+the SDK error wrapper. `Close` waits for active calls, then frees the runtime;
+cancel their contexts first when shutdown must interrupt them. Closing twice is
+safe. Module instantiation and filesystem operations use the pinned wazero
+experimental interfaces; this is an initial API, not a stable published release.
+
+## Verification
+
+Run from the repository root:
+
+```sh
+mise run build
+mise exec -- go -C sdk/go test ./...
+mise exec -- go -C sdk/go vet -stdmethods=false ./...
+```
+
+Tests run the actual built modules, compare canonical requests and generated
+source with native upstream tools, run concurrent and repeated jobs, and cover
+Unicode paths, validation, read-only inputs, filesystem bounds, diagnostic
+preservation, transactional generator failures, and cancellation of a running
+infinite Wasm loop. Native tools are used only by the test oracle.
+
+The `stdmethods` vet analyzer is disabled for this package because wazero's
+experimental filesystem requires `Seek(int64, int) (int64, sys.Errno)`, which
+intentionally differs from the standard `io.Seeker` signature. Other vet
+analyzers remain enabled.

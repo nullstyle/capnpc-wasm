@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cap'n Proto in a browser</title>
+  <style>
+  body {
+    max-width: 64rem;
+    margin: 3rem auto;
+    padding: 0 1rem;
+    font: 16px system-ui;
+  }
+  textarea {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 12rem;
+    font: 15px monospace;
+    padding: 1rem;
+  }
+  button {
+    padding: .6rem 1rem;
+    margin: 1rem .5rem 0 0;
+  }
+  pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    padding: 1rem;
+    background: #f3f4f5;
+  }
+  </style>
+  <h1>Cap'n Proto in a browser</h1>
+  <p>Generate Rust in a worker using the bundled compiler and generator.</p>
+  <label for="schema">person.capnp</label>
+  <textarea id="schema" spellcheck="false">@0xece4bf9c1f867623;
+struct Person {
+  name @0 :Text;
+}</textarea>
+  <div>
+    <button id="generate" disabled>Generate Rust</button>
+    <button id="cancel" disabled>Cancel</button>
+  </div>
+  <p id="status" role="status">Loading Wasm modules…</p>
+  <pre id="output"></pre>
+  <script type="module" src="./main.js"></script>
+</html>

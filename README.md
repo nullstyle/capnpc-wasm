@@ -8,9 +8,10 @@ generation.
 The build produces `capnp.wasm`, `capnpc-c++.wasm`, `capnpc-capnp.wasm`,
 `capnpc-rust.wasm`, and `capnpc-go.wasm`. The same modules compile schemas and
 generate C++, Rust, and Go in Wasmtime, wazero (compiler and interpreter), and
-Deno using the pinned browser WASI shim. Tests compare them with native upstream
-output and compile the generated source. Browser execution, public SDKs, the Zig
-generator guest, and release packaging are still ahead.
+Deno and Chromium using the pinned browser WASI shim. The TypeScript and Go SDKs
+accept in-memory workspaces and return generated files. Tests compare them with
+native upstream output and compile the generated source. The Zig generator,
+additional browser engines, and published releases are still ahead.
 
 ## Bootstrap
 
@@ -21,6 +22,9 @@ the repository root:
 mise install
 mise run setup
 mise run check
+# For real browser tests (downloads Chromium into .cache/playwright):
+mise run browser:install
+mise run test:browser
 ```
 
 Tool versions live in `mise.toml`; `mise.lock` records resolved downloads where
@@ -43,13 +47,15 @@ runner is required for this setup.
 mise run build        # native reference tools and WASI modules
 mise run test         # builds as needed, then runs the host comparison suite
 mise run check        # adds formatting, lint, type, and environment checks
+mise run test:browser # real Chromium, offline execution and worker cancellation
 ```
 
 Native tools are in `build/native/bin/`; Wasm commands are in `build/wasm/bin/`.
 Wasm builds export the compiler sources into `build/src/`, apply the project
 patch there, and leave `ref/` pristine. Test requests, generated source, and
 canonical comparison data remain in `build/test/` for inspection after a
-failure.
+failure. The build also stages a standalone TypeScript module, worker, identical
+Wasm commands, and standard include schemas under `dist/`.
 
 Tests cover standard annotations, relative imports, unions, enums, interfaces,
 byte-identical C++/Rust/Go output, native compilation of generated files, Rust
@@ -61,10 +67,32 @@ and pointer values are preserved.
 
 The current [port and runtime profile](patches/capnproto/README.md) requires
 standardized Wasm exception handling. Wasmtime uses `-W exceptions=y`; the
-wazero test runner enables its experimental EH feature. The Deno runner
-exercises the browser shim's in-memory WASI implementation; browser
-compatibility still needs real browser tests. Host runners are development
-harnesses over trusted staging directories.
+wazero hosts enable its experimental EH feature. The SDKs use isolated memory
+filesystems; the older command runners under `tests/hosts/` remain development
+harnesses over trusted staging directories. Real browser coverage currently uses
+pinned Chromium; Firefox and WebKit remain unverified.
+
+## Host SDKs
+
+The [TypeScript SDK](sdk/typescript/README.md) runs in Deno or a browser worker.
+The [Go SDK](sdk/go/README.md) embeds wazero. Both compile modules once, use
+fresh instances per command, and return generated files only after every
+requested generator succeeds. Callers supply all module and schema bytes before
+execution. Worker termination and Go context cancellation interrupt running
+jobs.
+
+```sh
+mise run example:deno      # Rust generation using the bundled SDK
+mise run example:browser   # local worker example at http://127.0.0.1:8080/examples/browser/
+```
+
+The browser test compares C++, Rust, and Go output against native generation
+after disabling network access and native process creation. SDK tests also
+exercise invalid paths, diagnostic preservation, failed-job isolation, and
+cancellation of an infinite Wasm command. These are initial workspace SDKs;
+package publication and a stable release interface are pending.
+
+## Command modules
 
 After `mise run build`, create a request with the Wasm compiler, then feed it to
 the generator in a separate output directory:
@@ -122,9 +150,11 @@ For CMake cross builds, use
 | `cmake/`      | Minimal synchronous C++ command build for WASI                  |
 | `patches/`    | Documented upstream porting changes                             |
 | `generators/` | Rust command wrapper and pinned Rust/Go dependency manifests    |
+| `sdk/`        | TypeScript worker/in-memory SDK and Go wazero SDK               |
+| `examples/`   | Browser worker and Deno SDK examples                            |
 | `tests/`      | Schema fixtures, native oracle, and development host runners    |
 | `build/`      | Ignored build trees, scratch source copies, and generated files |
-| `dist/`       | Ignored distributable output                                    |
+| `dist/`       | Ignored SDK bundles, command modules, and standard schemas      |
 | `.cache/`     | Ignored project caches                                          |
 
 `mise run refs:sync` initializes only the top-level references at the commits
