@@ -4,7 +4,7 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("fixture");
 using Go = import "/go.capnp";
 $Go.package("types");
-$Go.import("capnp-wasm/fixture/types");
+$Go.import("capnpc-wasm/fixture/types");
 
 enum Status {
   pending @0;

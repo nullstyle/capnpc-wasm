@@ -268,7 +268,7 @@ const server = Deno.serve(
     const path = new URL(request.url).pathname;
     if (path === "/") {
       return new Response(
-        "<!doctype html><title>capnp-wasm browser tests</title>",
+        "<!doctype html><title>capnpc-wasm browser tests</title>",
         {
           headers: { "Content-Type": "text/html" },
         },

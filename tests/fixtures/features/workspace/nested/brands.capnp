@@ -4,7 +4,7 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("feature_brands");
 using Go = import "/go.capnp";
 $Go.package("nested");
-$Go.import("capnp-wasm/features/nested");
+$Go.import("capnpc-wasm/features/nested");
 using Shared = import "../shared/common.capnp";
 
 struct Box(T) {

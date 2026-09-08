@@ -1,4 +1,4 @@
-# Working in capnp-wasm
+# Working in capnpc-wasm
 
 This repository ports the reference Cap'n Proto tools and language generators to
 Wasm commands for browsers, Deno, and wazero. The compiler and C++, Rust, Go,

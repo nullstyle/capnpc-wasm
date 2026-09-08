@@ -396,7 +396,7 @@ for (const host of hosts) {
                 ],
                 undefined,
                 root,
-                { CAPNP_WASM_GENERATED_DIR: output },
+                { CAPNPC_WASM_GENERATED_DIR: output },
               ),
               "generated Rust roundtrip",
             );

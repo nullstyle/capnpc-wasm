@@ -4,7 +4,7 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("feature_test");
 using Go = import "/go.capnp";
 $Go.package("shared");
-$Go.import("capnp-wasm/features/shared");
+$Go.import("capnpc-wasm/features/shared");
 
 annotation note(file, struct, field, const) :Text;
 $note("shared declarations reached through relative imports");

@@ -1,13 +1,13 @@
 # Go host SDK
 
-`capnpwasm` compiles schema workspaces and runs C++, Rust, Go, and Zig
+`capnpcwasm` compiles schema workspaces and runs C++, Rust, Go, and Zig
 generators in wazero. The API accepts module bytes and schema bytes and returns
 the standard unpacked `CodeGeneratorRequest`, generated file bytes, and stderr
 diagnostics. Execution needs no native compiler, network access, or host
 filesystem access.
 
 ```go
-compiler, err := capnpwasm.New(ctx, capnpwasm.Modules{
+compiler, err := capnpcwasm.New(ctx, capnpcwasm.Modules{
 	Compiler: compilerWasm,
 	Generators: map[string][]byte{
 		"cpp": cppGeneratorWasm,
@@ -21,7 +21,7 @@ if err != nil {
 }
 defer compiler.Close(context.Background())
 
-result, err := compiler.Compile(ctx, capnpwasm.Request{
+result, err := compiler.Compile(ctx, capnpcwasm.Request{
 	Files: map[string][]byte{"person.capnp": schemaBytes},
 	IncludeFiles: map[string][]byte{
 		"capnp/c++.capnp": cppAnnotationBytes,
@@ -36,8 +36,8 @@ if err != nil {
 // result.Outputs["rust"]["person_capnp.rs"] contains generated source.
 ```
 
-Import `capnp-wasm/sdk/go` as `capnpwasm` from this checkout. This first SDK is
-source intended for workspace use; publication and release packaging remain
+Import `capnpc-wasm/sdk/go` as `capnpcwasm` from this checkout. This first SDK
+is source intended for workspace use; publication and release packaging remain
 pending. Its `go.mod` replacement selects `ref/wazero`, whose gitlink pins the
 experimental standardized Wasm exception support required by the C++ tools.
 Applications using a local module replacement must also replace
@@ -60,7 +60,7 @@ Keep that request to generate additional languages without compiling the
 workspace again:
 
 ```go
-compiled, err := compiler.Compile(ctx, capnpwasm.Request{
+compiled, err := compiler.Compile(ctx, capnpcwasm.Request{
 	Files: schemaFiles,
 	IncludeFiles: standardSchemas,
 	Entrypoints: []string{"person.capnp"},
@@ -68,7 +68,7 @@ compiled, err := compiler.Compile(ctx, capnpwasm.Request{
 if err != nil {
 	return err
 }
-generated, err := compiler.Generate(ctx, capnpwasm.GenerationRequest{
+generated, err := compiler.Generate(ctx, capnpcwasm.GenerationRequest{
 	Request: compiled.Request,
 	Generators: []string{"rust", "go"},
 })
@@ -111,7 +111,7 @@ Do not mutate request maps, generator lists, or byte slices while `Compile` or
 `Generate` runs. `Generate` takes a private copy of the supplied request.
 Returned maps and bytes belong to the caller and do not alias inputs or later
 jobs. The SDK returns a zero result on every error, including a later generator
-failure after earlier generators succeeded. Inspect `*capnpwasm.Error` for the
+failure after earlier generators succeeded. Inspect `*capnpcwasm.Error` for the
 failing stage, generator language, raw stderr, and wrapped error. Successful
 stderr is retained in `Result.Diagnostics` without parsing upstream diagnostic
 syntax.

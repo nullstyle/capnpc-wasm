@@ -1,13 +1,13 @@
 pub mod common_capnp {
     include!(concat!(
-        env!("CAPNP_WASM_GENERATED_DIR"),
+        env!("CAPNPC_WASM_GENERATED_DIR"),
         "/types/common_capnp.rs"
     ));
 }
 
 pub mod person_capnp {
     include!(concat!(
-        env!("CAPNP_WASM_GENERATED_DIR"),
+        env!("CAPNPC_WASM_GENERATED_DIR"),
         "/person_capnp.rs"
     ));
 }

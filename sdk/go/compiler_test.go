@@ -1,4 +1,4 @@
-package capnpwasm_test
+package capnpcwasm_test
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	capnpwasm "capnp-wasm/sdk/go"
+	capnpcwasm "capnpc-wasm/sdk/go"
 )
 
 func root(t *testing.T) string {
@@ -35,9 +35,9 @@ func read(t *testing.T, path string) []byte {
 	return data
 }
 
-func fixture(t *testing.T) capnpwasm.Request {
+func fixture(t *testing.T) capnpcwasm.Request {
 	r := root(t)
-	return capnpwasm.Request{
+	return capnpcwasm.Request{
 		Files: map[string][]byte{
 			"person.capnp":       read(t, r+"/tests/fixtures/schemas/person.capnp"),
 			"types/common.capnp": read(t, r+"/tests/fixtures/schemas/types/common.capnp"),
@@ -51,10 +51,10 @@ func fixture(t *testing.T) capnpwasm.Request {
 	}
 }
 
-func loadModules(t *testing.T) capnpwasm.Modules {
+func loadModules(t *testing.T) capnpcwasm.Modules {
 	t.Helper()
 	dir := root(t) + "/build/wasm/bin/"
-	return capnpwasm.Modules{
+	return capnpcwasm.Modules{
 		Compiler: read(t, dir+"capnp.wasm"),
 		Generators: map[string][]byte{
 			"cpp":  read(t, dir+"capnpc-c++.wasm"),
@@ -102,7 +102,7 @@ func outputFiles(t *testing.T, dir string) map[string][]byte {
 
 func TestCompiler(t *testing.T) {
 	r := root(t)
-	c, err := capnpwasm.New(t.Context(), loadModules(t))
+	c, err := capnpcwasm.New(t.Context(), loadModules(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,11 +200,11 @@ func TestCompiler(t *testing.T) {
 		req := fixture(t)
 		req.Files["person.capnp"] = []byte("invalid schema")
 		got, err := c.Compile(t.Context(), req)
-		var failure *capnpwasm.Error
+		var failure *capnpcwasm.Error
 		if !errors.As(err, &failure) || failure.Stage != "compile" || failure.Stderr == "" {
 			t.Fatalf("missing diagnostic: %v", err)
 		}
-		if !reflect.DeepEqual(got, capnpwasm.Result{}) {
+		if !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 			t.Fatal("partial result on error")
 		}
 	})
@@ -214,11 +214,11 @@ func TestCompiler(t *testing.T) {
 		req.Generators = []string{"cpp", "rust", "zig", "go"}
 		req.Files["person.capnp"] = bytes.Replace(req.Files["person.capnp"], []byte(`$Go.package("fixture");`), nil, 1)
 		got, err := c.Compile(t.Context(), req)
-		var failure *capnpwasm.Error
+		var failure *capnpcwasm.Error
 		if !errors.As(err, &failure) || failure.Stage != "generate" || failure.Language != "go" || failure.Stderr == "" {
 			t.Fatalf("missing generator diagnostic: %v", err)
 		}
-		if !reflect.DeepEqual(got, capnpwasm.Result{}) {
+		if !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 			t.Fatal("earlier generator output escaped on failure")
 		}
 	})
@@ -234,13 +234,13 @@ func TestCompiler(t *testing.T) {
 				assertValidation(t, c, req)
 			})
 		}
-		for _, modify := range []func(*capnpwasm.Request){
-			func(r *capnpwasm.Request) { r.Entrypoints = nil },
-			func(r *capnpwasm.Request) { r.Entrypoints = []string{"missing.capnp"} },
-			func(r *capnpwasm.Request) { r.Entrypoints = []string{"person.capnp", "person.capnp"} },
-			func(r *capnpwasm.Request) { r.Generators = []string{"python"} },
-			func(r *capnpwasm.Request) { r.Generators = []string{"go", "go"} },
-			func(r *capnpwasm.Request) { r.Files["types"] = []byte{} },
+		for _, modify := range []func(*capnpcwasm.Request){
+			func(r *capnpcwasm.Request) { r.Entrypoints = nil },
+			func(r *capnpcwasm.Request) { r.Entrypoints = []string{"missing.capnp"} },
+			func(r *capnpcwasm.Request) { r.Entrypoints = []string{"person.capnp", "person.capnp"} },
+			func(r *capnpcwasm.Request) { r.Generators = []string{"python"} },
+			func(r *capnpcwasm.Request) { r.Generators = []string{"go", "go"} },
+			func(r *capnpcwasm.Request) { r.Files["types"] = []byte{} },
 		} {
 			req := fixture(t)
 			modify(&req)
@@ -252,7 +252,7 @@ func TestCompiler(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		got, err := c.Compile(ctx, request)
-		if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(got, capnpwasm.Result{}) {
+		if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 			t.Fatalf("cancellation: %+v, %v", got, err)
 		}
 	})
@@ -262,14 +262,14 @@ func TestCompiler(t *testing.T) {
 	assertValidation(t, c, request)
 }
 
-func assertValidation(t *testing.T, c *capnpwasm.Compiler, request capnpwasm.Request) {
+func assertValidation(t *testing.T, c *capnpcwasm.Compiler, request capnpcwasm.Request) {
 	t.Helper()
 	got, err := c.Compile(t.Context(), request)
-	var failure *capnpwasm.Error
+	var failure *capnpcwasm.Error
 	if !errors.As(err, &failure) || failure.Stage != "validate" {
 		t.Fatalf("expected validation error, got %v", err)
 	}
-	if !reflect.DeepEqual(got, capnpwasm.Result{}) {
+	if !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 		t.Fatal("partial validation result")
 	}
 }
@@ -277,15 +277,15 @@ func assertValidation(t *testing.T, c *capnpwasm.Compiler, request capnpwasm.Req
 func TestCancellationDuringGuestExecution(t *testing.T) {
 	// (module (memory (export "memory") 1) (func (export "_start") (loop br 0)))
 	loop := wasmBytes(t, "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a0901070003400c000b0b")
-	c, err := capnpwasm.New(t.Context(), capnpwasm.Modules{Compiler: loop})
+	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: loop})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close(context.Background())
 	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
 	defer cancel()
-	got, err := c.Compile(ctx, capnpwasm.Request{Files: map[string][]byte{"test.capnp": {}}, Entrypoints: []string{"test.capnp"}})
-	if !errors.Is(err, context.DeadlineExceeded) || !reflect.DeepEqual(got, capnpwasm.Result{}) {
+	got, err := c.Compile(ctx, capnpcwasm.Request{Files: map[string][]byte{"test.capnp": {}}, Entrypoints: []string{"test.capnp"}})
+	if !errors.Is(err, context.DeadlineExceeded) || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 		t.Fatalf("cancellation: %+v, %v", got, err)
 	}
 }
@@ -311,15 +311,15 @@ func TestCommandContractValidation(t *testing.T) {
 	} {
 		t.Run(guest.name, func(t *testing.T) {
 			for _, language := range []string{"", "rust"} {
-				modules := capnpwasm.Modules{Compiler: wasmBytes(t, guest.encoded)}
+				modules := capnpcwasm.Modules{Compiler: wasmBytes(t, guest.encoded)}
 				if language != "" {
-					modules = capnpwasm.Modules{Compiler: wasmBytes(t, noopCommand), Generators: map[string][]byte{language: wasmBytes(t, guest.encoded)}}
+					modules = capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand), Generators: map[string][]byte{language: wasmBytes(t, guest.encoded)}}
 				}
-				c, err := capnpwasm.New(t.Context(), modules)
+				c, err := capnpcwasm.New(t.Context(), modules)
 				if c != nil {
 					_ = c.Close(context.Background())
 				}
-				var failure *capnpwasm.Error
+				var failure *capnpcwasm.Error
 				if c != nil || !errors.As(err, &failure) || failure.Stage != "modules" || failure.Language != language {
 					t.Fatalf("invalid %q command accepted: %v, %v", language, c, err)
 				}
@@ -329,27 +329,27 @@ func TestCommandContractValidation(t *testing.T) {
 }
 
 func TestEmptyCompilerOutputFails(t *testing.T) {
-	c, err := capnpwasm.New(t.Context(), capnpwasm.Modules{Compiler: wasmBytes(t, noopCommand)})
+	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close(context.Background())
-	got, err := c.Compile(t.Context(), capnpwasm.Request{Files: map[string][]byte{"test.capnp": {}}, Entrypoints: []string{"test.capnp"}})
-	var failure *capnpwasm.Error
-	if !errors.As(err, &failure) || failure.Stage != "compile" || !reflect.DeepEqual(got, capnpwasm.Result{}) {
+	got, err := c.Compile(t.Context(), capnpcwasm.Request{Files: map[string][]byte{"test.capnp": {}}, Entrypoints: []string{"test.capnp"}})
+	var failure *capnpcwasm.Error
+	if !errors.As(err, &failure) || failure.Stage != "compile" || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 		t.Fatalf("empty compiler output accepted: %+v, %v", got, err)
 	}
 }
 
 func TestModuleValidation(t *testing.T) {
-	for _, modules := range []capnpwasm.Modules{
+	for _, modules := range []capnpcwasm.Modules{
 		{},
 		{Compiler: []byte("not wasm")},
 		{Compiler: []byte("not wasm"), Generators: map[string][]byte{"python": {1}}},
 		{Compiler: []byte("not wasm"), Generators: map[string][]byte{"rust": nil}},
 	} {
-		c, err := capnpwasm.New(t.Context(), modules)
-		var failure *capnpwasm.Error
+		c, err := capnpcwasm.New(t.Context(), modules)
+		var failure *capnpcwasm.Error
 		if c != nil || !errors.As(err, &failure) || failure.Stage != "modules" {
 			t.Fatalf("invalid modules accepted: %v, %v", c, err)
 		}

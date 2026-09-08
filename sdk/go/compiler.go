@@ -1,6 +1,6 @@
-// Package capnpwasm compiles schema workspaces and generates source entirely in
+// Package capnpcwasm compiles schema workspaces and generates source entirely in
 // memory using the project's WASI command modules and the wazero runtime.
-package capnpwasm
+package capnpcwasm
 
 import (
 	"bytes"
@@ -90,9 +90,9 @@ func (e *Error) Error() string {
 		stage += " (" + e.Language + ")"
 	}
 	if e.Stderr != "" {
-		return fmt.Sprintf("capnp-wasm %s: %v: %s", stage, e.Err, strings.TrimSpace(e.Stderr))
+		return fmt.Sprintf("capnpc-wasm %s: %v: %s", stage, e.Err, strings.TrimSpace(e.Stderr))
 	}
-	return fmt.Sprintf("capnp-wasm %s: %v", stage, e.Err)
+	return fmt.Sprintf("capnpc-wasm %s: %v", stage, e.Err)
 }
 
 func (e *Error) Unwrap() error { return e.Err }

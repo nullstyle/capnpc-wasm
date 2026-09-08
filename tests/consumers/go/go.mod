@@ -1,4 +1,4 @@
-module capnp-wasm/fixture
+module capnpc-wasm/fixture
 
 go 1.25.0
 

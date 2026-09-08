@@ -4,7 +4,7 @@ using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("feature_test");
 using Go = import "/go.capnp";
 $Go.package("features");
-$Go.import("capnp-wasm/features");
+$Go.import("capnpc-wasm/features");
 using Shared = import "shared/common.capnp";
 
 const rawBytes :Data = embed "assets/bytes.bin";

@@ -10,7 +10,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "capnp-wasm-generated-rust-test"
+name = "capnpc-wasm-generated-rust-test"
 version = "0.1.0"
 dependencies = [
  "capnp",

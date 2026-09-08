@@ -1,5 +1,5 @@
 [package]
-name = "capnp-wasm-rust-generator"
+name = "capnpc-wasm-rust-generator"
 version = "0.1.0"
 edition = "2021"
 publish = false

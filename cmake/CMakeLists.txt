@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(capnp_wasm_tools LANGUAGES C CXX)
+project(capnpc_wasm_tools LANGUAGES C CXX)
 
 if(NOT CMAKE_SYSTEM_NAME STREQUAL "WASI")
   message(FATAL_ERROR "Use WASI SDK's wasi-sdk-p1.cmake toolchain")

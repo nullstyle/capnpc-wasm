@@ -1,4 +1,4 @@
-module capnp-wasm/sdk/go
+module capnpc-wasm/sdk/go
 
 go 1.25.0
 

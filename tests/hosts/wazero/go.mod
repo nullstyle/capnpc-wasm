@@ -1,4 +1,4 @@
-module capnp-wasm/tests/hosts/wazero
+module capnpc-wasm/tests/hosts/wazero
 
 go 1.25.0
 

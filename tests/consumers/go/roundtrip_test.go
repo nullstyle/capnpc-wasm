@@ -3,7 +3,7 @@ package fixture
 import (
 	"testing"
 
-	"capnp-wasm/fixture/types"
+	"capnpc-wasm/fixture/types"
 	"capnproto.org/go/capnp/v3"
 )
 

@@ -1,17 +1,16 @@
-# capnp-wasm
+# capnpc-wasm
 
-Workspace for porting the reference Cap'n Proto tools and code generators to
-WebAssembly, for use in browsers, Deno, and wazero. The initial direction is
-WASI Preview 1 command modules with C++, Rust, Go, and Zig generation.
+Cap'n Proto compiler and code generators running in WebAssembly.
 
-The build produces `capnp.wasm`, `capnpc-c++.wasm`, `capnpc-capnp.wasm`,
-`capnpc-rust.wasm`, `capnpc-go.wasm`, and `capnpc-zig.wasm`. The same modules
-compile schemas and generate C++, Rust, Go, and Zig in Wasmtime, wazero
-(compiler and interpreter), and Deno, Chromium, Firefox, and WebKit using the
-pinned browser WASI shim. The TypeScript and Go SDKs accept in-memory workspaces
-and return generated files. Tests compare them with native upstream output and
-compile the generated source. Zig output targets the pinned `capnp-zig` library.
-Broader resource controls and published releases are still ahead.
+The build produces WASI Preview 1 commands: `capnp.wasm`, `capnpc-c++.wasm`,
+`capnpc-capnp.wasm`, `capnpc-rust.wasm`, `capnpc-go.wasm`, and
+`capnpc-zig.wasm`. The same modules compile schemas and generate C++, Rust, Go,
+and Zig in Wasmtime, wazero (compiler and interpreter), and Deno, Chromium,
+Firefox, and WebKit using the pinned browser WASI shim. The TypeScript and Go
+SDKs accept in-memory workspaces and return generated files. Tests compare them
+with native upstream output and compile the generated source. Zig output targets
+the pinned `capnp-zig` library. Broader resource controls and published releases
+are still ahead.
 
 ## Bootstrap
 

@@ -1,4 +1,4 @@
-module capnp-wasm/generators/go
+module capnpc-wasm/generators/go
 
 go 1.25.0
 

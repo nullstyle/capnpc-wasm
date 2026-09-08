@@ -1,4 +1,4 @@
-package capnpwasm_test
+package capnpcwasm_test
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"reflect"
 	"testing"
 
-	capnpwasm "capnp-wasm/sdk/go"
+	capnpcwasm "capnpc-wasm/sdk/go"
 )
 
 func TestSchemaFeatures(t *testing.T) {
@@ -26,7 +26,7 @@ func TestSchemaFeatures(t *testing.T) {
 	if err := json.Unmarshal(read(t, fixtures+"/manifest.json"), &manifest); err != nil {
 		t.Fatal(err)
 	}
-	compiler, err := capnpwasm.New(t.Context(), loadModules(t))
+	compiler, err := capnpcwasm.New(t.Context(), loadModules(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestSchemaFeatures(t *testing.T) {
 	})
 	for _, scenario := range manifest.Scenarios {
 		t.Run(scenario.Name, func(t *testing.T) {
-			request := capnpwasm.Request{
+			request := capnpcwasm.Request{
 				Files: map[string][]byte{},
 				IncludeFiles: map[string][]byte{
 					"capnp/c++.capnp": read(t, r+"/ref/capnproto/c++/src/capnp/c++.capnp"),

@@ -18,7 +18,7 @@ fn run() -> Result<(), String> {
             println!("{HELP}");
             return Ok(());
         } else if arg == "--version" {
-            println!("capnpc-rust (capnp-wasm {})", env!("CARGO_PKG_VERSION"));
+            println!("capnpc-rust (capnpc-wasm {})", env!("CARGO_PKG_VERSION"));
             return Ok(());
         } else if arg == "--output-directory" {
             output_directory = args
