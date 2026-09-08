@@ -84,7 +84,7 @@ run = [
   "cargo fmt --manifest-path generators/rust/Cargo.toml -- --check",
   "cargo fmt --manifest-path tests/consumers/rust/Cargo.toml -- --check",
   "cargo clippy --locked --manifest-path generators/rust/Cargo.toml --all-targets -- -D warnings",
-  "zig fmt --check generators/zig tests/consumers/zig",
+  "zig fmt --check generators/zig tests/consumers/zig tests/wire",
   { task = "doctor" },
   { task = "test" },
 ]
@@ -123,6 +123,7 @@ depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig", 
 run = [
   "zig test build/src/capnp-zig/src/main.zig --cache-dir build/zig/cache --test-filter 'main tests' --test-filter Generator.importPath",
   "deno test --allow-read --allow-write=build --allow-run tests/toolchain_test.ts",
+  "deno test --allow-read --allow-write=build --allow-run tests/wire_conformance_test.ts",
   "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts",
   "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read --allow-write=build --allow-run tests/schema_features_test.ts",
   # Generated Wasm and shared fixtures live outside the Go module's cache inputs.

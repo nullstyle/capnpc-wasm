@@ -29,6 +29,63 @@ function equalBytes(actual: Uint8Array, expected: Uint8Array, name: string) {
   assert(offset === -1, `${name}: bytes differ at offset ${offset}`);
 }
 
+// Only the documented 0003 substitutions are allowed for this fixture. Keep
+// occurrence counts exact so unrelated output changes cannot pass as fixes.
+function helperNameQualifications(upstream: Uint8Array): Uint8Array {
+  let source = decoder.decode(upstream);
+  const changes = [
+    [
+      "const schema = capnpc.schema;\n",
+      "const schema = capnpc.schema;\nconst _capnp_file = @This();\n",
+      1,
+    ],
+    [
+      "error{InvalidEnumValue}!WhichTag {",
+      "error{InvalidEnumValue}!_capnp_file.WhichTag.WhichTag {",
+      1,
+    ],
+    [
+      "std.enums.fromInt(WhichTag,",
+      "std.enums.fromInt(_capnp_file.WhichTag.WhichTag,",
+      1,
+    ],
+    ["EnumOrdinals.State", "_capnp_file.EnumOrdinals.State", 3],
+    [
+      "fn enumOrdinals(self: @This()) EnumOrdinals {",
+      "fn enumOrdinals(self: @This()) @This().EnumOrdinals {",
+      4,
+    ],
+    [
+      "fn getEnumOrdinals(self: Reader) EnumOrdinals.Reader {",
+      "fn getEnumOrdinals(self: Reader) GroupViews.EnumOrdinals.Reader {",
+      1,
+    ],
+    [
+      "fn getEnumOrdinals(self: *Builder) EnumOrdinals.Builder {",
+      "fn getEnumOrdinals(self: *Builder) GroupViews.EnumOrdinals.Builder {",
+      1,
+    ],
+    [
+      "fn nestedLists(self: @This()) NestedLists {",
+      "fn nestedLists(self: @This()) @This().NestedLists {",
+      2,
+    ],
+    [
+      "fn pointerKinds(self: @This()) PointerKinds {",
+      "fn pointerKinds(self: @This()) @This().PointerKinds {",
+      2,
+    ],
+  ] as const;
+  for (const [before, after, count] of changes) {
+    assert(
+      source.split(before).length - 1 === count,
+      `unexpected upstream helper-names template: ${before}`,
+    );
+    source = source.replaceAll(before, after);
+  }
+  return new TextEncoder().encode(source);
+}
+
 async function command(
   args: string[],
   cwd: string,
@@ -164,7 +221,10 @@ for (const scenario of manifest.scenarios) {
         );
         assert(stdout.length === 0, `${language}: unexpected native stdout`);
         const expected = await outputFiles(nativeOutput);
-        if (language === "zig" && scenario.name === "values") {
+        if (
+          language === "zig" &&
+          (scenario.name === "values" || scenario.name === "helper-names")
+        ) {
           const upstream = `${work}/upstream-zig`;
           await Deno.mkdir(upstream);
           await command(
@@ -179,7 +239,13 @@ for (const scenario of manifest.scenarios) {
             "Zig patch changed upstream output paths",
           );
           for (const [path, bytes] of Object.entries(unmodified)) {
-            equalBytes(expected[path], bytes, `unmodified Zig/${path}`);
+            equalBytes(
+              expected[path],
+              scenario.name === "helper-names"
+                ? helperNameQualifications(bytes)
+                : bytes,
+              `upstream Zig/${path}`,
+            );
           }
         }
         const actual = result.outputs[language]!;

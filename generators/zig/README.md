@@ -16,6 +16,13 @@ beneath the working directory. Generated modules import `capnpc-zig`; bind that
 module to the matching pinned runtime. Serialization-only consumers can use
 `ref/capnp-zig/src/lib_core.zig`.
 
+For the project's runtime corrections, including reference-compatible double-far
+struct-list writing, bind that module to `build/src/capnp-zig/src/lib_core.zig`
+after `mise run build:zig`. The build exports and patches this disposable copy
+alongside the generator; it does not modify the reference runtime. The
+[patch notes](../../patches/capnp-zig/README.md) describe the corrected paths
+and remaining runtime gaps.
+
 The upstream command options remain available, including `--verbose`,
 `--no-manifest`, `--api-profile=compact`, `--shape-sharing`, and the
 `max-codegen-*=N` budget tokens. Defaults emit the full API and schema manifest.
