@@ -81,13 +81,13 @@ publish the npm package.
 
 `test:package` verifies the archive and manifest, extracts into a fresh
 temporary workspace outside this checkout, runs an actual Deno consumer through
-the installed package's npm-style exports, and runs a separate Go module against
-the included SDK. Both compile a schema and generate C++, Rust, Go, and Zig from
-the packaged assets. The Go consumer resolves wazero from its checksum-pinned
-public module version, with no replacement for that dependency. Negative
-controls modify a manifest digest and add a stale file; verification must reject
-both. The test also prepares the same input twice and checks identical archive
-hashes.
+the installed package's npm-style exports with strict TypeScript checking, and
+runs a separate Go module against the included SDK. Both compile a schema and
+generate C++, Rust, Go, and Zig from the packaged assets. The Go consumer
+resolves wazero from its checksum-pinned public module version, with no
+replacement for that dependency. Negative controls modify a manifest digest and
+add a stale file; verification must reject both. The test also prepares the same
+input twice and checks identical archive hashes.
 
 Hosted browser/platform checks, nightly fuzz/soak evidence, and application
 validation remain release gates. Successful local packaging alone does not

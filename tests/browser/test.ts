@@ -705,7 +705,26 @@ try {
         await pending;
         return { name: "unexpected success", outputs: {} };
       } catch (error) {
-        const result = await worker.compile(input);
+        const expectedName = mode === "abort" ? "AbortError" : "TimeoutError";
+        if ((error as Error).name !== expectedName) {
+          throw new Error(
+            `${mode} expected ${expectedName}, received ${
+              (error as Error).name
+            }: ${(error as Error).message}`,
+            { cause: error },
+          );
+        }
+        let result: Result;
+        try {
+          result = await worker.compile(input);
+        } catch (cause) {
+          throw new Error(
+            `worker recovery after ${mode} failed: ${(cause as Error).name}: ${
+              (cause as Error).message
+            }`,
+            { cause },
+          );
+        }
         return {
           name: (error as Error).name,
           outputs: Object.fromEntries(

@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "nativeCommit": "bb15e6d3ed92e909b89a725faf11c4692e08027a",
-  "referenceCommit": "bb15e6d3ed92e909b89a725faf11c4692e08027a",
-  "sourceDigest": "b36e7e4f74d8e116848b72144558d8988777dcec458ce7c90322f3165228e79f",
+  "nativeCommit": "1578881be90ef8950f1cd66a6dabc177b74c56c3",
+  "referenceCommit": "1578881be90ef8950f1cd66a6dabc177b74c56c3",
+  "sourceDigest": "ad77738cdad59002b57657ec7ef0b9635f02c8f211dd1f2e3282e95c922db6f8",
   "sources": {
     "brand_fidelity_test.zig": "e4353d8f07c5690d1b9175df9d905a287235059c32f19c4f6f0a6d0dc169427a",
     "capnpc-zig/brand_fidelity.zig": "1b34fdfd34c86264d779a5515eae93c7f529fed5ce4c8869d903dd1ec1a916e0",
@@ -176,16 +176,16 @@
     "rpc/wire/protocol.zig": "4b1a8458fd47e7d9e1e3f4583d8140736cf1ae9e43c89f5a42ece07e60652a0d",
     "serialization/allocation_budget.zig": "ab91d4ea753661a4ce7aeb79a6a22e3b266f644666797c5ac909f65bd38eb0b1",
     "serialization/canonical.zig": "e78584931cd3cda4bceb6d7215013f8d70039b44256e02ad59f9f6577ad700f8",
-    "serialization/copy_budget.zig": "eca4661301866f3466922cbacb8ce8acde6dcee1c2eab359c27708484cbcd401",
+    "serialization/copy_budget.zig": "8b614c58b20602f517019826ee19529443294401854618bbc8cd6d72d63042fa",
     "serialization/generated_helpers.zig": "82b26c76fc459bc15515b7e5226c77c2bece7538d10b6ae6617d75b022570d90",
     "serialization/generic.zig": "650b44ad787e8742d82902b109a56a985063e6ee7ecf0301c9b3509aee16ecd3",
     "serialization/llms.txt": "3862a0e1ee95c3e9e1ddfc26fbb8e39a68ecfdd3910031861d2dd241ccca8964",
-    "serialization/message.zig": "b346146c6575c0496273e9eebe6d2912b71a6e9faa3a95c02073a71d017622b0",
+    "serialization/message.zig": "1933190e15eb6c70cb509b0350d1edf339dd448433837e8002ad0cab883994e8",
     "serialization/message/any_pointer_builder.zig": "d3bd64ce763461bb34c934bf328b407e857c46d485752f8723e932d4b373e937",
     "serialization/message/any_pointer_reader.zig": "bce1c5e817bb95dbcf6fd14f60baf774d2eab3e3957007fe1e11c9276787822d",
     "serialization/message/bounds.zig": "b4c2d3908fe95dbd525f366fda39db80a9968697e2ac8268dfae1e9bfd7228dd",
     "serialization/message/capability_remap.zig": "75098f7685e5aedc2ce3a1374686e301457288530fc80be64f7b773097420acb",
-    "serialization/message/clone_any_pointer.zig": "de3b118c069280b86ca67b4860f6c5ca3c34a74ec17e72f489f0e504486b500b",
+    "serialization/message/clone_any_pointer.zig": "b6b949b53aedddbcba149d8da19664cf323a5b4d59908b80796dd01e70611b22",
     "serialization/message/element_list.zig": "828ea6e2ba4b304134c30f513abaaf8f115f9b288e025867f7bf21a21e7dc905",
     "serialization/message/list_builders.zig": "b82c0aa71a94913ba33e6d64e729b3e7975eef0ce1d72d8d6582952d990db9bd",
     "serialization/message/list_readers.zig": "60d00a139274c225bbedde1484f7c95af50bc717dd1ded4342aebb9adadf0872",
@@ -258,12 +258,12 @@
     {
       "native": "tests/reflection/copy_limits_test.zig",
       "path": "tests/reflection/copy_limits_test.zig",
-      "sha256": "9b7db883538361d1786fb070a29725a81c192872dc87de7c8c5e5b77ec513da8"
+      "sha256": "30d1ac1b6da6cd731a91be73b60e5f1b0562cadb73f5e021df94192bd7982afe"
     },
     {
       "native": "tests/reflection/fuzz_test.zig",
       "path": "tests/reflection/fuzz_test.zig",
-      "sha256": "718007ca880198c1af05a7c620cd4525aa953557ec24527fc57d66c56fc39982"
+      "sha256": "00267819882a5f25bc9c04b4520b04eb3d7149f90523903957ac1bd4b650888f"
     },
     {
       "native": "tests/reflection/request.bin",
@@ -374,6 +374,11 @@
       "native": "tests/serialization/support/generic_collections_consumer.zig",
       "path": "tests/generator_api/consumers/generic_collections_consumer.zig",
       "sha256": "91953de419f977bf2ade5740146c3d66d928ebd183e0d0ebc5556dd5ee9e068c"
+    },
+    {
+      "native": "tests/reflection/double_far_fixture.zig",
+      "path": "tests/reflection/double_far_fixture.zig",
+      "sha256": "d9807f820ae89e5f2135cc36fda90b28a27bb9636b0b82f2985a137b6f43f5c1"
     }
   ]
 }

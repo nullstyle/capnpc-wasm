@@ -90,7 +90,8 @@ catching quota bypasses when the shim grows a resizable ArrayBuffer in place.
 Hosted CI runs `mise run check` from clean Linux and macOS checkouts. A separate
 Linux job installs the browser system libraries with the pinned Playwright CLI
 and executes this complete three-engine suite. Build trees are not restored from
-caches, and failed test fixtures are retained as workflow artifacts.
+caches, and failed test fixtures plus the exact tested Wasm modules and SDK
+bundles are retained as workflow artifacts.
 
 Published package installation and application-specific Content Security
 Policies are outside this suite's current coverage. Browser versions follow the

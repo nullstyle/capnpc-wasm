@@ -1,5 +1,10 @@
 # Zig parity sprint implementation
 
+This is the historical receipt for native revision `86106c2` and its original
+downstream synchronization manifest. Later fixes, reference updates, hosted CI,
+and package work are tracked in [release readiness](release-readiness.md).
+References to the final candidate below mean the end of that earlier sprint.
+
 This sprint implements the approved RPC typing and release-candidate hardening
 plan in `capnp-zig` and mirrors the matching runtime/generator into
 `capnpc-wasm`. Local acceptance is recorded below. Hosted platform CI and seven
@@ -72,14 +77,13 @@ bounded preflight. Earlier avoidable copy allocations and read overhead were
 removed. The remaining preflight is retained to enforce limits before mutation;
 this is a documented cost of the new bounded operation.
 
-The implementation is committed in native
-`86106c226f197d26f280442598155898e7fb1fb1`. The
-[sync manifest](../generators/zig/sync.json) verifies 194 sources and 35
-mirrored fixtures against committed Git objects, with source digest
-`d7338312877832c5f3610a618fe9671588eeb512ada870881ad041b13f6dc514`. Every Zig
-build enforces this check; `mise run check:zig-sync` also verifies an existing
-prepared tree without the native checkout. References and gitlinks remain
-unchanged.
+The implementation was committed in native
+`86106c226f197d26f280442598155898e7fb1fb1`. That sprint's sync manifest verified
+194 sources and 35 mirrored fixtures against committed Git objects, with source
+digest `d7338312877832c5f3610a618fe9671588eeb512ada870881ad041b13f6dc514`. Every
+Zig build enforces this check; `mise run check:zig-sync` also verifies an
+existing prepared tree without the native checkout. References and gitlinks
+remain unchanged.
 
 The final fuzz campaign on clean native revision `86106c2` passed all 16 targets
 with at least 10,000 measured new executions each, using seed `0x6ca9b3d1`.

@@ -108,6 +108,7 @@ try {
   await command([
     "deno",
     "run",
+    "--check",
     "--cached-only",
     "--no-prompt",
     `--allow-read=${consumer}`,
@@ -169,6 +170,7 @@ try {
           "stale staging cleanup",
           "tampered manifest rejection",
           "unexpected file rejection",
+          "external npm-layout TypeScript declarations",
           "external npm-layout Deno direct/replay/worker",
           "external Go compile/replay",
           "public pinned wazero without replacement",

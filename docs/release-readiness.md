@@ -7,7 +7,7 @@ Project licensing is still awaiting the owner's choice; candidate metadata uses
 The Zig generator and runtime now come directly from the pristine pinned
 capnp-zig commit. Eight local patches and three copied reflection files have
 been removed. The synchronization gate checks all 194 current source files and
-35 mirrored conformance fixtures. The old audit source is independently pinned,
+36 mirrored conformance fixtures. The old audit source is independently pinned,
 exported, and verified so its failing writer and traversal controls remain
 available after a live reference update. Injected historical-source drift was
 rejected by the gate.
@@ -32,14 +32,25 @@ Hosted CI starts from clean Linux and macOS checkouts and runs `mise run check`
 and `mise run test:package`. A separate Linux job installs the pinned browser
 engines and their system libraries, then requires all three engines to pass.
 
+The first hosted run,
+[34306671510](https://github.com/nullstyle/capnpc-wasm/actions/runs/34306671510),
+passed the clean Linux and macOS checks and external package consumers on
+`ac9b91e`. Chromium and Firefox passed. WebKit trapped while compiling after a
+worker timeout; the exact trap has not reproduced locally, including a complete
+Linux browser run. This remains an unresolved browser acceptance failure.
+Subsequent failing jobs retain their exact Wasm modules and SDK bundles
+alongside fixtures so the hosted failure can be investigated with identical
+assets.
+
 The package gate checks reproducible archive bytes, SHA-256 inventory integrity,
 stale staging cleanup, and tamper rejection. External Deno consumers exercise
-the npm-layout package's direct, replay, and worker APIs; an external Go module
-uses the exact public wazero dependency without a local runtime replacement.
-Both SDKs generate identical C++, Rust, Go, and Zig bytes. The final receipt is
-written to `build/test/package-receipt.json` and identifies the source commit,
-dirty state, source digest, and archive digest. Rebuild after committing to tie
-the candidate to a clean source revision.
+the npm-layout package's strict TypeScript declarations and direct, replay, and
+worker APIs; an external Go module uses the exact public wazero dependency
+without a local runtime replacement. Both SDKs generate identical C++, Rust, Go,
+and Zig bytes. The final receipt is written to `build/test/package-receipt.json`
+and identifies the source commit, dirty state, source digest, and archive
+digest. Rebuild after committing to tie the candidate to a clean source
+revision.
 
 Seven consecutive successful scheduled native Nightly runs remain an elapsed
 time gate. Local tests and manual Nightly runs do not count as daily cycles. The
