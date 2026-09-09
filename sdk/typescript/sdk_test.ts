@@ -158,13 +158,7 @@ function simpleRequest(name = "Person"): CompileRequest {
 
 Deno.test("SDK generates all languages from one workspace", async () => {
   const { modules, request } = await fixture();
-  // Accept both compiled modules and bytes in the same module set.
-  const compiler = await createCompiler({
-    ...modules,
-    compiler: await WebAssembly.compile(
-      new Uint8Array(modules.compiler as Uint8Array),
-    ),
-  });
+  const compiler = await createCompiler(modules);
   const result = await compiler.compile(request);
   assert(result.request.length > 0, "missing binary request");
   assert(result.diagnostics.length === 0, "unexpected diagnostics");
@@ -706,4 +700,641 @@ Deno.test("SDK worker kills running Wasm on timeout or abort and can restart", a
   } finally {
     worker.dispose();
   }
+});
+
+Deno.test("SDK bounds aggregate workspace bytes and entries before executing", async () => {
+  const compiler = await createCompiler({
+    compiler: malformedRequestGuest,
+    generators: {},
+  }, {
+    limits: { workspaceBytes: 5, workspaceEntries: 3, pathBytes: 8 },
+  });
+  for (const bytes of [4, 5]) {
+    const result = await compiler.compile({
+      files: { "a/b": "é" },
+      includeFiles: { c: new Uint8Array(bytes - 2) },
+      entrypoints: ["a/b"],
+      generators: [],
+    });
+    equalBytes(result.request, encoder.encode("x"), "bounded request");
+  }
+  await rejects(
+    () =>
+      compiler.compile({
+        files: { "a/b": "é" },
+        includeFiles: { c: new Uint8Array(4) },
+        entrypoints: ["a/b"],
+        generators: [],
+      }),
+    "TypeError",
+    "workspaceBytes",
+  );
+  await rejects(
+    () =>
+      compiler.compile({
+        files: { "a/b": "" },
+        includeFiles: { "c/d": "" },
+        entrypoints: ["a/b"],
+        generators: [],
+      }),
+    "TypeError",
+    "workspaceEntries",
+  );
+  await rejects(
+    () =>
+      compiler.compile({
+        files: { "ééééx": "" },
+        entrypoints: ["ééééx"],
+        generators: [],
+      }),
+    "TypeError",
+    "pathBytes",
+  );
+});
+
+function leb(value: number): number[] {
+  const bytes: number[] = [];
+  do {
+    const part = value & 127;
+    value = Math.floor(value / 128);
+    bytes.push(part | (value ? 128 : 0));
+  } while (value);
+  return bytes;
+}
+function section(id: number, bytes: number[]): number[] {
+  return [id, ...leb(bytes.length), ...bytes];
+}
+function name(value: string): number[] {
+  const bytes = [...encoder.encode(value)];
+  return [...leb(bytes.length), ...bytes];
+}
+function commandGuest(
+  code: number[],
+  data: number[] = [8, 0, 0, 0, 1, 0, 0, 0, 120],
+  memory = [0, 1],
+): Uint8Array {
+  const body = [0, ...code, 0x0b];
+  return new Uint8Array([
+    0,
+    97,
+    115,
+    109,
+    1,
+    0,
+    0,
+    0,
+    ...section(1, [2, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f, 0x60, 0, 0]),
+    ...section(2, [
+      1,
+      ...name("wasi_snapshot_preview1"),
+      ...name("fd_write"),
+      0,
+      0,
+    ]),
+    ...section(3, [1, 1]),
+    ...section(5, [1, ...memory]),
+    ...section(7, [2, ...name("memory"), 2, 0, ...name("_start"), 0, 1]),
+    ...section(10, [1, ...leb(body.length), ...body]),
+    ...section(11, [1, 0, 0x41, 0, 0x0b, ...leb(data.length), ...data]),
+  ]);
+}
+const writeX = [0x41, 1, 0x41, 0, 0x41, 1, 0x41, 12, 0x10, 0, 0x1a];
+
+Deno.test("SDK caps unbounded and larger guest memories before execution", async () => {
+  // Grow twice from one page, then emit memory.size as a byte. Two-page ceiling
+  // makes the second growth fail inside Wasm without allocating a third page.
+  const code = [
+    0x41,
+    1,
+    0x40,
+    0,
+    0x1a,
+    0x41,
+    1,
+    0x40,
+    0,
+    0x1a,
+    0x41,
+    8,
+    0x3f,
+    0,
+    0x3a,
+    0,
+    0,
+    ...writeX,
+  ];
+  for (const memory of [[0, 1], [1, 1, 3], [1, 1, 1]]) {
+    const compiler = await createCompiler({
+      compiler: commandGuest(code, undefined, memory),
+      generators: {},
+    }, { limits: { memoryPages: 2 } });
+    const result = await compiler.compile({
+      files: { a: "" },
+      entrypoints: ["a"],
+      generators: [],
+    });
+    equalBytes(
+      result.request,
+      new Uint8Array([memory[2] === 1 ? 1 : 2]),
+      "memory ceiling",
+    );
+  }
+  await rejects(
+    () =>
+      createCompiler({
+        compiler: commandGuest(writeX, undefined, [0, 3]),
+        generators: {},
+      }, { limits: { memoryPages: 2 } }),
+    "TypeError",
+    "memoryPages",
+  );
+  await rejects(
+    () =>
+      createCompiler({
+        compiler: awaitCompiledGuest as unknown as Uint8Array,
+        generators: {},
+      }),
+    "TypeError",
+    "bytes",
+  );
+});
+const awaitCompiledGuest = await WebAssembly.compile(
+  new Uint8Array(malformedRequestGuest),
+);
+
+Deno.test("SDK bounds command stdout and stderr while preserving diagnostics", async () => {
+  for (const count of [1, 2, 3]) {
+    const guest = commandGuest(
+      Array.from({ length: count }, () => writeX).flat(),
+    );
+    const compiler = await createCompiler({ compiler: guest, generators: {} }, {
+      limits: { stdoutBytes: 2 },
+    });
+    const run = () =>
+      compiler.compile({
+        files: { a: "" },
+        entrypoints: ["a"],
+        generators: [],
+      });
+    if (count <= 2) {
+      equalBytes(
+        (await run()).request,
+        encoder.encode("x".repeat(count)),
+        "stdout boundary",
+      );
+    } else await rejects(run, "CompileError", "stdoutBytes");
+  }
+  const stderrWrite = [...writeX];
+  stderrWrite[1] = 2;
+  const noisy = await createCompiler({
+    compiler: commandGuest([...stderrWrite, ...stderrWrite]),
+    generators: {},
+  }, { limits: { stderrBytes: 1 } });
+  const failure = await rejects(
+    () =>
+      noisy.compile({ files: { a: "" }, entrypoints: ["a"], generators: [] }),
+    "CompileError",
+    "stderrBytes",
+  );
+  assert(
+    failure instanceof CompileError && failure.diagnostics[0]?.stderr === "x",
+    "stderr limit lost captured prefix",
+  );
+  assert(!("outputs" in failure), "resource failure published output");
+});
+
+Deno.test("SDK accounts resizable buffer growth for stdout and stderr", async () => {
+  // Seven single-byte writes exercise both replacement and in-place ArrayBuffer
+  // growth; checking only a two-byte ceiling never reaches an in-place resize.
+  for (const stream of ["stdoutBytes", "stderrBytes"] as const) {
+    for (const count of [5, 6, 7]) {
+      const write = [...writeX];
+      write[1] = stream === "stdoutBytes" ? 1 : 2;
+      const code = Array.from({ length: count }, () => write).flat();
+      if (stream === "stderrBytes") code.push(...writeX);
+      const compiler = await createCompiler({
+        compiler: commandGuest(code),
+        generators: {},
+      }, { limits: { [stream]: 6 } });
+      const run = () =>
+        compiler.compile({
+          files: { a: "" },
+          entrypoints: ["a"],
+          generators: [],
+        });
+      if (count <= 6) {
+        const result = await run();
+        equalBytes(
+          result.request,
+          encoder.encode("x".repeat(stream === "stdoutBytes" ? count : 1)),
+          `${stream} boundary`,
+        );
+        if (stream === "stderrBytes") {
+          assert(
+            result.diagnostics[0]?.stderr === "x".repeat(count),
+            "stderr prefix differs",
+          );
+        }
+      } else {
+        const failure = await rejects(run, "CompileError", stream);
+        assert(
+          !("outputs" in failure),
+          "stream quota failure published outputs",
+        );
+        if (stream === "stderrBytes") {
+          assert(
+            failure instanceof CompileError,
+            "stderr quota lost CompileError",
+          );
+          assert(
+            failure.diagnostics[0]?.stderr === "xxxxxx",
+            "stderr quota lost its bounded prefix",
+          );
+        }
+      }
+    }
+  }
+});
+
+Deno.test("SDK worker propagates limits through failures, cancellation, and restart", async () => {
+  const worker = await createWorkerCompiler(workerURL, {
+    compiler: commandGuest([...writeX, ...writeX]),
+    generators: {
+      cpp: loopGuest,
+      rust: commandGuest([]),
+      zig: commandGuest([...writeX, ...writeX, ...writeX]),
+    },
+  }, {
+    limits: {
+      workspaceBytes: 2,
+      requestBytes: 2,
+      stdoutBytes: 2,
+      memoryPages: 1,
+    },
+  });
+  const job = {
+    files: { a: "é" },
+    entrypoints: ["a"],
+    generators: [] as const,
+  };
+  try {
+    equalBytes(
+      (await worker.compile(job)).request,
+      encoder.encode("xx"),
+      "worker limits",
+    );
+    await rejects(
+      () => worker.compile({ ...job, files: { a: "éx" } }),
+      "TypeError",
+      "workspaceBytes",
+    );
+    await rejects(
+      () =>
+        worker.generate({ request: new Uint8Array(3), generators: ["rust"] }),
+      "TypeError",
+      "requestBytes",
+    );
+    await rejects(
+      () =>
+        worker.generate({ request: new Uint8Array(1), generators: ["cpp"] }, {
+          timeoutMs: 50,
+        }),
+      "TimeoutError",
+    );
+    const failure = await rejects(
+      () =>
+        worker.generate({
+          request: new Uint8Array(1),
+          generators: ["rust", "zig"],
+        }),
+      "CompileError",
+      "stdoutBytes",
+    );
+    assert(
+      failure instanceof CompileError && failure.stage === "zig" &&
+        !("outputs" in failure),
+      "worker published earlier output after failure",
+    );
+    equalBytes(
+      (await worker.compile(job)).request,
+      encoder.encode("xx"),
+      "restarted worker limits",
+    );
+  } finally {
+    worker.dispose();
+  }
+});
+
+Deno.test("SDK bounds aggregate generator files at exact byte and entry boundaries", async () => {
+  const { modules } = await fixture();
+  const baseline = await (await createCompiler(modules)).compile(
+    simpleRequest(),
+  );
+  const files = baseline.outputs.cpp!;
+  const bytes = Object.values(files).reduce(
+    (sum, data) => sum + data.length,
+    0,
+  );
+  const entries = Object.keys(files).length;
+  for (const extra of [0, 1]) {
+    const bounded = await createCompiler(modules, {
+      limits: { outputBytes: bytes + extra, outputEntries: entries + extra },
+    });
+    equalOutputs(
+      await bounded.generate({
+        request: baseline.request,
+        generators: ["cpp"],
+      }),
+      baseline,
+    );
+  }
+  for (
+    const limits of [{ outputBytes: bytes - 1 }, { outputEntries: entries - 1 }]
+  ) {
+    const bounded = await createCompiler(modules, { limits });
+    const failure = await rejects(
+      () =>
+        bounded.generate({ request: baseline.request, generators: ["cpp"] }),
+      "CompileError",
+      Object.keys(limits)[0],
+    );
+    assert(!("outputs" in failure), "filesystem failure published output");
+  }
+});
+
+function signedLeb(value: bigint): number[] {
+  const bytes: number[] = [];
+  for (;;) {
+    const part = Number(value & 127n);
+    value >>= 7n;
+    const done = value === 0n && (part & 64) === 0 ||
+      value === -1n && (part & 64) !== 0;
+    bytes.push(part | (done ? 0 : 128));
+    if (done) return bytes;
+  }
+}
+function filesystemGuest(
+  operation: "allocate" | "resize" | "pwrite" | "recreate" | "grow-truncate",
+  size: bigint,
+): Uint8Array {
+  const i32 = 0x7f, i64 = 0x7e;
+  const signatures = [
+    [i32, i32, i32, i32],
+    [i32, i32, i32, i32, i32, i64, i64, i32, i32],
+    [i32, i64, i64],
+    [i32, i64],
+    [i32, i32, i32, i64, i32],
+    [i32, i32],
+    [i32, i32, i32],
+  ];
+  const imports = [
+    "fd_write",
+    "path_open",
+    "fd_allocate",
+    "fd_filestat_set_size",
+    "fd_pwrite",
+    "fd_renumber",
+    "path_unlink_file",
+  ];
+  const open = [
+    0x41,
+    3,
+    0x41,
+    0,
+    0x41,
+    32,
+    0x41,
+    1,
+    0x41,
+    1,
+    0x42,
+    0,
+    0x42,
+    0,
+    0x41,
+    0,
+    0x41,
+    16,
+    0x10,
+    1,
+    0x1a,
+  ];
+  // Rename the returned fd so budgets must follow descriptors, not numeric slots.
+  const code = [...open, 0x41, 16, 0x28, 2, 0, 0x41, 1, 0x10, 5, 0x1a];
+  if (operation === "allocate") {
+    code.push(0x41, 1, 0x42, 0, 0x42, ...signedLeb(size), 0x10, 2, 0x1a);
+  }
+  if (operation === "resize") {
+    code.push(0x41, 1, 0x42, ...signedLeb(size), 0x10, 3, 0x1a);
+  }
+  if (operation === "pwrite") {
+    code.push(
+      0x41,
+      1,
+      0x41,
+      0,
+      0x41,
+      1,
+      0x42,
+      ...signedLeb(size - 1n),
+      0x41,
+      12,
+      0x10,
+      4,
+      0x1a,
+    );
+  }
+  if (operation === "recreate") {
+    code.push(0x41, 3, 0x41, 32, 0x41, 1, 0x10, 6, 0x1a, ...open);
+  }
+  if (operation === "grow-truncate") {
+    for (let i = 0n; i < size; i++) code.push(...writeX);
+    // A late collectFiles check cannot catch an overage erased before return.
+    code.push(0x41, 1, 0x42, 0, 0x10, 3, 0x1a);
+  }
+  const body = [0, ...code, 0x0b];
+  const data = Array<number>(33).fill(0);
+  data[0] = 8;
+  data[4] = 1;
+  data[8] = 120;
+  data[32] = 97;
+  return new Uint8Array([
+    0,
+    97,
+    115,
+    109,
+    1,
+    0,
+    0,
+    0,
+    ...section(1, [
+      8,
+      ...signatures.flatMap((
+        parameters,
+      ) => [0x60, parameters.length, ...parameters, 1, i32]),
+      0x60,
+      0,
+      0,
+    ]),
+    ...section(2, [
+      7,
+      ...imports.flatMap((
+        value,
+        index,
+      ) => [...name("wasi_snapshot_preview1"), ...name(value), 0, index]),
+    ]),
+    ...section(3, [1, 7]),
+    ...section(5, [1, 0, 1]),
+    ...section(7, [2, ...name("memory"), 2, 0, ...name("_start"), 0, 7]),
+    ...section(10, [1, ...leb(body.length), ...body]),
+    ...section(11, [1, 0, 0x41, 0, 0x0b, ...leb(data.length), ...data]),
+  ]);
+}
+
+Deno.test("SDK rejects oversized file allocation, truncate, sparse writes, and inode churn", async () => {
+  for (const operation of ["allocate", "resize", "pwrite"] as const) {
+    for (const size of [3n, 4n, 5n, 1n << 54n]) {
+      const compiler = await createCompiler({
+        compiler: malformedRequestGuest,
+        generators: { cpp: filesystemGuest(operation, size) },
+      }, { limits: { outputBytes: 4, outputEntries: 1 } });
+      const run = () =>
+        compiler.generate({ request: new Uint8Array(1), generators: ["cpp"] });
+      if (size <= 4n) {
+        assert(
+          (await run()).outputs.cpp.a.length === Number(size),
+          `${operation} exact boundary failed`,
+        );
+      } else await rejects(run, "CompileError", "outputBytes");
+    }
+  }
+  const compiler = await createCompiler({
+    compiler: malformedRequestGuest,
+    generators: { cpp: filesystemGuest("recreate", 0n) },
+  }, { limits: { outputEntries: 1 } });
+  await rejects(
+    () =>
+      compiler.generate({ request: new Uint8Array(1), generators: ["cpp"] }),
+    "CompileError",
+    "outputEntries",
+  );
+});
+
+Deno.test("SDK bounds resizable file growth before a later truncate", async () => {
+  for (const size of [5n, 6n, 7n]) {
+    const compiler = await createCompiler({
+      compiler: malformedRequestGuest,
+      generators: { cpp: filesystemGuest("grow-truncate", size) },
+    }, { limits: { outputBytes: 6, outputEntries: 1 } });
+    const run = () =>
+      compiler.generate({ request: new Uint8Array(1), generators: ["cpp"] });
+    if (size <= 6n) {
+      assert(
+        (await run()).outputs.cpp.a.length === 0,
+        "permitted growth did not truncate",
+      );
+    } else {
+      const failure = await rejects(run, "CompileError", "outputBytes");
+      assert(
+        !("outputs" in failure),
+        "truncation erased a peak-byte quota failure",
+      );
+    }
+  }
+});
+
+Deno.test("SDK rejects malformed, shared, memory64, duplicate, and imported memories", async () => {
+  for (
+    const memory of [[3, 1, 2], [4, 1], [1, 2, 1], [0, 128, 128, 128, 128, 16]]
+  ) {
+    await rejects(
+      () =>
+        createCompiler({
+          compiler: commandGuest([], undefined, memory),
+          generators: {},
+        }),
+      "TypeError",
+    );
+  }
+  const good = commandGuest([]);
+  for (
+    const bad of [
+      good.slice(0, -1),
+      new Uint8Array([...good, ...section(5, [1, 0, 1])]),
+      new Uint8Array([...good, 0, 255, 255, 255, 255, 16]),
+    ]
+  ) {
+    await rejects(
+      () => createCompiler({ compiler: bad, generators: {} }),
+      "TypeError",
+    );
+  }
+  const originalImport = section(2, [
+    1,
+    ...name("wasi_snapshot_preview1"),
+    ...name("fd_write"),
+    0,
+    0,
+  ]);
+  const extendedImport = section(2, [
+    2,
+    ...originalImport.slice(3),
+    ...name("env"),
+    ...name("memory"),
+    2,
+    0,
+    1,
+  ]);
+  const start = good.findIndex((_, index) =>
+    originalImport.every((value, part) => good[index + part] === value)
+  );
+  assert(start > 0, "test import fixture not found");
+  const imported = new Uint8Array([
+    ...good.slice(0, start),
+    ...extendedImport,
+    ...good.slice(start + originalImport.length),
+  ]);
+  await rejects(
+    () => createCompiler({ compiler: imported, generators: {} }),
+    "TypeError",
+    "imported",
+  );
+});
+
+Deno.test("SDK path limits count user paths separately from internal mount and root probes", async () => {
+  const { modules } = await fixture();
+  for (const path of ["a", "é", "a/b"]) {
+    const compiler = await createCompiler({
+      compiler: modules.compiler,
+      generators: {},
+    }, { limits: { pathBytes: encoder.encode(path).length } });
+    const input = {
+      files: { [path]: "@0xece4bf9c1f867623; struct Foo {}" },
+      entrypoints: [path],
+      generators: [] as const,
+    };
+    assert(
+      (await compiler.compile(input)).request.length > 0,
+      "valid short path was blocked by internal root lookup",
+    );
+    await rejects(
+      () =>
+        compiler.compile({
+          ...input,
+          files: { [path + "x"]: "" },
+          entrypoints: [path + "x"],
+        }),
+      "TypeError",
+      "pathBytes",
+    );
+  }
+  const writer = await createCompiler({
+    compiler: malformedRequestGuest,
+    generators: { cpp: filesystemGuest("allocate", 1n) },
+  }, { limits: { pathBytes: 0 } });
+  await rejects(
+    () => writer.generate({ request: new Uint8Array(1), generators: ["cpp"] }),
+    "CompileError",
+    "pathBytes",
+  );
 });

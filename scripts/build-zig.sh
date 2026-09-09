@@ -3,10 +3,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 source_dir=build/src/capnp-zig
-patch_files=(patches/capnp-zig/*.patch)
-runtime_files=(generators/zig/runtime/*.zig)
 revision="$(git -C ref/capnp-zig rev-parse HEAD)"
-source_key="$revision:$(git hash-object "${patch_files[@]}" "${runtime_files[@]}")"
+source_key="$revision:pristine-v1"
+historical_dir=build/src/capnp-zig-historical
+historical_revision="$(cat generators/zig/historical-reference)"
 
 mkdir -p build/src build/native/bin build/wasm/bin build/zig/cache build/zig/bin
 if [[ ! -f "$source_dir/.source-key" ]] ||
@@ -14,21 +14,26 @@ if [[ ! -f "$source_dir/.source-key" ]] ||
   rm -rf "$source_dir"
   mkdir -p "$source_dir"
   git -C ref/capnp-zig archive "$revision" src/ | tar -x -C "$source_dir"
-  for patch_file in "${patch_files[@]}"; do
-    git apply --check --directory="$source_dir" "$patch_file"
-    git apply --directory="$source_dir" "$patch_file"
-  done
-  mkdir -p "$source_dir/src/reflection"
-  cp "${runtime_files[@]}" "$source_dir/src/reflection/"
   printf '%s\n' "$source_key" > "$source_dir/.source-key"
+fi
+
+if [[ ! -f "$historical_dir/.source-key" ]] ||
+   [[ "$(cat "$historical_dir/.source-key")" != "$historical_revision" ]]; then
+  git -C ref/capnp-zig cat-file -e "$historical_revision^{commit}" || {
+    echo 'Historical Zig audit reference missing; run mise run refs:sync' >&2
+    exit 1
+  }
+  rm -rf "$historical_dir"
+  mkdir -p "$historical_dir"
+  git -C ref/capnp-zig archive "$historical_revision" src/ | tar -x -C "$historical_dir"
+  printf '%s\n' "$historical_revision" > "$historical_dir/.source-key"
 fi
 
 deno run --allow-read --allow-run=git scripts/check-zig-sync.ts
 
 # Compile main directly, without the RPC build graph or a second emitter. Keep
-# an unmodified historical oracle as well as matching patched native/WASI
-# commands. New generated APIs intentionally differ from the old source output.
-zig build-exe ref/capnp-zig/src/main.zig \
+# the old audit oracle separate from the current pristine native/WASI commands.
+zig build-exe "$historical_dir/src/main.zig" \
   -O ReleaseSafe -fstrip --cache-dir build/zig/cache \
   -femit-bin=build/zig/bin/capnpc-zig-upstream
 zig build-exe "$source_dir/src/main.zig" \

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	capnpcwasm "capnpc-wasm/sdk/go"
+	capnpcwasm "github.com/nullstyle/capnpc-wasm/sdk/go"
 )
 
 func root(t *testing.T) string {

@@ -8,8 +8,11 @@ TypeScript declarations, and `worker.js` is its bundled worker entrypoint.
 `dist/include/` contains pinned standard schemas and language annotations.
 
 The caller loads only the generators it needs, using its own asset URLs,
-embedded bytes, or cache. Modules can be bytes or compiled `WebAssembly.Module`
-objects. No runtime imports point into `ref/` or to a CDN.
+embedded bytes, or cache. Supply original `Uint8Array` module bytes. The SDK
+compiles and retains bounded modules internally; opaque `WebAssembly.Module`
+objects are rejected because their memory limits cannot be inspected or reduced
+through the standard JavaScript API. No runtime imports point into `ref/` or to
+a CDN.
 
 ```ts
 import { createWorkerCompiler } from "./dist/typescript/mod.js";
@@ -63,13 +66,13 @@ const rust = await compiler.generate({
 ```
 
 `generate` returns `outputs` and `diagnostics`. It requires at least one
-available generator and nonempty unpacked request bytes, up to 64 MiB. Request
-bytes are copied before execution; generators validate their contents and report
-malformed requests through `CompileError`. All requested generators must succeed
-before outputs are returned. Worker `generate` accepts the same signal and
-timeout options as `compile`, and shares its one-active-job limit. Cache
-requests only alongside the toolchain revision and the full schema/include
-workspace they represent.
+available generator and nonempty unpacked request bytes, up to `requestBytes`
+(64 MiB by default). Request bytes are copied before execution; generators
+validate their contents and report malformed requests through `CompileError`.
+All requested generators must succeed before outputs are returned. Worker
+`generate` accepts the same signal and timeout options as `compile`, and shares
+its one-active-job limit. Cache requests only alongside the toolchain revision
+and the full schema/include workspace they represent.
 
 ## Workspace and results
 
@@ -106,18 +109,18 @@ not inferred from human-readable diagnostics.
 
 ## Execution and cancellation
 
-`createCompiler(modules)` compiles modules once and runs jobs in the current JS
-thread. Its interface is asynchronous, but each guest's execution blocks that
-thread. This works in Deno and application-owned workers; it has no hard
-timeout.
+`createCompiler(modules, options?)` compiles modules once and runs jobs in the
+current JS thread. Its interface is asynchronous, but each guest's execution
+blocks that thread. This works in Deno and application-owned workers; it has no
+hard timeout.
 
-`createWorkerCompiler(workerURL, modules)` executes off the main thread. Its
-`compile(request, { signal, timeoutMs })` accepts an `AbortSignal` and defaults
-to a 30-second deadline, including restart time. Aborting or timing out
-terminates the worker and rejects the job. The next job creates a fresh worker
-using private copies of the original modules. `dispose()` rejects pending work
-and terminates the client permanently. One job may be active per worker client;
-use separate clients for parallel jobs.
+`createWorkerCompiler(workerURL, modules, options?)` executes off the main
+thread. Its `compile(request, { signal, timeoutMs })` accepts an `AbortSignal`
+and defaults to a 30-second deadline, including restart time. Aborting or timing
+out terminates the worker and rejects the job. The next job creates a fresh
+worker using private copies of the original modules. `dispose()` rejects pending
+work and terminates the client permanently. One job may be active per worker
+client; use separate clients for parallel jobs.
 
 Worker initialization also has a 30-second timeout. Worker script loading is a
 host action: to restart completely offline, fetch `worker.js` in advance and use
@@ -125,17 +128,72 @@ a blob URL, as the browser test does. Keep that URL alive until the client is
 disposed. The SDK does not inject CSP exceptions; the application controls where
 workers can be loaded.
 
-This first SDK is tested in the pinned Deno, Chromium, Firefox, and WebKit
-versions. The C++ modules require standardized Wasm exception handling. Worker
-termination bounds execution time, but this adapter does not yet enforce hard
-guest-memory or output-byte budgets; use the pinned trusted guest modules and
-size application workspaces appropriately.
+## Resource limits
+
+Both factory functions accept the same optional `{ limits }` argument. Omitted
+fields use the exported `defaultLimits`. Limits are fixed for the lifetime of a
+compiler and survive worker restart:
+
+```ts
+const compiler = await createWorkerCompiler(workerURL, modules, {
+  limits: {
+    workspaceBytes: 8 * 1024 * 1024,
+    outputBytes: 16 * 1024 * 1024,
+    memoryPages: 2048, // 128 MiB, in 64 KiB Wasm pages
+  },
+});
+```
+
+| Limit              | Default         | Scope                                                         |
+| ------------------ | --------------- | ------------------------------------------------------------- |
+| `memoryPages`      | 4,096 (256 MiB) | Linear memory of each guest instance                          |
+| `workspaceBytes`   | 64 MiB          | Combined UTF-8/byte contents of `files` and `includeFiles`    |
+| `workspaceEntries` | 4,096           | Combined files and implied directories, excluding mount roots |
+| `pathBytes`        | 4,096           | UTF-8 bytes per workspace, entrypoint, or output path         |
+| `requestBytes`     | 64 MiB          | Compiled or supplied unpacked request                         |
+| `outputBytes`      | 64 MiB          | File contents retained by each generator                      |
+| `outputEntries`    | 4,096           | Files and directories created by each generator               |
+| `stdoutBytes`      | 64 MiB          | Captured stdout per command                                   |
+| `stderrBytes`      | 1 MiB           | Captured stderr per command                                   |
+
+Limits must be nonnegative safe integers. Zero disallows the corresponding
+resource; `memoryPages` instead accepts 1 through 65,536. Compiler stdout is
+also bounded by `requestBytes`. Workspace size is checked before encoding
+strings, copying byte contents, or posting a worker message. String contents are
+measured as UTF-8; returned and retained bytes remain private snapshots.
+
+Before compilation, the SDK inserts or lowers the maximum in the module's memory
+section. The engine then validates the resulting module and enforces its maximum
+during initialization and every `memory.grow`, including growth that makes no
+host calls. Initial memory above the configured ceiling is rejected. Only one
+defined, unshared wasm32 memory is supported; imported, shared, memory64, and
+multiple memories are rejected. This preserves a module's smaller existing
+maximum. It does not change the guest's code or data sections.
+
+Writable file limits are checked before writes, sparse writes, allocation, and
+resizing. Renumbering a descriptor does not bypass its budget. Deleted files
+remain accounted while their storage can be retained by descriptors, and entry
+creation consumes a command-lifetime budget even if an entry is later removed.
+Final output paths, entry counts, and bytes are validated before result copies,
+including aliases. A guest that exceeds a host budget traps immediately and
+rejects with `CompileError`; captured earlier stderr and the failure stage are
+preserved, and no partial results are returned. Memory allocation failure is
+reported through the guest's usual exit/trap behavior.
+
+These are per-workspace/per-command bounds, not a total JavaScript heap or
+process memory limit: snapshots, generated results, module compilation, and
+concurrent clients need additional host storage. Use the worker API to bound
+execution time as well as resources. The SDK is tested in the pinned Deno,
+Chromium, Firefox, and WebKit versions; the C++ modules require standardized
+Wasm exception handling.
 
 ## Verification
 
 `mise run test` runs the Deno SDK tests using only read permission, including
-infinite-Wasm cancellation and recovery. `mise run browser:install` installs the
-pinned browsers, then `mise run test:browser` compares every generated byte with
-native output in all three engines, blocks network and revokes process
-permissions after loading assets, and tests worker cancellation and reuse. See
-`tests/browser/README.md` for test-host requirements.
+infinite-Wasm cancellation and recovery, exact resource boundaries, oversized
+sparse output writes, descriptor renumbering, and guest memory growth.
+`mise run browser:install` installs the pinned browsers, then
+`mise run test:browser` compares every generated byte with native output in all
+three engines, blocks network and revokes process permissions after loading
+assets, and tests worker cancellation and reuse. See `tests/browser/README.md`
+for test-host requirements.

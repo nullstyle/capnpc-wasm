@@ -62,9 +62,10 @@ async function git(cwd: string, ...args: string[]) {
 
 async function committedInventory(
   cwd: string,
+  revision = "HEAD",
 ): Promise<Record<string, string>> {
   const entries = decoder.decode(
-    await gitBytes(cwd, "ls-tree", "-r", "-z", "HEAD:src"),
+    await gitBytes(cwd, "ls-tree", "-r", "-z", `${revision}:src`),
   ).split("\0").filter(Boolean);
   const found: Record<string, string> = {};
   for (const entry of entries) {
@@ -131,6 +132,11 @@ if (recording) {
 if (manifest.version !== 1 || !/^[a-f0-9]{40}$/.test(manifest.nativeCommit)) {
   throw new Error("Invalid native source manifest");
 }
+if (manifest.nativeCommit !== manifest.referenceCommit) {
+  throw new Error(
+    "Pristine Zig reference must match the native source revision",
+  );
+}
 if (
   await git("ref/capnp-zig", "rev-parse", "HEAD") !== manifest.referenceCommit
 ) throw new Error("Reference revision differs from sync metadata");
@@ -153,6 +159,20 @@ for (const fixture of manifest.fixtures) {
   if (await sha256(await Deno.readFile(fixture.path)) !== fixture.sha256) {
     throw new Error(`Mirrored fixture changed: ${fixture.path}`);
   }
+}
+const historical =
+  (await Deno.readTextFile("generators/zig/historical-reference"))
+    .trim();
+if (!/^[a-f0-9]{40}$/.test(historical)) {
+  throw new Error("Invalid historical Zig revision");
+}
+if (
+  await digest(await inventory("build/src/capnp-zig-historical/src")) !==
+    await digest(await committedInventory("ref/capnp-zig", historical))
+) {
+  throw new Error(
+    "Historical Zig audit sources differ from their pinned commit",
+  );
 }
 if (recording) {
   await Deno.writeTextFile(

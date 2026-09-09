@@ -10,7 +10,7 @@ scope.onmessage = async ({ data }) => {
   try {
     let result;
     if (data.kind === "init") {
-      compiler = await createCompiler(data.modules);
+      compiler = await createCompiler(data.modules, data.options);
     } else if (data.kind === "compile" && compiler) {
       result = await compiler.compile(data.request);
     } else if (data.kind === "generate" && compiler) {

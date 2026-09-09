@@ -4,29 +4,28 @@
 for the native host and `wasm32-wasi` (Zig's name for WASI Preview 1). The
 artifacts are `build/native/bin/capnpc-zig` and
 `build/wasm/bin/capnpc-zig.wasm`. Both use the upstream request reader,
-validator, and generator, with the same
-[compatibility corrections](../../patches/capnp-zig/README.md) applied to a
-disposable source copy. The build also emits an unmodified native oracle at
-`build/native/bin/capnpc-zig-upstream`. There is no second emitter or RPC
-transport dependency.
+validator, and generator from the pristine pinned source. The former local
+compatibility patches and reflection copies are now part of capnp-zig itself.
+The build also exports the separately pinned historical audit revision and emits
+its command at `build/native/bin/capnpc-zig-upstream`. There is no second
+emitter or RPC transport dependency.
 
 The compiler request is an unpacked Cap'n Proto message on stdin, bounded to 64
 MiB by upstream. Each requested `path/name.capnp` produces `path/name.zig`
 beneath the working directory. Generated modules import `capnpc-zig`; bind that
 module to `build/src/capnp-zig/src/lib_core.zig` after `mise run build:zig`.
 This serialization-only runtime includes reflection and reference-compatible
-double-far struct-list writing. The build exports and patches this disposable
-copy alongside the generator, then installs the project-owned
-[reflection sources](runtime/). It does not modify the reference runtime. The
-[patch notes](../../patches/capnp-zig/README.md) describe the corrected paths
-and remaining runtime gaps.
+double-far struct-list writing. The build exports an exact disposable copy of
+the pinned runtime alongside the generator. It applies no Zig patches and does
+not modify the reference checkout. See the
+[synchronization history](../../patches/capnp-zig/README.md).
 
 The upstream command options remain available, including `--verbose`,
 `--no-manifest`, `--api-profile=compact`, `--shape-sharing`, and the
 `max-codegen-*=N` budget tokens. Defaults emit the full API, binary reflection
 metadata, and the JSON export manifest. `--no-reflection` omits the binary
 metadata and generated schema references. The generated APIs still require the
-matching patched runtime when reflection is disabled. `--no-manifest`
+matching pinned runtime when reflection is disabled. `--no-manifest`
 independently omits the JSON export manifest. The command does not invoke
 another process or an external formatter. The host runs it with an empty
 environment, so environment-based upstream options do not affect SDK builds.
@@ -69,7 +68,7 @@ terminal failure. These additions remain Experimental.
 The [Builder/reflection tests](../../tests/reflection/README.md),
 [generic API tests](../../tests/generator_api/README.md), RPC codegen tests, and
 [wire conformance suite](../../tests/wire/README.md) compile and execute the new
-surfaces on native Zig and WASI. Patched native/Wasm output matches exactly; the
+surfaces on native Zig and WASI. Current native/Wasm output matches exactly; the
 old pristine Zig generator remains a historical oracle. These API changes
 intentionally alter its output even under `--no-reflection`.
 
@@ -193,8 +192,11 @@ mise exec -- deno run --allow-read --allow-write=generators/zig/sync.json \
 ```
 
 The command checks committed native sources against the mirrored fixtures and
-prepared build tree. Compatibility patches still apply only to disposable
-sources; the reference submodule remains at its recorded revision.
+prepared build tree. The reference submodule and native source revision match;
+there is no local Zig patch layer. `historical-reference` separately pins the
+old audit revision. `mise run refs:sync` fetches that commit even in a shallow
+checkout; `build:zig` exports it under `build/src/capnp-zig-historical`. The
+wire tests retain their original failing-writer and validation controls there.
 
 The JSON manifest remains a separate list of module/type/export names. It is not
 used to implement reflection. Binary descriptors increase generated source size;

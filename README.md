@@ -9,10 +9,12 @@ and Zig in Wasmtime, wazero (compiler and interpreter), and Deno, Chromium,
 Firefox, and WebKit using the pinned browser WASI shim. The TypeScript and Go
 SDKs accept in-memory workspaces and return generated files. Tests compare them
 with native output and compile and execute the generated source. C++, Rust, and
-Go retain pristine upstream comparisons. Zig uses the matching patched native
+Go and Zig retain pristine upstream comparisons. Zig uses the matching pinned
 generator and runtime, including
-[binary schema reflection and generated views](generators/zig/README.md).
-Broader resource controls and published releases are still ahead.
+[binary schema reflection and generated views](generators/zig/README.md). The
+TypeScript SDK bounds guest memory, inputs, requests, diagnostics, and outputs.
+Installable release candidates are tested locally; publication and sustained
+nightly confidence remain release gates.
 
 ## Bootstrap
 
@@ -96,7 +98,9 @@ cancellation of an infinite Wasm command. The shared
 limits, generic brands, pointer defaults, groups, and relative imports. The
 browser example supports language selection, viewing and downloading files, and
 reuse of the compiled request when its schema is unchanged. These are initial
-workspace SDKs; package publication and a stable release interface are pending.
+workspace SDKs. The [release guide](docs/releases.md) describes building and
+testing a private installable candidate with `mise run test:package`; package
+publication and a stable release interface are pending.
 
 ## Command modules
 

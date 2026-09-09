@@ -59,7 +59,7 @@ run = [{ task = "refs:sync" }, { task = "doctor" }]
 
 [tasks."refs:sync"]
 description = "Initialize top-level reference submodules at their recorded commits"
-run = ["git submodule sync", "git -c submodule.recurse=false submodule update --init"]
+run = ["git submodule sync", "git -c submodule.recurse=false submodule update --init", "git -C ref/capnp-zig fetch --no-tags origin $(cat generators/zig/historical-reference)"]
 
 [tasks."refs:status"]
 description = "Show the exact reference checkouts"
@@ -160,3 +160,13 @@ run = "deno run --no-prompt --allow-read=dist examples/deno.ts"
 description = "Serve the browser worker example and local SDK assets"
 depends = ["build:sdk"]
 run = "deno run --allow-read=examples/browser,dist --allow-net=127.0.0.1:8080 scripts/serve-example.ts"
+
+[tasks."release:prepare"]
+description = "Prepare a private versioned SDK archive with checksums and source/tool/reference provenance"
+depends = ["build:sdk"]
+run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/release.ts"
+
+[tasks."test:package"]
+description = "Verify reproducible candidate packaging and clean external Deno/Go consumers"
+depends = ["release:prepare"]
+run = "deno run --allow-read --allow-write --allow-run=deno,go,cmake scripts/test-package.ts"

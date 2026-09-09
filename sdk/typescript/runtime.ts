@@ -1,3 +1,6 @@
+import { boundedStream, boundFilesystem, boundWasiIO } from "./resource-fs.ts";
+import { checkPath } from "./limits.ts";
+import { defaultLimits, type ResourceLimits } from "./types.ts";
 import WASI from "../../ref/browser_wasi_shim/src/wasi.ts";
 import {
   Directory,
@@ -76,28 +79,44 @@ function stageFiles(
   return root;
 }
 
-function collectFiles(directory: Directory): Record<string, Uint8Array> {
-  const files: Record<string, Uint8Array> = Object.create(null);
-  const ancestors = new Set<Directory>();
-  function visit(current: Directory, prefix: string): void {
-    if (ancestors.has(current)) throw new Error("generated directory cycle");
-    ancestors.add(current);
-    for (const [name, inode] of current.contents) {
-      checkName(name);
-      const path = prefix + name;
-      if (inode instanceof Directory) {
-        visit(inode, path + "/");
-      } else if (inode instanceof File) {
-        // The shim may leave files backed by resizable ArrayBuffers, which are
-        // rejected by some Web APIs and must not escape this command instance.
-        files[path] = new Uint8Array(inode.data);
-      } else {
-        throw new Error(`unsupported generated filesystem entry: ${path}`);
-      }
+function collectFiles(
+  directory: Directory,
+  limits: ResourceLimits,
+): Record<string, Uint8Array> {
+  const pending = [{ directory, prefix: "" }];
+  const visited = new Set<Directory>();
+  const selected: [string, File][] = [];
+  let bytes = 0;
+  let entries = 0;
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (visited.has(current.directory)) {
+      throw new Error("generated directory cycle or alias");
     }
-    ancestors.delete(current);
+    visited.add(current.directory);
+    for (const [name, inode] of current.directory.contents) {
+      checkName(name);
+      const path = current.prefix + name;
+      checkPath(path, limits);
+      if (++entries > limits.outputEntries) {
+        throw new Error("outputEntries resource limit exceeded");
+      }
+      if (inode instanceof Directory) {
+        pending.push({ directory: inode, prefix: path + "/" });
+      } else if (inode instanceof File) {
+        bytes += inode.data.length;
+        if (bytes > limits.outputBytes) {
+          throw new Error("outputBytes resource limit exceeded");
+        }
+        selected.push([path, inode]);
+      } else throw new Error(`unsupported generated filesystem entry: ${path}`);
+    }
   }
-  visit(directory, "");
+  // Validate the complete output before copying it, including hard-link aliases.
+  const files: Record<string, Uint8Array> = Object.create(null);
+  for (const [path, inode] of selected) {
+    files[path] = new Uint8Array(inode.data);
+  }
   return files;
 }
 
@@ -157,15 +176,21 @@ export async function runCommand(
   stdin: Uint8Array,
   files: Record<string, Uint8Array>,
   readonly: boolean,
+  limits: ResourceLimits = defaultLimits,
 ): Promise<CommandResult> {
   const root = stageFiles(files, readonly);
-  const output = new File([]);
-  const errors = new File([]);
+  if (!readonly) boundFilesystem(root, limits);
+  const requestBound = readonly && limits.requestBytes < limits.stdoutBytes;
+  const output = boundedStream(
+    requestBound ? limits.requestBytes : limits.stdoutBytes,
+    requestBound ? "requestBytes" : "stdoutBytes",
+  );
+  const errors = boundedStream(limits.stderrBytes, "stderrBytes");
   const argv = [...args];
   const wasi = new WASI(argv, [], [
     new OpenFile(new File(stdin, { readonly: true })),
-    new OpenFile(output),
-    new OpenFile(errors),
+    output.descriptor,
+    errors.descriptor,
     new PreopenDirectory("/", root.contents),
   ], { debug: false });
   protectFiles(wasi, readonly);
@@ -200,7 +225,10 @@ export async function runCommand(
     return 0;
   };
 
+  boundWasiIO(wasi, limits);
+
   let code: number;
+  let generated: Record<string, Uint8Array> = Object.create(null);
   try {
     const instance = await WebAssembly.instantiate(module, {
       wasi_snapshot_preview1: wasi.wasiImport,
@@ -212,8 +240,9 @@ export async function runCommand(
       throw new Error("WASI command must export memory and _start");
     }
     code = wasi.start({ exports: { memory, _start: () => _start() } });
+    if (code === 0 && !readonly) generated = collectFiles(root, limits);
   } catch (cause) {
-    const stderr = new TextDecoder().decode(new Uint8Array(errors.data));
+    const stderr = new TextDecoder().decode(new Uint8Array(errors.file.data));
     const message = cause instanceof Error ? cause.message : String(cause);
     throw new CommandError(
       `WASI command failed: ${message}${stderr ? `\n${stderr}` : ""}`,
@@ -223,8 +252,8 @@ export async function runCommand(
   }
   return {
     code,
-    stdout: new Uint8Array(output.data),
-    stderr: new TextDecoder().decode(new Uint8Array(errors.data)),
-    files: code === 0 && !readonly ? collectFiles(root) : Object.create(null),
+    stdout: new Uint8Array(output.file.data),
+    stderr: new TextDecoder().decode(new Uint8Array(errors.file.data)),
+    files: generated,
   };
 }

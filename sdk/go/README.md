@@ -36,18 +36,21 @@ if err != nil {
 // result.Outputs["rust"]["person_capnp.rs"] contains generated source.
 ```
 
-Import `capnpc-wasm/sdk/go` as `capnpcwasm` from this checkout. This first SDK
-is source intended for workspace use; publication and release packaging remain
-pending. Its `go.mod` replacement selects `ref/wazero`, whose gitlink pins the
-experimental standardized Wasm exception support required by the C++ tools.
-Applications using a local module replacement must also replace
-`github.com/tetratelabs/wazero` with this checkout's `ref/wazero`: dependency
-module replacements are not inherited by Go consumers.
+Import `github.com/nullstyle/capnpc-wasm/sdk/go` as `capnpcwasm`. Its public
+wazero requirement is `v1.12.1-0.20260908083515-451613caac44`, the exact
+pseudo-version for the repository's `ref/wazero` gitlink and standardized Wasm
+exception support. Dependency checksums are committed in `go.sum`; applications
+need no wazero replacement or sibling reference checkout.
 
-Read modules from `build/wasm/bin/` or embed them in your application. The SDK
-does not download modules or supply annotation schemas. Include the pinned
-standard schemas that your inputs import; C++ annotations are in
-`ref/capnproto/c++/src/capnp/c++.capnp` and Go annotations in
+Until a Go module version is published, use a local replacement for this SDK
+module itself, or the self-contained source in a prepared release candidate. See
+[release preparation and external installation checks](../../docs/releases.md).
+A future nested module release uses a tag such as `sdk/go/v0.1.0-rc.1`.
+
+Read modules from the candidate's `wasm/` directory, `build/wasm/bin/`, or embed
+them in your application. The SDK does not download modules or supply annotation
+schemas. Include the pinned standard schemas that your inputs import; C++
+annotations are in `ref/capnproto/c++/src/capnp/c++.capnp` and Go annotations in
 `ref/go-capnp/std/go.capnp`. Go generation requires the upstream `$Go.package`
 and `$Go.import` annotations, as shown in the repository fixtures. An empty
 `Generators` list runs only the compiler.

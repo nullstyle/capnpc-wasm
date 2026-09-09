@@ -1,16 +1,23 @@
+import { compileBounded } from "./wasm.ts";
+import {
+  checkPath,
+  copyFiles,
+  resolveLimits,
+  validateGeneration,
+  validateWorkspace,
+} from "./limits.ts";
 import { CommandError, runCommand } from "./runtime.ts";
 import {
   CompileError,
   type Compiler,
   type CompileRequest,
   type CompileResult,
+  type CompilerOptions,
   type Diagnostic,
-  type Files,
   type GenerationRequest,
   type GenerationResult,
   type Language,
   type Modules,
-  type WasmModule,
 } from "./types.ts";
 
 export * from "./types.ts";
@@ -27,61 +34,31 @@ const commands = {
   go: "capnpc-go",
   zig: "capnpc-zig",
 };
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-function checkPath(path: string): void {
-  if (
-    typeof path !== "string" || /[\\\0]/.test(path) ||
-    path.split("/").some((part) => !part || part === "." || part === "..") ||
-    decoder.decode(encoder.encode(path)) !== path
-  ) throw new TypeError(`expected a canonical relative POSIX path: ${path}`);
-}
-
-function snapshot(files: Files, prefix: string): Record<string, Uint8Array> {
-  const result: Record<string, Uint8Array> = Object.create(null);
-  const names = new Set(Object.keys(files));
-  for (const [path, contents] of Object.entries(files)) {
-    checkPath(path);
-    const parts = path.split("/");
-    for (let i = 1; i < parts.length; i++) {
-      if (names.has(parts.slice(0, i).join("/"))) {
-        throw new TypeError(`file/directory collision: ${path}`);
-      }
-    }
-    if (typeof contents !== "string" && !(contents instanceof Uint8Array)) {
-      throw new TypeError(`expected text or bytes for ${path}`);
-    }
-    result[`${prefix}/${path}`] = typeof contents === "string"
-      ? encoder.encode(contents)
-      : new Uint8Array(contents);
-  }
-  return result;
-}
-
-async function compileModule(module: WasmModule): Promise<WebAssembly.Module> {
-  return module instanceof WebAssembly.Module
-    ? module
-    : await WebAssembly.compile(new Uint8Array(module));
-}
-
 /**
  * Compile the supplied modules once, then run disk-free jobs in this JS thread.
  * Guest execution is synchronous; browsers should use createWorkerCompiler.
  */
-export async function createCompiler(modules: Modules): Promise<Compiler> {
-  const compiler = await compileModule(modules.compiler);
+export async function createCompiler(
+  modules: Modules,
+  options: CompilerOptions = {},
+): Promise<Compiler> {
+  const limits = resolveLimits(options);
+  const compiler = await compileBounded(modules.compiler, limits.memoryPages);
   const generators = new Map<Language, WebAssembly.Module>();
   for (const [language, module] of Object.entries(modules.generators)) {
     if (!languages.includes(language as Language)) {
       throw new TypeError(`unknown generator: ${language}`);
     }
     if (module !== undefined) {
-      generators.set(language as Language, await compileModule(module));
+      generators.set(
+        language as Language,
+        await compileBounded(module, limits.memoryPages),
+      );
     }
   }
 
   function targets(requested: readonly Language[]): Language[] {
+    if (requested.length > 4) throw new TypeError("too many generators");
     const selected = [...requested];
     if (new Set(selected).size !== selected.length) {
       throw new TypeError("duplicate generators");
@@ -105,7 +82,7 @@ export async function createCompiler(modules: Modules): Promise<Compiler> {
   ) {
     let result;
     try {
-      result = await runCommand(module, args, stdin, files, readonly);
+      result = await runCommand(module, args, stdin, files, readonly, limits);
     } catch (cause) {
       if (cause instanceof CommandError && cause.stderr) {
         diagnostics.push({ stage, stderr: cause.stderr });
@@ -164,29 +141,21 @@ export async function createCompiler(modules: Modules): Promise<Compiler> {
       if (selected.length === 0) {
         throw new TypeError("at least one generator is required");
       }
-      if (
-        !(input.request instanceof Uint8Array) || input.request.length === 0
-      ) {
-        throw new TypeError(
-          "request must contain unpacked CodeGeneratorRequest bytes",
-        );
-      }
-      if (input.request.length > 64 * 1024 * 1024) {
-        throw new TypeError("request exceeds 64 MiB");
-      }
-      return await generate(new Uint8Array(input.request), selected, []);
+      const request = validateGeneration(input, limits);
+      return await generate(new Uint8Array(request), selected, []);
     },
     async compile(input: CompileRequest): Promise<CompileResult> {
       // Snapshot and validate the whole job before yielding to guest execution.
-      const files = snapshot(input.files, "src");
-      const includes = snapshot(input.includeFiles ?? {}, "include");
+      const [sources, annotations] = validateWorkspace(input, limits);
+      const files = copyFiles(sources, "src/");
+      const includes = copyFiles(annotations, "include/");
       const entrypoints = [...input.entrypoints];
       const selected = targets(input.generators);
       if (entrypoints.length === 0) {
         throw new TypeError("at least one entrypoint is required");
       }
       for (const path of entrypoints) {
-        checkPath(path);
+        checkPath(path, limits);
         if (!Object.hasOwn(files, `src/${path}`)) {
           throw new TypeError(`entrypoint is not in files: ${path}`);
         }
@@ -215,6 +184,13 @@ export async function createCompiler(modules: Modules): Promise<Compiler> {
       if (compiled.stdout.length === 0) {
         throw new CompileError(
           "compiler emitted no request",
+          "compiler",
+          diagnostics,
+        );
+      }
+      if (compiled.stdout.length > limits.requestBytes) {
+        throw new CompileError(
+          "compiler request exceeds requestBytes limit",
           "compiler",
           diagnostics,
         );

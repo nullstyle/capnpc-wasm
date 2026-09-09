@@ -1,8 +1,31 @@
+/** Per-job host budgets and a per-instance guest linear-memory ceiling. */
+export const defaultLimits = Object.freeze({
+  memoryPages: 4096,
+  workspaceBytes: 64 * 1024 * 1024,
+  workspaceEntries: 4096,
+  pathBytes: 4096,
+  requestBytes: 64 * 1024 * 1024,
+  outputBytes: 64 * 1024 * 1024,
+  outputEntries: 4096,
+  stdoutBytes: 64 * 1024 * 1024,
+  stderrBytes: 1024 * 1024,
+});
+export type ResourceLimits = {
+  -readonly [Name in keyof typeof defaultLimits]: number;
+};
+
 export type Language = "cpp" | "rust" | "go" | "zig";
 export type Files = Readonly<Record<string, string | Uint8Array>>;
-export type WasmModule = Uint8Array | WebAssembly.Module;
+/** Original Wasm bytes; opaque compiled modules cannot be memory-bounded. */
+export type WasmModule = Uint8Array;
 
-/** Supply already-loaded modules; SDK execution never fetches dependencies. */
+/** Resource policy shared by direct and worker compiler factories. */
+export interface CompilerOptions {
+  /** Omitted limits use defaultLimits; zero disallows the corresponding resource. */
+  limits?: Partial<ResourceLimits>;
+}
+
+/** Supply already-loaded module bytes; SDK execution never fetches dependencies. */
 export interface Modules {
   compiler: WasmModule;
   generators: Partial<Record<Language, WasmModule>>;
@@ -25,7 +48,7 @@ export interface Diagnostic {
 }
 
 export interface GenerationRequest {
-  /** One unpacked CodeGeneratorRequest, at most 64 MiB. */
+  /** One unpacked CodeGeneratorRequest, at most requestBytes (default 64 MiB). */
   request: Uint8Array;
   /** At least one generator is required for standalone generation. */
   generators: readonly Language[];

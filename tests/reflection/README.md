@@ -2,7 +2,7 @@
 
 `reflection_test.ts` feeds a native compiler request into the WASI Zig
 generator, then compiles the generated modules and `consumer.zig` against the
-project's patched runtime. The same consumer runs natively and as a WASI command
+project's pinned runtime. The same consumer runs natively and as a WASI command
 in Wasmtime. Embedded descriptors and emitted messages must match byte for byte.
 
 Run from the repository root after `mise run build`:
@@ -87,7 +87,7 @@ self-copy, union-group reopening, and clear operations. It does not compile
 generated fixture classes.
 
 The ordinary toolchain and feature tests compare complete Zig output across
-matching patched native and Wasm generators, including metadata-free output with
+matching pinned native and Wasm generators, including metadata-free output with
 `--no-reflection`. The new generated APIs intentionally differ from the
 historical pristine generator even when metadata is disabled.
 

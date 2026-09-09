@@ -1,13 +1,14 @@
 # Zig wire conformance
 
 `tests/wire_conformance_test.ts` compiles the same `probe.zig` against two
-runtime sources: pristine `ref/capnp-zig/src/lib_core.zig` and the patched
-`build/src/capnp-zig/src/lib_core.zig`. It also builds the patched probe for
+runtime sources: the historical audit export at
+`build/src/capnp-zig-historical/src/lib_core.zig` and the current pinned export
+at `build/src/capnp-zig/src/lib_core.zig`. It also builds the current probe for
 `wasm32-wasi` and runs it in Wasmtime. All emitted non-cyclic messages are
 checked with the pinned reference `build/native/bin/capnp decode`.
 
 Run from the repository root after building the native tools and preparing the
-patched source through the regular pipeline:
+current source through the regular pipeline:
 
 ```sh
 mise run build:native
@@ -43,21 +44,21 @@ lengths, scalar values, and strict Text reads.
 The TypeScript harness independently checks framed segment sizes, source and
 landing far pointers, tag kinds and offsets, element counts, data/pointer
 widths, and list word counts excluding the content tag. C++ must decode every
-patched writer case to the same values. Patched native and WASI outputs must
+current writer case to the same values. Current native and WASI outputs must
 match byte for byte.
 
 Same-segment and single-far controls still decode in both implementations and
 must remain byte-identical to pristine upstream output. Hand-encoded canonical
 double-far list and finite-tree fixtures independently check both Zig readers
-and C++ decoding. The simple patched writer output must equal the hand-encoded
+and C++ decoding. The simple current writer output must equal the hand-encoded
 canonical list exactly.
 
 ## Pristine writer evidence and retained legacy reads
 
-The pristine writer still emits Layout A: a struct-kind tag in the landing pad,
-with no in-content element tag. Its populated outputs must fail C++ decoding
-with exit 1 and `expected ref->kind() == WirePointer::LIST [0 == 1]`. Empty
-content segments fail earlier with the specific diagnostic
+The historical writer still emits Layout A: a struct-kind tag in the landing
+pad, with no in-content element tag. Its populated outputs must fail C++
+decoding with exit 1 and `expected ref->kind() == WirePointer::LIST [0 == 1]`.
+Empty content segments fail earlier with the specific diagnostic
 `Message contains double-far pointer to unknown segment`; the harness pins that
 case separately. Crashes, other diagnostics, or an unexpected successful decode
 fail the suite.
@@ -65,18 +66,19 @@ fail the suite.
 An independent hand-encoded Layout A fixture remains readable by both Zig
 runtimes and must remain rejected by C++. The pristine writer's simple output
 must equal that fixture exactly. This preserves the audit's W1 evidence while
-patch 0004 changes only new emission to the canonical encoding. Generated-code
-consumers currently use same-segment paths; this test targets the public
-allocation API.
+the current runtime emits the canonical encoding. The historical commit is
+recorded in `generators/zig/historical-reference`; advancing the live submodule
+does not change this regression control. Generated-code consumers currently use
+same-segment paths; this test targets the public allocation API.
 
 ## Validation and strict Text regressions
 
-The pristine runtime's original behavior remains an explicit oracle. The patched
-native and WASI runtimes must reject a canonical double-far struct cycle at
-nesting limit 1 and traversal budget 2, independently and together. The finite
-double-far tree charges four words, including its child; pristine Zig charges
-only its two landing words. Near-pointer cycles and landing-pad limits remain
-independent rejection controls.
+The historical runtime's original behavior remains an explicit oracle. The
+current native and WASI runtimes must reject a canonical double-far struct cycle
+at nesting limit 1 and traversal budget 2, independently and together. The
+finite double-far tree charges four words, including its child; pristine Zig
+charges only its two landing words. Near-pointer cycles and landing-pad limits
+remain independent rejection controls.
 
 Low-level `readText` keeps its lenient compatibility behavior. Generated Text
 getters now use strict reads, including Text list elements; non-null Text must
@@ -85,7 +87,7 @@ covers these typed getters. The wire suite checks raw strict rejection and C++
 rejection of missing terminators. Byte-list validation remains schema-agnostic,
 so valid Data is accepted by `Message.init`.
 
-Patched writer cases reopen composite lists through primitive and Text-list
+Current writer cases reopen composite lists through primitive and Text-list
 Builder views. C++ verifies the mutations and retained sibling fields, and the
 same/single-far controls remain byte-identical to pristine output.
 

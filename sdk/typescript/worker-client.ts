@@ -1,7 +1,14 @@
 import {
+  copyFiles,
+  resolveLimits,
+  validateGeneration,
+  validateWorkspace,
+} from "./limits.ts";
+import {
   CompileError,
   type CompileRequest,
   type CompileResult,
+  type CompilerOptions,
   type GenerationRequest,
   type GenerationResult,
   type Modules,
@@ -30,7 +37,9 @@ export interface WorkerCompiler {
 export async function createWorkerCompiler(
   workerURL: string | URL,
   modules: Modules,
+  options: CompilerOptions = {},
 ): Promise<WorkerCompiler> {
+  const limits = resolveLimits(options);
   // Keep private copies for restarting after cancellation; caller ownership stays intact.
   const snapshot = structuredClone(modules);
   // Structured cloning preserves SharedArrayBuffer storage. Copy every byte
@@ -141,32 +150,32 @@ export async function createWorkerCompiler(
       );
     }
     if (signal?.aborted) throw signal.reason;
-    // Clone before any restart await so edits to caller data cannot change a job.
-    const job = structuredClone(request);
+    // Validate before copying or posting to the worker; reject oversized inputs
+    // on the calling thread, including after timeout/restart.
+    let job: CompileRequest | GenerationRequest;
     if (kind === "generate") {
-      const generation = job as GenerationRequest;
-      if (generation.request instanceof Uint8Array) {
-        generation.request = new Uint8Array(generation.request);
-      }
+      const generation = request as GenerationRequest;
+      const bytes = validateGeneration(generation, limits);
+      job = {
+        request: new Uint8Array(bytes),
+        generators: [...generation.generators],
+      };
     } else {
-      const compilation = job as CompileRequest;
-      for (const files of [compilation.files, compilation.includeFiles]) {
-        if (!files) continue;
-        for (const [path, bytes] of Object.entries(files)) {
-          if (bytes instanceof Uint8Array) {
-            Object.defineProperty(files, path, {
-              value: new Uint8Array(bytes),
-            });
-          }
-        }
-      }
+      const compilation = request as CompileRequest;
+      const [sources, annotations] = validateWorkspace(compilation, limits);
+      job = {
+        files: copyFiles(sources),
+        includeFiles: copyFiles(annotations),
+        entrypoints: [...compilation.entrypoints],
+        generators: [...compilation.generators],
+      };
     }
     busy = true;
     const deadline = performance.now() + timeoutMs;
     try {
       if (!ready) {
         await exchange(
-          { kind: "init", modules: snapshot },
+          { kind: "init", modules: snapshot, options: { limits } },
           signal,
           timeoutMs,
         );
@@ -187,7 +196,11 @@ export async function createWorkerCompiler(
     }
   }
 
-  await exchange({ kind: "init", modules: snapshot }, undefined, 30_000);
+  await exchange(
+    { kind: "init", modules: snapshot, options: { limits } },
+    undefined,
+    30_000,
+  );
   ready = true;
   return {
     async compile(request, options) {

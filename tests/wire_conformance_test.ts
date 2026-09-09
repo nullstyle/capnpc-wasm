@@ -259,7 +259,7 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
   const variants = [
     {
       name: "upstream",
-      source: "ref/capnp-zig",
+      source: "build/src/capnp-zig-historical",
       canonical: false,
       wasm: false,
     },
