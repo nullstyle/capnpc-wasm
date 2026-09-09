@@ -1,0 +1,387 @@
+{
+  "schemaVersion": 1,
+  "scope": "Initial hosted acceptance; this is not a scheduled nightly confidence cycle.",
+  "runs": {
+    "native_ci": {
+      "repository": "nullstyle/capnp-zig",
+      "conclusion": "success",
+      "createdAt": "2026-09-09T07:46:35Z",
+      "event": "push",
+      "headSha": "0fb8df40126ea166f95016963c465b03db22819e",
+      "status": "completed",
+      "updatedAt": "2026-09-09T08:26:26Z",
+      "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790",
+      "jobs": [
+        {
+          "databaseId": 102382046878,
+          "name": "Evented backend check",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T07:49:14Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382046878"
+        },
+        {
+          "databaseId": 102382047099,
+          "name": "Cross-target compile (aarch64-linux-gnu)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:59Z",
+          "completedAt": "2026-09-09T07:59:37Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047099"
+        },
+        {
+          "databaseId": 102382047138,
+          "name": "ReleaseSafe hardening tests (windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T08:26:25Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047138"
+        },
+        {
+          "databaseId": 102382047142,
+          "name": "Hardening gate (macos-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:05Z",
+          "completedAt": "2026-09-09T07:53:59Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047142"
+        },
+        {
+          "databaseId": 102382047165,
+          "name": "Test (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T08:00:51Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047165"
+        },
+        {
+          "databaseId": 102382047171,
+          "name": "Zig e2e interop",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T07:54:47Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047171"
+        },
+        {
+          "databaseId": 102382047173,
+          "name": "QUIC targeted transport (windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T08:02:45Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047173"
+        },
+        {
+          "databaseId": 102382047182,
+          "name": "Cross-target compile (powerpc64-linux-gnu)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T07:58:08Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047182"
+        },
+        {
+          "databaseId": 102382047185,
+          "name": "Format check",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T07:47:08Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047185"
+        },
+        {
+          "databaseId": 102382047202,
+          "name": "Cross-target compile (x86-linux-gnu)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T07:55:12Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047202"
+        },
+        {
+          "databaseId": 102382047206,
+          "name": "Hardening gate (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:59Z",
+          "completedAt": "2026-09-09T07:49:56Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047206"
+        },
+        {
+          "databaseId": 102382047231,
+          "name": "Release build",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:59Z",
+          "completedAt": "2026-09-09T07:49:48Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047231"
+        },
+        {
+          "databaseId": 102382047248,
+          "name": "Test (macos-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:06Z",
+          "completedAt": "2026-09-09T08:04:36Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047248"
+        },
+        {
+          "databaseId": 102382047294,
+          "name": "ThreadSanitizer lane",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:59Z",
+          "completedAt": "2026-09-09T07:50:13Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047294"
+        },
+        {
+          "databaseId": 102382047306,
+          "name": "Reflection and generated RPC conformance",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:59Z",
+          "completedAt": "2026-09-09T07:53:02Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047306"
+        },
+        {
+          "databaseId": 102382047309,
+          "name": "ReleaseSafe hardening tests (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T08:15:36Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047309"
+        },
+        {
+          "databaseId": 102382047335,
+          "name": "Benchmark regression check",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T07:49:47Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047335"
+        },
+        {
+          "databaseId": 102382047348,
+          "name": "Docs smoke and snippets",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:00Z",
+          "completedAt": "2026-09-09T07:50:49Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047348"
+        },
+        {
+          "databaseId": 102382047352,
+          "name": "WASM build",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T07:48:56Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047352"
+        },
+        {
+          "databaseId": 102382047364,
+          "name": "Hardening gate (windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:59Z",
+          "completedAt": "2026-09-09T07:54:33Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047364"
+        },
+        {
+          "databaseId": 102382047368,
+          "name": "QUIC targeted transport (macos-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:02Z",
+          "completedAt": "2026-09-09T07:53:25Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047368"
+        },
+        {
+          "databaseId": 102382047401,
+          "name": "QUIC targeted transport (ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:59Z",
+          "completedAt": "2026-09-09T07:55:36Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047401"
+        },
+        {
+          "databaseId": 102382047424,
+          "name": "ReleaseSafe hardening tests (macos-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:05Z",
+          "completedAt": "2026-09-09T08:16:25Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047424"
+        },
+        {
+          "databaseId": 102382047460,
+          "name": "Cross-target compile (x86_64-windows)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T07:58:03Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047460"
+        },
+        {
+          "databaseId": 102382047462,
+          "name": "Test (windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:46:58Z",
+          "completedAt": "2026-09-09T08:18:51Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047462"
+        }
+      ]
+    },
+    "native_manual_nightly": {
+      "repository": "nullstyle/capnp-zig",
+      "conclusion": "success",
+      "createdAt": "2026-09-09T07:46:59Z",
+      "event": "workflow_dispatch",
+      "headSha": "0fb8df40126ea166f95016963c465b03db22819e",
+      "status": "completed",
+      "updatedAt": "2026-09-09T07:57:12Z",
+      "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325616792",
+      "jobs": [
+        {
+          "databaseId": 102382071752,
+          "name": "Forward-compat (zig dev.1786)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:03Z",
+          "completedAt": "2026-09-09T07:49:38Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325616792/job/102382071752"
+        },
+        {
+          "databaseId": 102382071900,
+          "name": "Extended gates",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:04Z",
+          "completedAt": "2026-09-09T07:57:12Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325616792/job/102382071900"
+        },
+        {
+          "databaseId": 102382072005,
+          "name": "RPC soak (chaos + deadlines, windows-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:04Z",
+          "completedAt": "2026-09-09T07:54:52Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325616792/job/102382072005"
+        },
+        {
+          "databaseId": 102382072018,
+          "name": "RPC soak (chaos + deadlines, ubuntu-latest)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:04Z",
+          "completedAt": "2026-09-09T07:55:19Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325616792/job/102382072018"
+        },
+        {
+          "databaseId": 102382072091,
+          "name": "Coverage-guided fuzzing with per-target evidence",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:47:06Z",
+          "completedAt": "2026-09-09T07:55:10Z",
+          "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325616792/job/102382072091"
+        }
+      ]
+    },
+    "wasm_ci": {
+      "repository": "nullstyle/capnpc-wasm",
+      "conclusion": "success",
+      "createdAt": "2026-09-09T07:48:19Z",
+      "event": "push",
+      "headSha": "94ba6b257fbfd16b2e35bc0117a8afa55a4d55e1",
+      "status": "completed",
+      "updatedAt": "2026-09-09T08:02:03Z",
+      "url": "https://github.com/nullstyle/capnpc-wasm/actions/runs/34325732963",
+      "jobs": [
+        {
+          "databaseId": 102382523149,
+          "name": "Chromium, Firefox, and WebKit",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:48:42Z",
+          "completedAt": "2026-09-09T08:02:02Z",
+          "url": "https://github.com/nullstyle/capnpc-wasm/actions/runs/34325732963/job/102382523149"
+        },
+        {
+          "databaseId": 102382523337,
+          "name": "Clean checkout (macos-15)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:48:48Z",
+          "completedAt": "2026-09-09T08:00:55Z",
+          "url": "https://github.com/nullstyle/capnpc-wasm/actions/runs/34325732963/job/102382523337"
+        },
+        {
+          "databaseId": 102382523504,
+          "name": "Clean checkout (ubuntu-24.04)",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:48:42Z",
+          "completedAt": "2026-09-09T07:58:51Z",
+          "url": "https://github.com/nullstyle/capnpc-wasm/actions/runs/34325732963/job/102382523504"
+        }
+      ]
+    },
+    "deno_ci": {
+      "repository": "nullstyle/capnp-deno",
+      "conclusion": "success",
+      "createdAt": "2026-09-09T04:48:28Z",
+      "event": "push",
+      "headSha": "24ccd2960b411dd20feb0a1965f2535fdf16d012",
+      "status": "completed",
+      "updatedAt": "2026-09-09T05:06:29Z",
+      "url": "https://github.com/nullstyle/capnp-deno/actions/runs/34312400044",
+      "jobs": [
+        {
+          "databaseId": 102344793621,
+          "name": "bench",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T05:05:40Z",
+          "completedAt": "2026-09-09T05:06:28Z",
+          "url": "https://github.com/nullstyle/capnp-deno/actions/runs/34312400044/job/102344793621"
+        },
+        {
+          "databaseId": 102344794360,
+          "name": "integration",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T04:50:23Z",
+          "completedAt": "2026-09-09T04:51:16Z",
+          "url": "https://github.com/nullstyle/capnp-deno/actions/runs/34312400044/job/102344794360"
+        },
+        {
+          "databaseId": 102344794667,
+          "name": "real-wasm",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T04:50:23Z",
+          "completedAt": "2026-09-09T04:53:02Z",
+          "url": "https://github.com/nullstyle/capnp-deno/actions/runs/34312400044/job/102344794667"
+        },
+        {
+          "databaseId": 102344817668,
+          "name": "verify",
+          "status": "completed",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T04:48:31Z",
+          "completedAt": "2026-09-09T04:50:20Z",
+          "url": "https://github.com/nullstyle/capnp-deno/actions/runs/34312400044/job/102344817668"
+        }
+      ]
+    }
+  }
+}

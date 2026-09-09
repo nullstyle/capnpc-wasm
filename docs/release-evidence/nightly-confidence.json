@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "phase": "scheduled_nightly_confidence",
+  "requiredConsecutiveScheduledRuns": 7,
+  "currentConsecutiveScheduledRuns": 0,
+  "nativeRevision": "0fb8df40126ea166f95016963c465b03db22819e",
+  "acceptedWasmRevision": "94ba6b257fbfd16b2e35bc0117a8afa55a4d55e1",
+  "acceptedDenoRevision": "24ccd2960b411dd20feb0a1965f2535fdf16d012",
+  "initialEvidence": "initial-hosted-checks.json",
+  "workflow": {
+    "repository": "nullstyle/capnp-zig",
+    "path": ".github/workflows/nightly.yml",
+    "requiredEvent": "schedule",
+    "scheduledTimeUtc": "09:17"
+  },
+  "earliestEligibleScheduledDateUtc": "2026-09-09",
+  "followupLocalTime": "05:00",
+  "followupTimeZone": "America/Anchorage",
+  "cycles": [],
+  "rules": [
+    "Every job must succeed, including all soak, extended, forward-compatibility and fuzz gates.",
+    "Audit execution receipts for every discovered fuzz target against the exact source revision and requested iteration floor.",
+    "Manual workflow_dispatch and local runs are never scheduled confidence cycles.",
+    "A missed or failed daily scheduled run breaks the consecutive streak.",
+    "Relevant runtime, generator, test, dependency or gate changes reset qualifying evidence.",
+    "Evidence-only documentation updates do not reset the native runtime confidence streak."
+  ],
+  "publicationAuthorized": false
+}

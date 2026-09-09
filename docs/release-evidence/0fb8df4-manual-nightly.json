@@ -1,0 +1,363 @@
+{
+  "run": {
+    "conclusion": "success",
+    "createdAt": "2026-09-09T07:46:59Z",
+    "event": "workflow_dispatch",
+    "headSha": "0fb8df40126ea166f95016963c465b03db22819e",
+    "updatedAt": "2026-09-09T07:57:12Z",
+    "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325616792"
+  },
+  "qualifies_as_scheduled_daily_cycle": false,
+  "artifact_id": 10093888209,
+  "artifact_sha256": "37b597e0d0cd450d11b657daa8eee9d9bc89b2b7768151cc949eb50e54e703b8",
+  "raw_manifest_sha256": "baa7686eb0ea88efef03d28ed6acb42f77f1b7f68f51e6dd394e0cc4bad19ea1",
+  "raw_summary_sha256": "21470d701b3647825fc3d8977b1fe324daab57c5da8bb9c251669ec25d834029",
+  "raw_job_log_sha256": "4d01d237c4cfad787031bce30292e76449f6a2982488a19480bb9b03df41de60",
+  "harness_self_checks": {
+    "passed": 5,
+    "expected": 5,
+    "job_id": 102382072091
+  },
+  "audit": {
+    "source_declarations": 17,
+    "manifest_targets": 17,
+    "individual_receipts": 17,
+    "manifest_source_filter_report_match": true,
+    "missing_or_extra_receipts": 0,
+    "oracle_failures": 0,
+    "all_processes_exited_zero": true,
+    "minimum_measured_iterations": 10005,
+    "platform": {
+      "os": "linux",
+      "arch": "aarch64",
+      "zig_version": "0.17.0-dev.1683+5ceec001b"
+    }
+  },
+  "target_count": 17,
+  "total_executions": 180533,
+  "targets": [
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: Message.init validated parse",
+      "report_name": "fuzz_targets.test.fuzz: Message.init validated parse",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10031,
+        "iterations": 10031
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "ff76c0fc7d6fd9dc12e0b509f9c09b5d69d9504345547b22cf372013a00e90bf",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "f58f0c9ec3a6570923b377c015ea670ce9cb872d14f815b26cddbb2663ee9692"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: equivalent far list encodings preserve evolved fields",
+      "report_name": "fuzz_targets.test.fuzz: equivalent far list encodings preserve evolved fields",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10019,
+        "iterations": 10019
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "28c533843ee56fc0005b6e0b10146c7d6ad417a4401680ce655c9ca11068b88a",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "221af28c3aeee4b54fa1fb310229e65e0c2d1a0a7ae38cb6f754454e04aa3d9f"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: CodeGeneratorRequest parse + generate",
+      "report_name": "fuzz_targets.test.fuzz: CodeGeneratorRequest parse + generate",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10031,
+        "iterations": 10031
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "b9ef8f824512d3a28af0fc9ea4a864f37f2344dcbd35b9190a16746a6b9c51d3",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "e0cb3f35516920d43e425032926a57bb9f1f8e92a6b859567a0c2190a08c191d"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: packed decode",
+      "report_name": "fuzz_targets.test.fuzz: packed decode",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10539,
+        "iterations": 10539
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "14ec3db237e1d8bb19863beb1a7dab777f3dda563b90fd973ece9e460542f72c",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "312295ccc1c578490d3e4f40dd5122f4ec6de36385ba58f72aecc27035eb55c0"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: flat (table-less) validated decode",
+      "report_name": "fuzz_targets.test.fuzz: flat (table-less) validated decode",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10061,
+        "iterations": 10061
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "9969dd463e9c57cca36c3ab45850d057fcd08d6d9e69a5a6ad8ee1c965960c8a",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "8d4375ece65d1c79a75e962ef3d75b26a02852bb3bfd8f01af6c729826199fc5"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: warm sturdy-ref envelope decode",
+      "report_name": "fuzz_targets.test.fuzz: warm sturdy-ref envelope decode",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10032,
+        "iterations": 10032
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "c2df38c60eaf95fadd7724b4f2fb90f71c97e4bfbb1dcd075b17d73f2e599d75",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "a7bed8bf26dec7aab11b2e79ce30c47a2e60d4c39a6b27fbcc195682cfb7e231"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: stream framer chunking",
+      "report_name": "fuzz_targets.test.fuzz: stream framer chunking",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10111,
+        "iterations": 10111
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "355c9d6e29c683e20a08d22babf3ecfa9aad82117b091a572f22f8afbeeab902",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "8873e4498999af0d2e4a7b7cf036e9cf01b92466550ed4d6e5165f40e33c3e1c"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: peer frame dispatch",
+      "report_name": "fuzz_targets.test.fuzz: peer frame dispatch",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10364,
+        "iterations": 10364
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "290ba5c04db33c5b2ec6763fed16ca1f45e5561d70b42554be8722468bb6831e",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "932d793c6ba1f29b86532f3eb6726623e9d6d271124aa09d3985731729cef7d0"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: peer structured frame dispatch",
+      "report_name": "fuzz_targets.test.fuzz: peer structured frame dispatch",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 11905,
+        "iterations": 11905
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "1dd36c980e41af70949083349e2fc9f220c1a8e8a1c4c1bddc3a1143f8bb34fd",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "972e6d93d113aec0dbd3e2e7a2d39b1fd37f82b632421e8d7464f9b04c1bd08a"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: peer L3/L4 frame dispatch",
+      "report_name": "fuzz_targets.test.fuzz: peer L3/L4 frame dispatch",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 11051,
+        "iterations": 11051
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "e83521659e2273dcb2cbeca66af0a02b7a9539f524d5aa44e8a3b481118371ca",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "25e60f4093532c40e19ee32cbadb90582a1643937efb506271fa740e64154480"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: quic length-delimited framer chunking",
+      "report_name": "fuzz_targets.test.fuzz: quic length-delimited framer chunking",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10111,
+        "iterations": 10111
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "4077c205c7938a9df0eff671928bae5751bda6fc59efcc4be04129ae8c18319a",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "ab59c1f4f388f3e29f21f917f1b1122e8d1f2dfdae5d9c51aeb84ca798735586"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: quic native control framer chunking",
+      "report_name": "fuzz_targets.test.fuzz: quic native control framer chunking",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10113,
+        "iterations": 10113
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "99578e1cfabc314e8c8d9ef2c29be876e1e411e392a6c04aef9fda1cbc1e65c7",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "13b5955674cdcda81900ff117938cd669ace2f354cf499c9d0f127e247b021c2"
+    },
+    {
+      "source": "tests/fuzz/fuzz_targets.zig",
+      "source_sha256": "2b43d50ae5b64b432b3d4e981a503170c247cd09dcd2225a12ca4cf7249a735e",
+      "target": "fuzz: persistence restore / sturdy-ref decode",
+      "report_name": "fuzz_targets.test.fuzz: persistence restore / sturdy-ref decode",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10529,
+        "iterations": 10529
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "ba1e3c45901a9bc61cf3e0d559e16549867302b23b3e006f4e8eabeaa2a5028a",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "b8a7f9cfa2173b4f0af38ddd560158af14150ff71ede1da1c3381135d3c34729"
+    },
+    {
+      "source": "tests/reflection/fuzz_test.zig",
+      "source_sha256": "00267819882a5f25bc9c04b4520b04eb3d7149f90523903957ac1bd4b650888f",
+      "target": "fuzz: bounded reflection registry loading",
+      "report_name": "fuzz_test.test.fuzz: bounded reflection registry loading",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10622,
+        "iterations": 10622
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "9d2be5f3105e4ddfa20aa437c80852268dd2b1c5bc7776ae1a3ab455c7928b9b",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "4ccb370829e4946019720c980f718cbf2e8a05211cf8e2ea256a826882aae01b"
+    },
+    {
+      "source": "tests/reflection/fuzz_test.zig",
+      "source_sha256": "00267819882a5f25bc9c04b4520b04eb3d7149f90523903957ac1bd4b650888f",
+      "target": "fuzz: dynamic mutation agrees with generated readers",
+      "report_name": "fuzz_test.test.fuzz: dynamic mutation agrees with generated readers",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10024,
+        "iterations": 10024
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "93eea6ed6ba5dcc5ad61875f37ad1aea58b9e008fca4847bbad4a7c30a0b5fe0",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "7ee09840ef6ef1980d67ae2d3b766e97c2502f7b8851a396bc48fd021bf0f218"
+    },
+    {
+      "source": "tests/reflection/fuzz_test.zig",
+      "source_sha256": "00267819882a5f25bc9c04b4520b04eb3d7149f90523903957ac1bd4b650888f",
+      "target": "fuzz: double-far struct copies preserve content and presence",
+      "report_name": "fuzz_test.test.fuzz: double-far struct copies preserve content and presence",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 10005,
+        "iterations": 10005
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "a6d5e6a68ce183b9b0d370a2e93f07eeea89e7c06b5d388302add1beebaa7bf3",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "d104aa86a2747cdb5d8430fcb95065949e80df4f7d3dd3bc2a8ee3490b4c6062"
+    },
+    {
+      "source": "tests/fuzz/generated_rpc_test.zig",
+      "source_sha256": "6bd8fbec54854e6b3bfe9407edef31399da0809662554a866dd453189c95717c",
+      "target": "fuzz: generated streaming lifecycle and ordered barriers",
+      "report_name": "generated_rpc_test.test.fuzz: generated streaming lifecycle and ordered barriers",
+      "requested_iterations": 10000,
+      "seed": 1823060945,
+      "report": {
+        "before": 0,
+        "after": 14985,
+        "iterations": 14985
+      },
+      "process_term": {
+        "exited": 0
+      },
+      "raw_receipt_sha256": "6aa176ff4a2bcb93f82418f6bcf78a45660ca926303b439863db7f334a01a578",
+      "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderr_sha256": "197614b67e0dcd4a5ea27af013eb6b620a18d4e4897f970874e5cd5c302a0c7c"
+    }
+  ]
+}

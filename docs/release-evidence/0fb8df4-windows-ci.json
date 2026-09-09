@@ -1,0 +1,305 @@
+{
+  "schemaVersion": 1,
+  "run": {
+    "conclusion": "success",
+    "created_at": "2026-09-09T07:46:35Z",
+    "head_sha": "0fb8df40126ea166f95016963c465b03db22819e",
+    "html_url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790",
+    "id": 34325581790,
+    "status": "completed",
+    "updated_at": "2026-09-09T08:26:26Z"
+  },
+  "evidenceRoot": "0fb8df4-windows-ci",
+  "toolchain": "0.17.0-dev.1683+5ceec001b",
+  "workaround": "Exact selected-suite parallel compile warmup in a separate invocation, then original test graph with Windows Maker -j1; test-internal concurrency and CI caps unchanged.",
+  "jobs": {
+    "Debug": {
+      "id": 102382047462,
+      "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047462",
+      "name": "Test (windows-latest)",
+      "conclusion": "success",
+      "startedAt": "2026-09-09T07:46:58Z",
+      "completedAt": "2026-09-09T08:18:51Z",
+      "elapsedSeconds": 1913,
+      "rawLogPath": "Debug/job.log",
+      "rawLogSha256": "a797d8cc689a57bec393ce4c2c4dc8582f377495600b4f1e5cd22831f0946a1e",
+      "jobMetadataPath": "Debug/job.json",
+      "jobMetadataSha256": "31b8de200c61c0068655459d7f4b1a98a4bdf198017fa7e54ad1615debdb979e",
+      "focusedTimedRead": {
+        "receipt": {
+          "revision": "0fb8df40126ea166f95016963c465b03db22819e",
+          "zig": "0.17.0-dev.1683+5ceec001b",
+          "optimize": "Debug",
+          "phase": "run",
+          "executableSha256": "690d03f25523779a2267684bc6ef9a19df9afae31b233d41cd2df0a17c9a0ebd",
+          "runLimitSeconds": 90,
+          "elapsedSeconds": 3.0739955,
+          "timedOut": false,
+          "exitCode": 0
+        },
+        "passedTimedReadCases": [
+          "readTimeout expires cleanly on a silent peer instead of panicking",
+          "readTimeout delivers data that arrives before the deadline",
+          "readTimeout expires before delayed data and leaves it for the next read",
+          "readTimeout tolerates a rejected batch slot already returned to unused",
+          "readTimeout works without batch concurrency and leaves the socket reusable",
+          "readTimeout preserves stream bytes across repeated deadline races",
+          "readTimeout retains a completed read when the batch reports a concurrency error",
+          "readTimeout preserves a successful read while joining caller cancellation"
+        ],
+        "timedReadSkips": 0,
+        "otherPassedCases": 2,
+        "otherSkippedCases": 1,
+        "otherSkip": {
+          "test": "traffic resets the idle clock",
+          "source": "tests/rpc/transport/tcp/rpc_tick_idle_test.zig",
+          "classification": "Existing Windows Nagle/delayed-ACK timing guard; tick, idle reaping and all readTimeout cases still execute"
+        },
+        "artifact": {
+          "id": 10093740141,
+          "archiveSha256": "60a4711a4938c159a39fc1a9800eedf3865cd934fa43b655bc03703230cc1fca",
+          "name": "windows-timed-read-Debug-34325581790",
+          "digestVerifiedAgainstGitHub": true,
+          "rawReceiptPath": "Debug/focused/receipt.json",
+          "rawReceiptSha256": "33860eb56cb41357cc426141dc1f896caf8adafd12a97adb00cda0b8064c3170",
+          "stderrPath": "Debug/focused/stderr.log",
+          "stderrSha256": "793915814c3f36d42223b0456265f5b58f8c4fb5238cfceb992aca1c9b42efe4"
+        }
+      },
+      "fullSuite": {
+        "compile": {
+          "name": "Compile Windows test binaries",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:50:48Z",
+          "completedAt": "2026-09-09T07:58:25Z",
+          "elapsedSeconds": 457
+        },
+        "execute": {
+          "name": "Run tests",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:58:25Z",
+          "completedAt": "2026-09-09T08:03:53Z",
+          "elapsedSeconds": 328
+        },
+        "buildStepsPassed": 199,
+        "buildStepsTotal": 199,
+        "testsPassed": 1999,
+        "testsTotal": 2002,
+        "skips": [
+          {
+            "test": "createOutputFileInDir rejects symlink parent components",
+            "source": "src/main.zig",
+            "classification": "Existing Windows guard"
+          },
+          {
+            "test": "createOutputFileInDir rejects symlink final output",
+            "source": "src/main.zig",
+            "classification": "Existing Windows guard"
+          },
+          {
+            "test": "traffic resets the idle clock",
+            "source": "tests/rpc/transport/tcp/rpc_tick_idle_test.zig",
+            "classification": "Existing Windows Nagle/delayed-ACK timing guard; tick, idle reaping and all readTimeout cases still execute"
+          }
+        ],
+        "summary": "199/199 steps succeeded; 1999/2002 tests passed (3 skipped)"
+      }
+    },
+    "ReleaseSafe": {
+      "id": 102382047138,
+      "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047138",
+      "name": "ReleaseSafe hardening tests (windows-latest)",
+      "conclusion": "success",
+      "startedAt": "2026-09-09T07:46:58Z",
+      "completedAt": "2026-09-09T08:26:25Z",
+      "elapsedSeconds": 2367,
+      "rawLogPath": "ReleaseSafe/job.log",
+      "rawLogSha256": "890c257ae93768b3581ba11d08fdfe42efc283e4a5a638aa1d0fa1008f47a85e",
+      "jobMetadataPath": "ReleaseSafe/job.json",
+      "jobMetadataSha256": "0fd577193da4dc4e40aec99fefd727e5a998b2735111a49bdf4ffdbb1031498b",
+      "focusedTimedRead": {
+        "receipt": {
+          "revision": "0fb8df40126ea166f95016963c465b03db22819e",
+          "zig": "0.17.0-dev.1683+5ceec001b",
+          "optimize": "ReleaseSafe",
+          "phase": "run",
+          "executableSha256": "1a3fb2e0cfec0ddfd1e578ef86150ebcaf29040aa7e6ea151c66e04f0402886d",
+          "runLimitSeconds": 90,
+          "elapsedSeconds": 3.2642756,
+          "timedOut": false,
+          "exitCode": 0
+        },
+        "passedTimedReadCases": [
+          "readTimeout expires cleanly on a silent peer instead of panicking",
+          "readTimeout delivers data that arrives before the deadline",
+          "readTimeout expires before delayed data and leaves it for the next read",
+          "readTimeout tolerates a rejected batch slot already returned to unused",
+          "readTimeout works without batch concurrency and leaves the socket reusable",
+          "readTimeout preserves stream bytes across repeated deadline races",
+          "readTimeout retains a completed read when the batch reports a concurrency error",
+          "readTimeout preserves a successful read while joining caller cancellation"
+        ],
+        "timedReadSkips": 0,
+        "otherPassedCases": 2,
+        "otherSkippedCases": 1,
+        "otherSkip": {
+          "test": "traffic resets the idle clock",
+          "source": "tests/rpc/transport/tcp/rpc_tick_idle_test.zig",
+          "classification": "Existing Windows Nagle/delayed-ACK timing guard; tick, idle reaping and all readTimeout cases still execute"
+        },
+        "artifact": {
+          "id": 10093772956,
+          "archiveSha256": "6be94062b51ec1c668c5eb73465659dfb89e889691becdcfa7513d2caadd6c7a",
+          "name": "windows-timed-read-ReleaseSafe-34325581790",
+          "digestVerifiedAgainstGitHub": true,
+          "rawReceiptPath": "ReleaseSafe/focused/receipt.json",
+          "rawReceiptSha256": "758a61569663ea4ad453ac74a848dfe3579047473e886c6040c107178228fdb0",
+          "stderrPath": "ReleaseSafe/focused/stderr.log",
+          "stderrSha256": "793915814c3f36d42223b0456265f5b58f8c4fb5238cfceb992aca1c9b42efe4"
+        }
+      },
+      "fullSuite": {
+        "compile": {
+          "name": "Compile Windows test binaries (ReleaseSafe)",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T07:51:47Z",
+          "completedAt": "2026-09-09T08:19:27Z",
+          "elapsedSeconds": 1660
+        },
+        "execute": {
+          "name": "Run the full suite under ReleaseSafe",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T08:19:27Z",
+          "completedAt": "2026-09-09T08:23:32Z",
+          "elapsedSeconds": 245
+        },
+        "buildStepsPassed": 199,
+        "buildStepsTotal": 199,
+        "testsPassed": 1998,
+        "testsTotal": 2002,
+        "skips": [
+          {
+            "test": "createOutputFileInDir rejects symlink parent components",
+            "source": "src/main.zig",
+            "classification": "Existing Windows guard"
+          },
+          {
+            "test": "createOutputFileInDir rejects symlink final output",
+            "source": "src/main.zig",
+            "classification": "Existing Windows guard"
+          },
+          {
+            "test": "traffic resets the idle clock",
+            "source": "tests/rpc/transport/tcp/rpc_tick_idle_test.zig",
+            "classification": "Existing Windows Nagle/delayed-ACK timing guard; tick, idle reaping and all readTimeout cases still execute"
+          },
+          {
+            "test": "L3 affinity: an inbound Accept pins the index, exactly like a Provide does",
+            "source": "tests/rpc/peer/rpc_three_party_handoff_vatc_test.zig",
+            "classification": "Existing non-Debug guard: thread-affinity observation is unavailable outside Debug"
+          }
+        ],
+        "summary": "199/199 steps succeeded; 1998/2002 tests passed (4 skipped)"
+      },
+      "releaseFastSubset": {
+        "compile": {
+          "name": "Compile Windows teardown-heavy RPC binaries",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T08:23:32Z",
+          "completedAt": "2026-09-09T08:25:49Z",
+          "elapsedSeconds": 137
+        },
+        "execute": {
+          "name": "Run teardown-heavy RPC suites under ReleaseFast",
+          "conclusion": "success",
+          "startedAt": "2026-09-09T08:25:49Z",
+          "completedAt": "2026-09-09T08:26:19Z",
+          "elapsedSeconds": 30
+        },
+        "buildStepsPassed": 13,
+        "buildStepsTotal": 13,
+        "testsPassed": 168,
+        "testsTotal": 169,
+        "skips": [
+          {
+            "test": "L3 affinity: an inbound Accept pins the index, exactly like a Provide does",
+            "source": "tests/rpc/peer/rpc_three_party_handoff_vatc_test.zig",
+            "classification": "Existing non-Debug guard: thread-affinity observation is unavailable outside Debug"
+          }
+        ]
+      }
+    },
+    "QUIC": {
+      "id": 102382047173,
+      "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34325581790/job/102382047173",
+      "name": "QUIC targeted transport (windows-latest)",
+      "conclusion": "success",
+      "startedAt": "2026-09-09T07:46:58Z",
+      "completedAt": "2026-09-09T08:02:45Z",
+      "elapsedSeconds": 947,
+      "rawLogPath": "QUIC/job.log",
+      "rawLogSha256": "b881bc699e5c924d9141ef947f68beb8c95a80c2eb69f2dd22a3288b2d9f2171",
+      "jobMetadataPath": "QUIC/job.json",
+      "jobMetadataSha256": "e8cbe8be678804d22b8a527f6b0d002c892953650b28aead99bca2fd88fb1b92",
+      "modes": {
+        "Debug": {
+          "compile": {
+            "name": "Compile Windows QUIC evidence binaries (Debug)",
+            "conclusion": "success",
+            "startedAt": "2026-09-09T07:52:05Z",
+            "completedAt": "2026-09-09T07:59:58Z",
+            "elapsedSeconds": 473
+          },
+          "execute": {
+            "name": "Run native QUIC transport evidence (Debug, no skips)",
+            "conclusion": "success",
+            "startedAt": "2026-09-09T07:59:58Z",
+            "completedAt": "2026-09-09T08:00:27Z",
+            "elapsedSeconds": 29
+          },
+          "buildStepsPassed": 19,
+          "buildStepsTotal": 19,
+          "testsPassed": 88,
+          "testsTotal": 88,
+          "testsSkipped": 0,
+          "sourceInventory": {
+            "roots": 4,
+            "tests": 83,
+            "skipPaths": 0
+          }
+        },
+        "ReleaseSafe": {
+          "compile": {
+            "name": "Compile Windows QUIC evidence binaries (ReleaseSafe)",
+            "conclusion": "success",
+            "startedAt": "2026-09-09T08:00:27Z",
+            "completedAt": "2026-09-09T08:02:10Z",
+            "elapsedSeconds": 103
+          },
+          "execute": {
+            "name": "Run native QUIC transport evidence (ReleaseSafe, no skips)",
+            "conclusion": "success",
+            "startedAt": "2026-09-09T08:02:10Z",
+            "completedAt": "2026-09-09T08:02:40Z",
+            "elapsedSeconds": 30
+          },
+          "buildStepsPassed": 19,
+          "buildStepsTotal": 19,
+          "testsPassed": 88,
+          "testsTotal": 88,
+          "testsSkipped": 0,
+          "sourceInventory": {
+            "roots": 4,
+            "tests": 83,
+            "skipPaths": 0
+          }
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Counts and conclusions are from actual completed Windows job logs and durable focused receipts.",
+    "Full-suite skip names are classified from unchanged explicit source guards and the corresponding ordered runner summaries; the Maker full summary does not print individual skipped names.",
+    "The successful workaround does not imply that the pinned upstream process-inheritance defect is fixed."
+  ]
+}
