@@ -10,14 +10,14 @@ mise run browser:install firefox
 mise run test:browser firefox webkit
 ```
 
-The driver uses pinned Deno and `playwright@1.58.2`. By default, installation
+The driver uses pinned Deno and `playwright@1.63.0`. By default, installation
 and verification cover all three engines:
 
-| Engine                  | Version      | Playwright revision |
-| ----------------------- | ------------ | ------------------- |
-| Chromium headless shell | 145.0.7632.6 | 1208                |
-| Firefox                 | 146.0.1      | 1509                |
-| WebKit                  | 26.0         | 2248                |
+| Engine                  | Version       | Playwright revision |
+| ----------------------- | ------------- | ------------------- |
+| Chromium headless shell | 153.0.8010.12 | 1243                |
+| Firefox                 | 155.0         | 1543                |
+| WebKit                  | 26.6          | 2359                |
 
 Browsers and the FFmpeg helper live under `.cache/playwright`; no Node
 installation or system browser is used. On Linux, browsers still need the
@@ -28,8 +28,16 @@ Install those libraries using the same pinned package (the CLI invokes the
 system package manager and may request sudo):
 
 ```sh
-mise exec -- deno run --config tests/browser/deno.json --frozen --allow-read --allow-env --allow-sys --allow-run --allow-net playwright install-deps chromium firefox webkit
+mise exec -- deno run --config tests/browser/deno.json --frozen --allow-read --allow-env --allow-sys --allow-run --allow-net tests/browser/playwright.ts install-deps chromium firefox webkit
 ```
+
+The small `playwright.ts` bootstrap also runs the pinned upstream CLI. During
+package import only, it treats a denied optional WSL detection probe at
+`/proc/sys/fs/binfmt_misc/WSLInterop` as unavailable. Deno continues to deny
+access to that privileged path. The original `fs.existsSync` function is
+restored in `finally`, and other paths and errors retain their behavior. The
+bootstrap test verifies both restoration and the retained Linux permission
+denial. No additional permissions are granted.
 
 `install.ts` obtains the current platform's download plan from the pinned
 Playwright package, downloads its official archives, and extracts them with the
@@ -75,8 +83,11 @@ differences fail the engine's result. Raw and canonical requests remain beside
 the generated fixtures for inspection.
 
 Malformed and truncated Zig requests must exit unsuccessfully with preserved
-diagnostics and no exposed output files. Worker abort and timeout must terminate
-a job and allow reuse with identical output. Native output and temporary browser
+diagnostics and no exposed output files. Twenty alternating worker abort and
+timeout operations must terminate their jobs and allow reuse with identical
+output after every replacement. A separate 60-second host deadline detects a
+stalled browser without changing the SDK's one-millisecond cancellation budget
+or its normal 30-second recovery budget. Native output and temporary browser
 profiles stay under `build/test/browser-*`; the output remains available for
 inspection.
 
@@ -96,3 +107,40 @@ bundles are retained as workflow artifacts.
 Published package installation and application-specific Content Security
 Policies are outside this suite's current coverage. Browser versions follow the
 pinned Playwright package rather than the user's installed browser versions.
+
+## Engine regression evidence
+
+The first hosted Linux run trapped in WebKit after a worker timeout. That exact
+null-reference trap did not reproduce locally, and the subsequent hosted
+`92d55f3` browser matrix passed. A separate repeated-cancellation probe did
+reproduce a stall in the older engine. The following control used unchanged SDK
+and Wasm bytes in a Linux x86_64 container, with the original person workspace
+and all four generators:
+
+| Playwright / WebKit revision | Active cancellation followed by recovery   |
+| ---------------------------- | ------------------------------------------ |
+| 1.58.2 / 2248                | Stalled at cycle 9 without instrumentation |
+| 1.61.1 / 2311                | Stalled at cycle 17                        |
+| 1.63.0 / 2359                | Passed 100 consecutive cycles              |
+
+Replacing the whole SDK client and retaining the full Wasm instance did not
+remove the old-engine stall. Twenty replacements of idle workers passed. The
+full browser regression with revision 2248 stopped during its twelfth recovery.
+The current twenty-replacement test preserves that failure pattern in each
+engine; compiler requests and every generated file remain checked against the
+native oracle. The A/B evidence motivates the browser upgrade without claiming
+it proves the cause of the earlier hosted trap.
+
+After the upgrade, the complete macOS three-engine matrix passed all sixty
+cancellation/recovery cycles. The Linux container also passed the complete
+WebKit suite and its subsequent canonical request audit. The bootstrap
+permission regression passes on both hosts.
+
+To repeat the control, retain the built `dist/` assets in a disposable checkout,
+change only the Playwright pin and frozen lock, install that engine, and invoke
+the driver directly to avoid rebuilding the SDK:
+
+```sh
+mise run browser:install webkit
+mise exec -- deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/run.ts webkit
+```

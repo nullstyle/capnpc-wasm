@@ -1,4 +1,4 @@
-import { chromium, firefox, webkit } from "playwright";
+import { chromium, firefox, webkit } from "./playwright.ts";
 import { selectedEngines } from "./engines.ts";
 
 // This driver deliberately prepares its native oracle before browser execution,
@@ -71,6 +71,23 @@ type BrowserGlobal = typeof globalThis & { capnpTest: BrowserState };
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+async function within<T>(pending: Promise<T>, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label} did not finish within 60 seconds`)),
+          60_000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function equalOutputs(
@@ -690,56 +707,62 @@ try {
     );
   }
 
-  for (const mode of ["abort", "timeout"] as const) {
-    const result = await page.evaluate(async ({ mode, input }) => {
-      const worker = (globalThis as BrowserGlobal).capnpTest.worker;
-      const controller = new AbortController();
-      let pending: Promise<Result>;
-      if (mode === "abort") {
-        pending = worker.compile(input, { signal: controller.signal });
-        setTimeout(() => controller.abort(), 1);
-      } else {
-        pending = worker.compile(input, { timeoutMs: 1 });
-      }
-      try {
-        await pending;
-        return { name: "unexpected success", outputs: {} };
-      } catch (error) {
-        const expectedName = mode === "abort" ? "AbortError" : "TimeoutError";
-        if ((error as Error).name !== expectedName) {
-          throw new Error(
-            `${mode} expected ${expectedName}, received ${
-              (error as Error).name
-            }: ${(error as Error).message}`,
-            { cause: error },
-          );
+  // Repeated replacement exposes engine faults that a single cancellation can
+  // miss. Keep the same compiler client and verify complete output after each.
+  for (let iteration = 0; iteration < 20; iteration++) {
+    const mode = iteration % 2 === 0 ? "abort" : "timeout";
+    const result = await within(
+      page.evaluate(async ({ mode, input }) => {
+        const worker = (globalThis as BrowserGlobal).capnpTest.worker;
+        const controller = new AbortController();
+        let pending: Promise<Result>;
+        if (mode === "abort") {
+          pending = worker.compile(input, { signal: controller.signal });
+          setTimeout(() => controller.abort(), 1);
+        } else {
+          pending = worker.compile(input, { timeoutMs: 1 });
         }
-        let result: Result;
         try {
-          result = await worker.compile(input);
-        } catch (cause) {
-          throw new Error(
-            `worker recovery after ${mode} failed: ${(cause as Error).name}: ${
-              (cause as Error).message
-            }`,
-            { cause },
-          );
+          await pending;
+          return { name: "unexpected success", outputs: {} };
+        } catch (error) {
+          const expectedName = mode === "abort" ? "AbortError" : "TimeoutError";
+          if ((error as Error).name !== expectedName) {
+            throw new Error(
+              `${mode} expected ${expectedName}, received ${
+                (error as Error).name
+              }: ${(error as Error).message}`,
+              { cause: error },
+            );
+          }
+          let result: Result;
+          try {
+            result = await worker.compile(input);
+          } catch (cause) {
+            throw new Error(
+              `worker recovery after ${mode} failed: ${
+                (cause as Error).name
+              }: ${(cause as Error).message}`,
+              { cause },
+            );
+          }
+          return {
+            name: (error as Error).name,
+            outputs: Object.fromEntries(
+              Object.entries(result.outputs).map(([language, files]) => [
+                language,
+                Object.fromEntries(
+                  Object.entries(files).map((
+                    [path, bytes],
+                  ) => [path, Array.from(bytes)]),
+                ),
+              ]),
+            ),
+          };
         }
-        return {
-          name: (error as Error).name,
-          outputs: Object.fromEntries(
-            Object.entries(result.outputs).map(([language, files]) => [
-              language,
-              Object.fromEntries(
-                Object.entries(files).map((
-                  [path, bytes],
-                ) => [path, Array.from(bytes)]),
-              ),
-            ]),
-          ),
-        };
-      }
-    }, { mode, input: data.scenarios[0].input });
+      }, { mode, input: data.scenarios[0].input }),
+      `${engine} worker ${mode} recovery cycle ${iteration + 1}`,
+    );
     assert(
       result.name === (mode === "abort" ? "AbortError" : "TimeoutError"),
       `${mode} failed with ${result.name}`,
@@ -750,7 +773,9 @@ try {
       `worker recovery after ${mode}`,
     );
     console.log(
-      `PASS ${engine} worker: ${mode} terminates the job and permits reuse`,
+      `PASS ${engine} worker: ${mode} terminates the job and permits reuse (${
+        iteration + 1
+      }/20)`,
     );
   }
 
@@ -786,6 +811,13 @@ try {
   console.log(
     `${engine} execution passed offline with process spawning disabled; canonical audit receipt: ${receiptPath}`,
   );
+} catch (error) {
+  // Report before shutting down an unhealthy browser so cleanup cannot hide
+  // the failing operation or the host-side recovery deadline.
+  console.error(
+    `FAIL ${engine}: ${error instanceof Error ? error.stack : String(error)}`,
+  );
+  throw error;
 } finally {
   await browser?.close();
   await server.shutdown();

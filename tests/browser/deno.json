@@ -1,6 +1,6 @@
 {
   "imports": {
-    "playwright": "npm:playwright@1.58.2"
+    "playwright": "npm:playwright@1.63.0"
   },
   "nodeModulesDir": "none",
   "lock": "./deno.lock"

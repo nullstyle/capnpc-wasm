@@ -37,10 +37,19 @@ The first hosted run,
 passed the clean Linux and macOS checks and external package consumers on
 `ac9b91e`. Chromium and Firefox passed. WebKit trapped while compiling after a
 worker timeout; the exact trap has not reproduced locally, including a complete
-Linux browser run. This remains an unresolved browser acceptance failure.
-Subsequent failing jobs retain their exact Wasm modules and SDK bundles
-alongside fixtures so the hosted failure can be investigated with identical
-assets.
+Linux browser run. The subsequent hosted browser matrix passed on `92d55f3`.
+Independent repeated cancellation did expose an older-engine stall: unchanged
+SDK/Wasm bytes stalled after 9 cycles with WebKit revision 2248 and after 17
+with revision 2311, while revision 2359 passed 100 cycles. This evidence
+supports the Playwright 1.63.0 upgrade without establishing the cause of the
+earlier hosted null-reference trap. The browser gate now verifies twenty
+alternating cancellations and complete output recovery per engine. The narrow
+Deno bootstrap compatibility test preserves denied procfs access; no runtime
+permission is added. The updated macOS three-engine matrix and complete Linux
+WebKit suite, including canonical request verification, passed locally.
+[Browser evidence](../tests/browser/README.md) records the control and
+reproduction commands. Subsequent failing jobs retain their exact Wasm modules
+and SDK bundles alongside fixtures for investigation.
 
 The package gate checks reproducible archive bytes, SHA-256 inventory integrity,
 stale staging cleanup, and tamper rejection. External Deno consumers exercise

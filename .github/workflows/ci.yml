@@ -80,7 +80,12 @@ jobs:
         run: >-
           mise exec -- deno run --config tests/browser/deno.json --frozen
           --allow-read --allow-env --allow-sys --allow-run --allow-net
-          playwright install-deps chromium firefox webkit
+          tests/browser/playwright.ts install-deps chromium firefox webkit
+      - name: Verify the browser bootstrap permission boundary
+        run: >-
+          mise exec -- deno test --config tests/browser/deno.json --frozen
+          --no-prompt --allow-read --allow-env --allow-sys
+          tests/browser/playwright_test.ts
       - name: Install all pinned browser engines
         run: mise run browser:install chromium firefox webkit
       # One build feeds all engines. Each browser still runs in a separate

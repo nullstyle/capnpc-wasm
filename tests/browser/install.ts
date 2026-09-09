@@ -7,7 +7,6 @@ import { selectedEngines } from "./engines.ts";
 const root = Deno.cwd();
 const cache = `${root}/.cache/playwright`;
 const config = new URL("./deno.json", import.meta.url);
-const { imports } = JSON.parse(await Deno.readTextFile(config));
 const plan = await new Deno.Command(Deno.execPath(), {
   args: [
     "run",
@@ -17,7 +16,7 @@ const plan = await new Deno.Command(Deno.execPath(), {
     "--allow-read",
     "--allow-env",
     "--allow-sys",
-    imports.playwright,
+    fileURLToPath(new URL("./playwright.ts", import.meta.url)),
     "install",
     ...selectedEngines(Deno.args),
     "--only-shell",
