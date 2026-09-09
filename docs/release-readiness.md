@@ -68,18 +68,26 @@ processes kept their pipes open. Both serial controls passed all 16 tests and
 records exact source, artifact and raw-receipt hashes, process/pipe observations,
 and the limitation that the original c875835 process state was not captured.
 
-Native `04d3b62` applies the project-owned workaround and is synchronized in this
-Wasm candidate. It compiles each selected suite's exact prerequisites
+Native `04d3b62` applies the project-owned workaround; the follow-up `0fb8df4`
+is synchronized in this Wasm candidate. It compiles each selected suite's exact prerequisites
 in parallel, waits for that invocation to exit, then runs the unchanged suite
 with one Maker job on Windows. It preserves test selection, test-internal
 concurrency, skip policy, time limits, and failure propagation. The original
 runtime, generator and test sources remain unchanged. Initial hosted checks stay
 open until the full Windows Debug, ReleaseSafe, ReleaseFast and QUIC gates pass
-with this workaround; the successful isolated controls do not replace them. Fresh verification runs are
+with this workaround; the successful isolated controls do not replace them. The first
 [native CI 34324587356](https://github.com/nullstyle/capnp-zig/actions/runs/34324587356)
+rejected the new compile step's display label under the existing ReleaseFast
+policy scanner. `0fb8df4` removes the incidental mode word from that label;
+commands and policy exceptions are unchanged, and local hardening passes with
+72 reviewed findings across 195 files. The
+[manual Nightly at 04d3b62](https://github.com/nullstyle/capnp-zig/actions/runs/34324612439)
+passed all five jobs; it remains nonqualifying manual evidence. Current
+verification is
+[native CI 34325581790](https://github.com/nullstyle/capnp-zig/actions/runs/34325581790)
 and
-[manual Nightly 34324612439](https://github.com/nullstyle/capnp-zig/actions/runs/34324612439).
-Both were in progress when recorded. The local compile/run phases passed:
+[manual Nightly 34325616792](https://github.com/nullstyle/capnp-zig/actions/runs/34325616792),
+both pending when recorded. The local compile/run phases passed:
 Debug ran 1,786/1,786 tests; ReleaseSafe ran 1,785/1,786 with the existing
 Debug-only test skipped. Both completed all 199 build steps. A comparison of
 real build configurations verified that all original execution nodes and flags
