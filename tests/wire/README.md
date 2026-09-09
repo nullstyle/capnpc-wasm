@@ -69,31 +69,28 @@ patch 0004 changes only new emission to the canonical encoding. Generated-code
 consumers currently use same-segment paths; this test targets the public
 allocation API.
 
-## Unchanged known validation gaps
+## Validation and strict Text regressions
 
-The following W2/W3 expectations remain explicit in every runtime variant. They
-are assertions, never skips or blanket acceptance of arbitrary exceptions. A
-changed outcome fails the suite and requires reviewing the corresponding runtime
-change.
+The pristine runtime's original behavior remains an explicit oracle. The patched
+native and WASI runtimes must reject a canonical double-far struct cycle at
+nesting limit 1 and traversal budget 2, independently and together. The finite
+double-far tree charges four words, including its child; pristine Zig charges
+only its two landing words. Near-pointer cycles and landing-pad limits remain
+independent rejection controls.
 
-- **W2: ordinary Text reads are lenient.** A byte list without a NUL terminator
-  is accepted by `readText`, which generated Text getters currently use.
-  `readTextStrict` must reject it with `InvalidTextPointer`, and C++ must reject
-  it as non-NUL-terminated. `writeText` supplies a positive control accepted by
-  all readers. The message validator is schema-agnostic: this is a typed
-  Text-read assertion, not a requirement that byte-list validation reject Data.
-- **W3: double-far struct traversal skips its pointer section.** A cyclic struct
-  behind a canonical double-far root unexpectedly passes validation at nesting
-  limit 1 and traversal budget 2, tested separately and together. The probe
-  asserts exactly two charged words and follows only 1,000 children, with no
-  further charge. Near-pointer cycles must reject under independent nesting and
-  traversal limits; the double-far cycle must reject when its budget cannot
-  cover the landing pad or its nesting limit disallows reading the root. A
-  future routing fix should replace the known-acceptance assertions with the
-  corresponding limit errors.
+Low-level `readText` keeps its lenient compatibility behavior. Generated Text
+getters now use strict reads, including Text list elements; non-null Text must
+carry a trailing NUL and valid UTF-8. The reflection/generated-Builder suite
+covers these typed getters. The wire suite checks raw strict rejection and C++
+rejection of missing terminators. Byte-list validation remains schema-agnostic,
+so valid Data is accepted by `Message.init`.
+
+Patched writer cases reopen composite lists through primitive and Text-list
+Builder views. C++ verifies the mutations and retained sibling fields, and the
+same/single-far controls remain byte-identical to pristine output.
 
 The cycle is intentionally not passed to `capnp decode`: its default-limit
 printer also crashed on this input during the audit and exposes no tight-limit
-flag. W3 records a Zig validation/limit-enforcement gap, not a claim that the
-C++ command safely prints cyclic inputs. The finite double-far tree is the C++
-control.
+flag. The historical W3 finding records a Zig limit-enforcement gap, not a claim
+that the C++ command safely prints cyclic inputs. The finite double-far tree is
+the C++ control.

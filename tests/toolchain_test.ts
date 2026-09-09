@@ -164,13 +164,34 @@ async function prepare() {
       `expected two ${language} files`,
     );
     if (language === "zig") {
-      const upstream = `${work}/upstream-zig`;
-      await Deno.mkdir(upstream);
+      // The maintained Zig generator now intentionally adds typed Builder and
+      // RPC APIs. --no-reflection disables descriptors, not those improvements;
+      // byte identity with the older pristine generator is no longer a contract.
+      const withoutReflection = `${work}/zig-without-reflection`;
+      await Deno.mkdir(withoutReflection);
       success(
-        await run([`${native}/capnpc-zig-upstream`], request, upstream),
-        "unmodified upstream Zig generator",
+        await run(
+          [`${native}/capnpc-zig`, "--no-reflection"],
+          request,
+          withoutReflection,
+        ),
+        "Zig generator without reflection metadata",
       );
-      await equalFiles(directory, upstream);
+      const plainFiles = await files(withoutReflection);
+      const reflectedFiles = await files(directory);
+      assert(
+        JSON.stringify([...plainFiles.keys()].sort()) ===
+          JSON.stringify([...reflectedFiles.keys()].sort()),
+        "--no-reflection changed generated Zig paths",
+      );
+      for (const [path, bytes] of plainFiles) {
+        const source = text.decode(bytes);
+        assert(
+          !source.includes("pub const CAPNP_SCHEMA_REQUEST") &&
+            !source.includes("pub const capnpSchema"),
+          `${path}: --no-reflection retained binary metadata`,
+        );
+      }
     }
   }
   return {
@@ -380,6 +401,23 @@ for (const host of hosts) {
           },
         );
       }
+      if (language === "zig") {
+        await t.step(
+          "Zig without reflection remains byte-identical to native",
+          async () => {
+            const output = `${data.work}/${host.name}-zig-without-reflection`;
+            await Deno.mkdir(output);
+            success(
+              await run(
+                guest("capnpc-zig", output, ["--no-reflection"]),
+                data.request,
+              ),
+              `${host.name} Zig without reflection`,
+            );
+            await equalFiles(output, `${data.work}/zig-without-reflection`);
+          },
+        );
+      }
       await t.step(
         `generated ${language} compiles and roundtrips with its pinned runtime`,
         async () => {
@@ -442,7 +480,7 @@ for (const host of hosts) {
                 "--dep",
                 "capnpc-zig",
                 `-Mgenerated=${output}/person.zig`,
-                `-Mcapnpc-zig=${root}/ref/capnp-zig/src/lib_core.zig`,
+                `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
               ]),
               "generated Zig roundtrip",
             );

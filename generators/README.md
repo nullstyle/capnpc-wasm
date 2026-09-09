@@ -44,10 +44,13 @@ descriptors.
 
 The [Zig command](zig/README.md) builds the existing `capnp-zig` generator for
 native and WASI hosts with the exact upstream Zig pin. Generated `name.zig`
-files import the `capnpc-zig` module. Bind that name to the pinned library;
-serialization consumers use its `src/lib_core.zig` entry point. No language
-annotations are required. The SDK uses the upstream full API and schema manifest
-defaults.
+files import the `capnpc-zig` module. Bind that name to
+`build/src/capnp-zig/src/lib_core.zig`, which includes the pinned runtime,
+compatibility corrections, and [reflection support](zig/README.md#reflection).
+Generated binary nodes support schema lookup and dynamic message access;
+`--no-reflection` omits metadata while retaining the new APIs and their matching
+patched-runtime dependency. No language annotations are required. The SDK emits
+the full API, binary reflection metadata, and JSON export manifest by default.
 
 ## Verification
 

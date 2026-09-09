@@ -2,6 +2,7 @@ const std = @import("std");
 const message = @import("capnpc-zig").message;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
+const patched_validation = @import("probe-options").patched_validation;
 
 fn write(init: std.process.Init, path: []const u8, bytes: []const u8) !void {
     const file = try std.Io.Dir.cwd().createFile(init.io, path, .{});
@@ -89,8 +90,16 @@ fn builderLists(init: std.process.Init) !void {
         try expectEqual(shape.pointer_words, reopened.pointer_words);
         if (shape.count > 0) {
             var first = try reopened.get(0);
-            if (shape.data_words > 0) first.writeU64(0, 42);
-            if (shape.pointer_words > 0) try first.writeText(0, "first");
+            if (patched_validation) {
+                // An older schema can reopen the same composite as a primitive
+                // or pointer list without losing the other element sections.
+                const pointer = try root.getAnyPointer(0);
+                if (shape.data_words > 0) try (try pointer.getU64List()).set(0, 42);
+                if (shape.pointer_words > 0) try (try pointer.getTextList()).set(0, "first");
+            } else {
+                if (shape.data_words > 0) first.writeU64(0, 42);
+                if (shape.pointer_words > 0) try first.writeText(0, "first");
+            }
         }
         const bytes = try builder.toBytes();
         defer init.gpa.free(bytes);
@@ -153,6 +162,7 @@ fn canonicalDoubleFarTree(init: std.process.Init) !void {
     putWord(&bytes, 48, 42);
     var decoded = try message.Message.init(init.gpa, &bytes, .{});
     defer decoded.deinit();
+    try expectEqual(@as(usize, if (patched_validation) 4 else 2), decoded.traversal_words_used);
     const root = try decoded.getRootStruct();
     try expectEqual(@as(u64, 0), root.readU64(0));
     try expectEqual(@as(u64, 42), (try root.readStruct(0)).readU64(0));
@@ -175,7 +185,8 @@ fn textValidation(init: std.process.Init) !void {
         var decoded = try message.Message.init(init.gpa, bytes, .{});
         defer decoded.deinit();
         const reader = try decoded.getRootStruct();
-        // Known gap W2: ordinary Text reads accept the unterminated bytes.
+        // The explicit low-level compatibility reader remains lenient. Fresh
+        // generated Text accessors use readTextStrict and are tested separately.
         try expectEqualStrings("wire text", try reader.readText(0));
         if (terminated) {
             try expectEqualStrings("wire text", try reader.readTextStrict(0));
@@ -226,6 +237,13 @@ fn cycleValidation(init: std.process.Init) !void {
     // nesting limit, so tighter controls must still reject this exact input.
     try expectValidationError(init.gpa, &far, .{ .traversal_limit_words = 1 }, error.TraversalLimitExceeded);
     try expectValidationError(init.gpa, &far, .{ .nesting_limit = 0 }, error.NestingLimitExceeded);
+
+    if (patched_validation) {
+        try expectValidationError(init.gpa, &far, .{ .nesting_limit = 1 }, error.NestingLimitExceeded);
+        try expectValidationError(init.gpa, &far, .{ .traversal_limit_words = 2 }, error.TraversalLimitExceeded);
+        try expectValidationError(init.gpa, &far, .{ .nesting_limit = 1, .traversal_limit_words = 2 }, error.TraversalLimitExceeded);
+        return;
+    }
 
     // Known failure W3: the pointer section is skipped. Assert the precise
     // observed gap instead of skipping the desired rejection test. A future

@@ -4,8 +4,9 @@ cd "$(dirname "$0")/.."
 
 source_dir=build/src/capnp-zig
 patch_files=(patches/capnp-zig/*.patch)
+runtime_files=(generators/zig/runtime/*.zig)
 revision="$(git -C ref/capnp-zig rev-parse HEAD)"
-source_key="$revision:$(git hash-object "${patch_files[@]}")"
+source_key="$revision:$(git hash-object "${patch_files[@]}" "${runtime_files[@]}")"
 
 mkdir -p build/src build/native/bin build/wasm/bin build/zig/cache build/zig/bin
 if [[ ! -f "$source_dir/.source-key" ]] ||
@@ -17,12 +18,14 @@ if [[ ! -f "$source_dir/.source-key" ]] ||
     git apply --check --directory="$source_dir" "$patch_file"
     git apply --directory="$source_dir" "$patch_file"
   done
+  mkdir -p "$source_dir/src/reflection"
+  cp "${runtime_files[@]}" "$source_dir/src/reflection/"
   printf '%s\n' "$source_key" > "$source_dir/.source-key"
 fi
 
 # Compile main directly, without the RPC build graph or a second emitter. Keep
-# an unmodified oracle as well as the patched native/WASI commands, so tests can
-# verify unchanged output outside the contextual import-path correction.
+# an unmodified historical oracle as well as matching patched native/WASI
+# commands. New generated APIs intentionally differ from the old source output.
 zig build-exe ref/capnp-zig/src/main.zig \
   -O ReleaseSafe -fstrip --cache-dir build/zig/cache \
   -femit-bin=build/zig/bin/capnpc-zig-upstream

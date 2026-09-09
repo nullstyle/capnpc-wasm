@@ -84,7 +84,7 @@ run = [
   "cargo fmt --manifest-path generators/rust/Cargo.toml -- --check",
   "cargo fmt --manifest-path tests/consumers/rust/Cargo.toml -- --check",
   "cargo clippy --locked --manifest-path generators/rust/Cargo.toml --all-targets -- -D warnings",
-  "zig fmt --check generators/zig tests/consumers/zig tests/wire",
+  "zig fmt --check generators/zig tests/consumers/zig tests/wire tests/reflection tests/generator_api tests/rpc_codegen",
   { task = "doctor" },
   { task = "test" },
 ]
@@ -121,9 +121,12 @@ run = "go -C tests/hosts/wazero build -mod=readonly -o ../../../build/hosts/waze
 description = "Compare compiler/generator behavior in Wasmtime, wazero, and the Deno browser shim"
 depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig", "build:wazero", "build:sdk"]
 run = [
-  "zig test build/src/capnp-zig/src/main.zig --cache-dir build/zig/cache --test-filter 'main tests' --test-filter Generator.importPath",
+  "zig test build/src/capnp-zig/src/main.zig --cache-dir build/zig/cache --test-filter 'main tests' --test-filter Generator.importPath --test-filter reflection",
   "deno test --allow-read --allow-write=build --allow-run tests/toolchain_test.ts",
   "deno test --allow-read --allow-write=build --allow-run tests/wire_conformance_test.ts",
+  "deno test --allow-read --allow-write=build --allow-run tests/reflection/reflection_test.ts",
+  "deno test --allow-read --allow-write=build --allow-run tests/generator_api_test.ts",
+  "deno test --allow-read --allow-write=build --allow-run tests/rpc_codegen_test.ts",
   "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts",
   "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read --allow-write=build --allow-run tests/schema_features_test.ts",
   # Generated Wasm and shared fixtures live outside the Go module's cache inputs.

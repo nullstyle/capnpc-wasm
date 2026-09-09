@@ -1,0 +1,27 @@
+[
+  {
+    "name": "collections",
+    "schema": "generic_collections.capnp",
+    "consumer": "generic_collections_consumer.zig"
+  },
+  {
+    "name": "recursive",
+    "schema": "generic_recursive.capnp",
+    "consumer": "generic_recursive_consumer.zig"
+  },
+  {
+    "name": "evolution",
+    "schema": "generic_collections.capnp",
+    "consumer": "generic_evolution_consumer.zig"
+  },
+  {
+    "name": "alternating",
+    "schema": "generic_alternating.capnp",
+    "consumer": "generic_alternating_consumer.zig"
+  },
+  {
+    "name": "list_defaults",
+    "schema": "generic_list_defaults.capnp",
+    "consumer": "generic_list_defaults_consumer.zig"
+  }
+]

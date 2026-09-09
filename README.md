@@ -8,9 +8,11 @@ The build produces WASI Preview 1 commands: `capnp.wasm`, `capnpc-c++.wasm`,
 and Zig in Wasmtime, wazero (compiler and interpreter), and Deno, Chromium,
 Firefox, and WebKit using the pinned browser WASI shim. The TypeScript and Go
 SDKs accept in-memory workspaces and return generated files. Tests compare them
-with native upstream output and compile the generated source. Zig output targets
-the pinned `capnp-zig` library. Broader resource controls and published releases
-are still ahead.
+with native output and compile and execute the generated source. C++, Rust, and
+Go retain pristine upstream comparisons. Zig uses the matching patched native
+generator and runtime, including
+[binary schema reflection and generated views](generators/zig/README.md).
+Broader resource controls and published releases are still ahead.
 
 ## Bootstrap
 

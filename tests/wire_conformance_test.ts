@@ -359,9 +359,14 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
   for (const variant of variants) {
     const directory = `${work}/${variant.name}`;
     await Deno.mkdir(directory);
+    const options = `${directory}/probe-options.zig`;
+    await Deno.writeTextFile(
+      options,
+      `pub const patched_validation = ${variant.canonical};\n`,
+    );
     const executable = `${directory}/probe${variant.wasm ? ".wasm" : ""}`;
     const passed = await t.step(
-      `${variant.name}: Zig values, mutable reopen, legacy reads, and W2/W3`,
+      `${variant.name}: Zig values, mutable reopen, legacy reads, and validation`,
       async () => {
         await mustSucceed([
           "zig",
@@ -371,8 +376,11 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
           `${root}/build/zig/cache`,
           "--dep",
           "capnpc-zig",
+          "--dep",
+          "probe-options",
           `-Mroot=${root}/tests/wire/probe.zig`,
           `-Mcapnpc-zig=${root}/${variant.source}/src/lib_core.zig`,
+          `-Mprobe-options=${options}`,
           `-femit-bin=${executable}`,
         ], root);
         await mustSucceed(

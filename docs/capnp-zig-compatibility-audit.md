@@ -54,6 +54,39 @@ aliasing, empty and zero-width lists, pointer fields, storage growth, and mutabl
 reopening. Patched native/WASI bytes match and decode successfully with C++;
 same-segment and single-far output remains byte-identical to pristine upstream.
 
+### Native package and generated API remediation
+
+The native package now contains the reflection and wire changes introduced by
+patches 0001–0006. Patch 0007 synchronizes the subsequent implementation back
+into the Wasm build without modifying the pinned reference. Findings #3–#9 have
+focused compile-and-use or wire regressions: ordinary Builder getters, pointer
+reopening/copy/clear and reader views; double-far struct validation; strict Text
+reads including lists; concrete generic collections and recursion; constrained
+ordinary setters; nested pipeline helpers; and qualified inherited methods.
+
+Typed generic views remain additive, and generic RPC clients are still erased.
+The low-level raw pointer escape remains available. Builder readers borrow an
+explicit storage object and expire on mutation; they are not owned snapshots. No
+orphan/adopt API or per-read traversal accounting is claimed. The historical
+findings below remain a description of the original pinned revision, not the
+current patched implementation.
+
+The current generator intentionally changes source output beyond reflection, so
+exact equality with the old pristine Zig generator is no longer expected. Exact
+native/Wasm equality, generated-code execution, C++ decoding, and native
+cross-language RPC tests serve different purposes and are reported separately.
+
+Validation completed on 2026-09-08: native Debug and ReleaseSafe suites passed
+all 185 build steps (ReleaseSafe reported 1,954 tests passed and one skipped).
+The native C++/Go/Rust RPC matrix passed 31 cases with five documented skips and
+no failures. Generated-file, API compatibility/closure, documentation, and
+clean-package checks passed; the dedicated wire-evolution fuzz target completed
+10,018 iterations without failure. Downstream `mise run check` passed, including
+native/WASI generated consumers and independent C++ descriptor/message checks.
+All 188 native source files matched the prepared Wasm source tree byte for byte;
+the pinned reference checkouts remained pristine. Browser runtime sources were
+unchanged, so the browser matrix was not rerun.
+
 ## Scope and method
 
 Audited the pinned capnp-zig generator and runtime (`ref/capnp-zig` at
