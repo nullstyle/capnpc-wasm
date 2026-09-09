@@ -8,9 +8,18 @@ project license, and the package gate verifies the extracted license files.
 Initial hosted acceptance passed on September 9, 2026: native `0fb8df4`, Wasm
 `94ba6b2`, and Deno `24ccd29` have successful CI runs, and the native manual
 Nightly passed every job. The [run inventory](release-evidence/initial-hosted-checks.json)
-records exact revisions and every successful job. Seven scheduled daily Nightly
-successes remain outstanding; the
-[confidence ledger](release-evidence/nightly-confidence.json) starts at zero.
+records exact revisions and every successful job. The
+[confidence ledger](release-evidence/nightly-confidence.json) records one of
+seven required consecutive scheduled daily Nightly successes.
+
+The first qualifying [scheduled run, September 9](https://github.com/nullstyle/capnp-zig/actions/runs/34334866428),
+passed all five jobs at native `0fb8df4`. Its
+[hosted execution receipt](release-evidence/nightly-2026-09-09-hosted.json)
+preserves every job and step plus execution summaries and raw-log hashes. The
+[fuzz audit](release-evidence/nightly-2026-09-09-fuzz.json) verifies all 17
+source-discovered targets, 180,296 executions, at least 10,005 per target against
+the 10,000 floor, zero process failures, and all five harness self-checks. This
+run used the `schedule` event; the earlier manual runs remain nonqualifying.
 
 The Zig generator and runtime now come directly from the pristine pinned
 capnp-zig commit. Eight local patches and three copied reflection files have
@@ -196,9 +205,10 @@ digest. Rebuild after committing to tie the candidate to a clean source
 revision.
 
 Seven consecutive successful scheduled native Nightly runs remain an elapsed
-time gate. Local tests and manual Nightly runs do not count as daily cycles. The
-release-confidence follow-up moves to daily at 05:00 America/Anchorage after
-recording initial acceptance. The native workflow is scheduled for 09:17 UTC;
+time gate, with one qualifying cycle recorded and six more required. Local
+tests and manual Nightly runs do not count as daily cycles. The
+release-confidence follow-up runs daily at 05:00 America/Anchorage.
+The native workflow is scheduled for 09:17 UTC;
 September 9 is the first eligible scheduled date for this accepted native
 revision. The confidence ledger records every counted cycle and its per-target
 evidence. A missed or failed cycle resets the consecutive count. The follow-up

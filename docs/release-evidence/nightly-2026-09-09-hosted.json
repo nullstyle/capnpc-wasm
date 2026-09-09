@@ -1,0 +1,549 @@
+{
+  "schemaVersion": 1,
+  "scheduledDateUtc": "2026-09-09",
+  "scheduledTimeUtc": "09:17",
+  "run": {
+    "conclusion": "success",
+    "createdAt": "2026-09-09T09:28:08Z",
+    "event": "schedule",
+    "headSha": "0fb8df40126ea166f95016963c465b03db22819e",
+    "jobs": [
+      {
+        "completedAt": "2026-09-09T09:36:01Z",
+        "conclusion": "success",
+        "databaseId": 102411789848,
+        "name": "Coverage-guided fuzzing with per-target evidence",
+        "startedAt": "2026-09-09T09:28:13Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-09T09:28:15Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-09T09:28:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:21Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "startedAt": "2026-09-09T09:28:15Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:26Z",
+            "conclusion": "success",
+            "name": "Run jdx/mise-action@v4",
+            "number": 3,
+            "startedAt": "2026-09-09T09:28:21Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:26Z",
+            "conclusion": "success",
+            "name": "Run ./.github/actions/setup-zig",
+            "number": 4,
+            "startedAt": "2026-09-09T09:28:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:33Z",
+            "conclusion": "success",
+            "name": "Prove evidence rejects missing activity and oracle failures",
+            "number": 5,
+            "startedAt": "2026-09-09T09:28:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:35:57Z",
+            "conclusion": "success",
+            "name": "Fuzz each target with a measured activity floor",
+            "number": 6,
+            "startedAt": "2026-09-09T09:28:33Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:35:58Z",
+            "conclusion": "success",
+            "name": "Preserve fuzz receipts, reports, and replay corpus",
+            "number": 7,
+            "startedAt": "2026-09-09T09:35:57Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:35:59Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 14,
+            "startedAt": "2026-09-09T09:35:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:35:59Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 15,
+            "startedAt": "2026-09-09T09:35:59Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34334866428/job/102411789848"
+      },
+      {
+        "completedAt": "2026-09-09T09:37:24Z",
+        "conclusion": "success",
+        "databaseId": 102411790116,
+        "name": "RPC soak (chaos + deadlines, windows-latest)",
+        "startedAt": "2026-09-09T09:28:12Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-09T09:28:17Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-09T09:28:13Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:35Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "startedAt": "2026-09-09T09:28:17Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:31:24Z",
+            "conclusion": "success",
+            "name": "Run jdx/mise-action@v4",
+            "number": 3,
+            "startedAt": "2026-09-09T09:28:35Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:31:28Z",
+            "conclusion": "success",
+            "name": "Run ./.github/actions/setup-zig",
+            "number": 4,
+            "startedAt": "2026-09-09T09:31:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:35:20Z",
+            "conclusion": "success",
+            "name": "Run soak harness (2 minutes, 8 workers)",
+            "number": 5,
+            "startedAt": "2026-09-09T09:31:28Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:36:56Z",
+            "conclusion": "success",
+            "name": "Run soak harness under ReleaseSafe (1 minute)",
+            "number": 6,
+            "startedAt": "2026-09-09T09:35:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:37:18Z",
+            "conclusion": "success",
+            "name": "Run soak harness under ReleaseSafe (64 workers)",
+            "number": 7,
+            "startedAt": "2026-09-09T09:36:56Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:37:18Z",
+            "conclusion": "skipped",
+            "name": "Run soak harness under ThreadSanitizer (30 seconds)",
+            "number": 8,
+            "startedAt": "2026-09-09T09:37:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:37:22Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "startedAt": "2026-09-09T09:37:18Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:37:22Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "startedAt": "2026-09-09T09:37:22Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34334866428/job/102411790116"
+      },
+      {
+        "completedAt": "2026-09-09T09:40:25Z",
+        "conclusion": "success",
+        "databaseId": 102411790170,
+        "name": "Extended gates",
+        "startedAt": "2026-09-09T09:28:12Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-09T09:28:14Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-09T09:28:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:22Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "startedAt": "2026-09-09T09:28:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:28Z",
+            "conclusion": "success",
+            "name": "Run jdx/mise-action@v4",
+            "number": 3,
+            "startedAt": "2026-09-09T09:28:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:28Z",
+            "conclusion": "success",
+            "name": "Run ./.github/actions/setup-zig",
+            "number": 4,
+            "startedAt": "2026-09-09T09:28:28Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:29:39Z",
+            "conclusion": "success",
+            "name": "Run ./.github/actions/setup-capnp",
+            "number": 5,
+            "startedAt": "2026-09-09T09:28:28Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:29:41Z",
+            "conclusion": "success",
+            "name": "Restore Zig package cache",
+            "number": 6,
+            "startedAt": "2026-09-09T09:29:39Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:31:03Z",
+            "conclusion": "success",
+            "name": "Prefetch dependency tree",
+            "number": 7,
+            "startedAt": "2026-09-09T09:29:41Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:32:41Z",
+            "conclusion": "success",
+            "name": "Full test suite",
+            "number": 8,
+            "startedAt": "2026-09-09T09:31:03Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:36:14Z",
+            "conclusion": "success",
+            "name": "QUIC self-healing soak (abrupt deaths + healing workers)",
+            "number": 9,
+            "startedAt": "2026-09-09T09:32:41Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:40:08Z",
+            "conclusion": "success",
+            "name": "ReleaseSafe hardening tests",
+            "number": 10,
+            "startedAt": "2026-09-09T09:36:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:40:22Z",
+            "conclusion": "success",
+            "name": "QUIC transport tests",
+            "number": 11,
+            "startedAt": "2026-09-09T09:40:08Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:40:22Z",
+            "conclusion": "success",
+            "name": "Post Restore Zig package cache",
+            "number": 21,
+            "startedAt": "2026-09-09T09:40:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:40:22Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 22,
+            "startedAt": "2026-09-09T09:40:22Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:40:22Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 23,
+            "startedAt": "2026-09-09T09:40:22Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34334866428/job/102411790170"
+      },
+      {
+        "completedAt": "2026-09-09T09:36:08Z",
+        "conclusion": "success",
+        "databaseId": 102411790219,
+        "name": "RPC soak (chaos + deadlines, ubuntu-latest)",
+        "startedAt": "2026-09-09T09:28:11Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-09T09:28:14Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-09T09:28:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:24Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "startedAt": "2026-09-09T09:28:14Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:30Z",
+            "conclusion": "success",
+            "name": "Run jdx/mise-action@v4",
+            "number": 3,
+            "startedAt": "2026-09-09T09:28:24Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:30Z",
+            "conclusion": "success",
+            "name": "Run ./.github/actions/setup-zig",
+            "number": 4,
+            "startedAt": "2026-09-09T09:28:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:31:58Z",
+            "conclusion": "success",
+            "name": "Run soak harness (2 minutes, 8 workers)",
+            "number": 5,
+            "startedAt": "2026-09-09T09:28:30Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:33:36Z",
+            "conclusion": "success",
+            "name": "Run soak harness under ReleaseSafe (1 minute)",
+            "number": 6,
+            "startedAt": "2026-09-09T09:31:58Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:34:37Z",
+            "conclusion": "success",
+            "name": "Run soak harness under ReleaseSafe (64 workers)",
+            "number": 7,
+            "startedAt": "2026-09-09T09:33:36Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:36:05Z",
+            "conclusion": "success",
+            "name": "Run soak harness under ThreadSanitizer (30 seconds)",
+            "number": 8,
+            "startedAt": "2026-09-09T09:34:37Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:36:05Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 16,
+            "startedAt": "2026-09-09T09:36:05Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:36:05Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 17,
+            "startedAt": "2026-09-09T09:36:05Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34334866428/job/102411790219"
+      },
+      {
+        "completedAt": "2026-09-09T09:30:55Z",
+        "conclusion": "success",
+        "databaseId": 102411790250,
+        "name": "Forward-compat (zig dev.1786)",
+        "startedAt": "2026-09-09T09:28:11Z",
+        "status": "completed",
+        "steps": [
+          {
+            "completedAt": "2026-09-09T09:28:13Z",
+            "conclusion": "success",
+            "name": "Set up job",
+            "number": 1,
+            "startedAt": "2026-09-09T09:28:12Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:20Z",
+            "conclusion": "success",
+            "name": "Run actions/checkout@v6",
+            "number": 2,
+            "startedAt": "2026-09-09T09:28:13Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:26Z",
+            "conclusion": "success",
+            "name": "Run jdx/mise-action@v4",
+            "number": 3,
+            "startedAt": "2026-09-09T09:28:20Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:28:39Z",
+            "conclusion": "success",
+            "name": "Install the probe toolchain",
+            "number": 4,
+            "startedAt": "2026-09-09T09:28:26Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:30:41Z",
+            "conclusion": "success",
+            "name": "Build against the probe toolchain",
+            "number": 5,
+            "startedAt": "2026-09-09T09:28:39Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:30:53Z",
+            "conclusion": "success",
+            "name": "Transport + wire suites against the probe toolchain",
+            "number": 6,
+            "startedAt": "2026-09-09T09:30:41Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:30:53Z",
+            "conclusion": "success",
+            "name": "Post Run actions/checkout@v6",
+            "number": 12,
+            "startedAt": "2026-09-09T09:30:53Z",
+            "status": "completed"
+          },
+          {
+            "completedAt": "2026-09-09T09:30:53Z",
+            "conclusion": "success",
+            "name": "Complete job",
+            "number": 13,
+            "startedAt": "2026-09-09T09:30:53Z",
+            "status": "completed"
+          }
+        ],
+        "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34334866428/job/102411790250"
+      }
+    ],
+    "status": "completed",
+    "updatedAt": "2026-09-09T09:40:25Z",
+    "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34334866428"
+  },
+  "audit": {
+    "allFiveJobsSucceeded": true,
+    "everyRequiredStepSucceeded": true,
+    "allowedSkips": [
+      {
+        "jobId": 102411790116,
+        "step": "Run soak harness under ThreadSanitizer (30 seconds)",
+        "reason": "Existing Linux-only ThreadSanitizer step; the Linux job executed it successfully."
+      }
+    ],
+    "rawRunSha256": "f372221bb7e24dc3d1dab6d3dade2deeccf572aeafe08ba10619101c9fa5b682",
+    "nonFuzzLogs": [
+      {
+        "jobId": 102411790116,
+        "rawLog": "build/test/nightly-2026-09-09/hosted/job-102411790116.log",
+        "sha256": "d6a3ba1ee18e911dca7f3d3c45c8457b4133335ea74f47814cab76d37bdeccd1",
+        "bytes": 57831078,
+        "executionSummaries": [
+          "2026-09-09T09:35:20.7480349Z soak: sessions=4673 calls_ok=81319 cancelled=933 chaos_closes=937 transport_errors=937 expected_disconnects=937 contention_disconnects=0 unexpected_exceptions=0",
+          "2026-09-09T09:35:20.7485194Z soak: PASS",
+          "2026-09-09T09:36:56.5528103Z soak: sessions=13975 calls_ok=243427 cancelled=5254 chaos_closes=2797 transport_errors=2797 expected_disconnects=2797 contention_disconnects=0 unexpected_exceptions=0",
+          "2026-09-09T09:36:56.5536267Z soak: PASS",
+          "2026-09-09T09:37:18.9246549Z soak: sessions=5577 calls_ok=96787 cancelled=1265 chaos_closes=1119 transport_errors=16798 expected_disconnects=1119 contention_disconnects=0 unexpected_exceptions=0",
+          "2026-09-09T09:37:18.9252573Z soak: PASS"
+        ]
+      },
+      {
+        "jobId": 102411790170,
+        "rawLog": "build/test/nightly-2026-09-09/hosted/job-102411790170.log",
+        "sha256": "dfcf31fea0ba5f1f09208ac663ab8f7c8ee35c07d9d4d9372571be4accae6a81",
+        "bytes": 364830,
+        "executionSummaries": [
+          "2026-09-09T09:32:41.7676339Z Build Summary: 199/199 steps succeeded; 2002/2002 tests passed",
+          "2026-09-09T09:36:14.7976818Z soak-quic: resets_sent=152 unroutable_dcid=152 (reset_queued=152) abrupt_deaths=10",
+          "2026-09-09T09:36:14.7996167Z soak: sessions=1298 calls_ok=21730 cancelled=257 chaos_closes=247 transport_errors=311 expected_disconnects=247 contention_disconnects=70 unexpected_exceptions=0",
+          "2026-09-09T09:36:14.8000306Z soak: PASS",
+          "2026-09-09T09:40:08.9113543Z Build Summary: 31/31 steps succeeded; 506/507 tests passed (1 skipped)",
+          "2026-09-09T09:40:22.3358722Z Build Summary: 17/17 steps succeeded; 88/88 tests passed"
+        ]
+      },
+      {
+        "jobId": 102411790219,
+        "rawLog": "build/test/nightly-2026-09-09/hosted/job-102411790219.log",
+        "sha256": "b4fe20a563910d146f22c36c54b4ee2f078bb8e2c1822ee0dc31aaf0ff2478db",
+        "bytes": 14962125,
+        "executionSummaries": [
+          "2026-09-09T09:31:58.7128177Z soak: sessions=1368 calls_ok=23912 cancelled=268 chaos_closes=276 transport_errors=276 expected_disconnects=276 contention_disconnects=0 unexpected_exceptions=0",
+          "2026-09-09T09:31:58.7132636Z soak: PASS",
+          "2026-09-09T09:33:36.2384265Z soak: sessions=709 calls_ok=12453 cancelled=136 chaos_closes=144 transport_errors=144 expected_disconnects=144 contention_disconnects=0 unexpected_exceptions=0",
+          "2026-09-09T09:33:36.2389191Z soak: PASS",
+          "2026-09-09T09:34:37.3295288Z soak: sessions=5632 calls_ok=98624 cancelled=1088 chaos_closes=1152 transport_errors=1152 expected_disconnects=1152 contention_disconnects=0 unexpected_exceptions=0",
+          "2026-09-09T09:34:37.3299396Z soak: PASS",
+          "2026-09-09T09:36:05.5681789Z soak: sessions=264 calls_ok=4672 cancelled=48 chaos_closes=56 transport_errors=56 expected_disconnects=56 contention_disconnects=0 unexpected_exceptions=0",
+          "2026-09-09T09:36:05.5693037Z soak: PASS"
+        ]
+      },
+      {
+        "jobId": 102411790250,
+        "rawLog": "build/test/nightly-2026-09-09/hosted/job-102411790250.log",
+        "sha256": "2bf981ff81406ed7892594e40eabf9a7adb012816f539087d0f65b9fd80ea4f7",
+        "bytes": 62167,
+        "executionSummaries": [
+          "2026-09-09T09:30:41.5151338Z Build Summary: 29/29 steps succeeded; 19/19 tests passed",
+          "2026-09-09T09:30:51.4956521Z Build Summary: 17/17 steps succeeded; 53/53 tests passed",
+          "2026-09-09T09:30:53.0588065Z Build Summary: 7/7 steps succeeded; 50/50 tests passed"
+        ]
+      }
+    ]
+  },
+  "fuzzEvidence": "nightly-2026-09-09-fuzz.json"
+}
