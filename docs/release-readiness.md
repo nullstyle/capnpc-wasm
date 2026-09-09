@@ -28,7 +28,7 @@ successful Windows soaks do not substitute for timed-read execution or count as
 a scheduled daily confidence cycle. The synchronized Zig Wasm generator bytes
 are unchanged by those transport fixes.
 
-The synchronized follow-up at native `c875835` repairs both Windows failures.
+The synchronized follow-up at native `c875835` repairs both timed-read defects.
 Its runtime and tests match the successful
 [Windows probe 34314807091](https://github.com/nullstyle/capnp-zig/actions/runs/34314807091):
 all eight timed-read cases ran in Debug and ReleaseSafe with zero skips.
@@ -42,7 +42,22 @@ integration evidence is tracked in
 [CI 34315133881](https://github.com/nullstyle/capnp-zig/actions/runs/34315133881)
 and the fresh
 [manual Nightly 34315154577](https://github.com/nullstyle/capnp-zig/actions/runs/34315154577).
-Both must succeed before the initial hosted confidence checks are closed.
+The manual Nightly passed all five jobs. Its
+[per-target receipt](release-evidence/c875835-manual-nightly.json) records
+180,345 executions across all 17 discovered fuzz targets, with each exceeding
+10,000 executions and matching the exact source and raw report identity. It is a
+manual run and does not count toward the daily streak.
+
+Native CI passed 24 of 25 jobs, including the Windows Debug full suite and both
+focused Windows timed-read gates. The remaining Windows ReleaseSafe job failed
+because its TCP connection teardown test executable stopped responding to the
+Zig build runner. The pinned runner emitted this error without an active test
+index, so the failure does not establish that a named teardown test hung. The
+[targeted Windows probe 34319397598](https://github.com/nullstyle/capnp-zig/actions/runs/34319397598)
+compares terminal and test-runner protocol execution against an empty control
+without changing runtime or test sources. Its results are pending. The initial
+hosted checks remain open; successful soaks and focused timeout tests do not
+replace this remaining gate.
 
 The TypeScript SDK now bounds guest linear memory and the bytes/counts used for
 workspaces, requests, outputs, stdout, and stderr. It requires original Wasm
@@ -65,6 +80,19 @@ and `mise run test:package`. A separate Linux job installs the pinned browser
 engines and their system libraries, then requires all three engines to pass. The
 Apache-2.0 candidate `0b4bbf6` passed every job in
 [Wasm CI 34311506597](https://github.com/nullstyle/capnpc-wasm/actions/runs/34311506597).
+The synchronized candidate `894890b` also passed every job in
+[Wasm CI 34315464935](https://github.com/nullstyle/capnpc-wasm/actions/runs/34315464935).
+Schema Studio at `a2326f6` passed all three jobs in
+[Wasm CI 34317631265](https://github.com/nullstyle/capnpc-wasm/actions/runs/34317631265),
+including the new Studio workflows in Chromium, Firefox, and WebKit. Studio's
+local tests compare downloaded files with native C++/Rust/Go/Zig output and
+exercise folder imports, binary assets, diagnostics, cancellation, and stale
+results. The public SDK API, native runtime, generators, and reference pins are
+unchanged. A fresh clean-source
+[private package receipt](release-evidence/a2326f6-private-package.json) records
+package verification at that exact revision, including external Deno and Go
+consumers, byte parity, licensing, reproducibility, and tamper rejection.
+
 The companion capnp-deno schema-evolution and transport-closure repairs at
 `24ccd29` passed every job in
 [Deno CI 34312400044](https://github.com/nullstyle/capnp-deno/actions/runs/34312400044)

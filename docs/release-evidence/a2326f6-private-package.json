@@ -1,0 +1,30 @@
+{
+  "version": "0.1.0-rc.1",
+  "source": {
+    "commit": "a2326f652651e1410f47059317ba96d11d6c903d",
+    "dirty": false,
+    "sha256": "4e3853bc590884a60a6a22fbd54b15e9503962f260f1fe7fbb5bfa4a27cc6500"
+  },
+  "archiveSha256": "31a5a3987417470c73f1d7152cb369a2cfb345ab76156d166eeee7ae8e995b10",
+  "checks": [
+    "Apache-2.0 package and Go module licenses",
+    "manifest integrity",
+    "reproducible archive",
+    "stale staging cleanup",
+    "tampered manifest rejection",
+    "unexpected file rejection",
+    "external npm-layout TypeScript declarations",
+    "external npm-layout Deno direct/replay/worker",
+    "external Go compile/replay",
+    "public pinned wazero without replacement",
+    "cross-SDK generated-byte parity"
+  ],
+  "generated": {
+    "request": "43699a14e8a33df5b78c973f1a9fa7de7bcf6e41330e04733ab8269c961c3f9f",
+    "cpp/candidate.capnp.h": "f72919e6b83511a7de03d718d11a4a378cf26c4601925a06984cdcad9a7d234d",
+    "cpp/candidate.capnp.c++": "69b1a70a77853e60ec575d5efc9c48cb8bc91effeb6939bffbf37f6b71297be1",
+    "rust/candidate_capnp.rs": "360678717468e8e4bac0be2d56c623b4e77c979e77641c7af188da19a281bd73",
+    "go/candidate.capnp.go": "b2cd45497d411ffecd2bf9517a4b9a98c6fc963f7316dccab1b9a778b0a910a0",
+    "zig/candidate.zig": "e17bd69ac0340e61cc30868d3b0faa8d07ac40b05aa2a3068b151caf1270d9f1"
+  }
+}
