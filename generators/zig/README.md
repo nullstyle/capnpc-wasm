@@ -51,8 +51,20 @@ elements. Low-level lenient readers remain available. Concrete generic lists and
 recursive applications retain typed `brands()` views. Nested RPC result
 pipelines support struct/group paths with a 64-operation bound; inherited
 same-name methods gain declaring-type suffixes. Standard streaming results are
-bundled with the runtime. Generic RPC clients remain erased, and raw pointer
-escape APIs remain available.
+bundled with the runtime. Experimental
+`Service.Apply(.{ .T = capnpc.generic.Text })` views add typed generic clients,
+params/results, callbacks, server adapters, and pipelines. Method-local generic
+callers use explicit `Apply` bindings; server dispatch stays erased because
+those bindings are not carried on the wire. Imported superclass brands and
+equivalent diamonds retain their concrete types; ambiguous ancestor applications
+require an explicit `asAncestor()` view.
+
+Generated deferred streaming handlers acknowledge after application work
+completes. Delivery and subsequent barriers remain ordered. Default outbound and
+retained-input windows are 64 calls and 1 MiB encoded bytes; zero disables a
+selected limit. Oversized calls fail instead of temporarily exceeding a byte
+window. One-shot readiness and drain callbacks expose capacity recovery and
+terminal failure. These additions remain Experimental.
 
 The [Builder/reflection tests](../../tests/reflection/README.md),
 [generic API tests](../../tests/generator_api/README.md), RPC codegen tests, and
@@ -146,6 +158,43 @@ messages and must be cloned before modification. Sharing a registry between
 threads requires synchronization around its lazy default cache. Explicit brands
 passed to `Schema.asStructWithBrand()` also borrow their caller-supplied binding
 slices; keep those bindings alive with the views.
+
+`Registry.initWithOptions` and `SchemaRef.loadWithOptions` bound input bytes (64
+MiB), live registry allocation (128 MiB), node count (65,536), and wire
+validation work. Defaults use the same limits. The memory budget includes lazy
+default materialization; actual allocator failure remains `OutOfMemory`.
+
+Dynamic Builders provide scalar/presence/union queries and `asReader(&storage)`.
+Rebind storage after mutation, and reacquire list element builders after growth.
+Copies preserve reachable values and union selection on failure, including
+self-copy and overlapping views. Their `copy_options` bound expanded graph work,
+output words, additional live backing allocation, and nesting. Defaults are
+8,388,608 work units/output words, 64 MiB, and 64 levels. Shared targets are
+charged per incoming pointer, including logical zero-width list elements.
+
+Wire copying preserves numeric capability indices without transferring RPC
+ownership. Use the explicit capability-table remapper or peer proxy-copy path
+for copies between distinct tables; those paths own mapping/pinning/release
+effects separately. The independent C++ mutation corpus and native/WASI failure
+sweeps cover the runtime used here.
+
+## Native synchronization
+
+[`sync.json`](sync.json) records the native commit, SHA-256 digest of the
+complete prepared source tree, and hashes of mirrored conformance fixtures.
+After a build, `mise run check:zig-sync` verifies all of them without access to
+a developer's native checkout. Missing, extra, and changed source files fail
+verification. Maintainers record a new manifest only after committing native
+sources:
+
+```sh
+mise exec -- deno run --allow-read --allow-write=generators/zig/sync.json \
+  --allow-run=git scripts/check-zig-sync.ts --record-native /path/to/capnp-zig
+```
+
+The command checks committed native sources against the mirrored fixtures and
+prepared build tree. Compatibility patches still apply only to disposable
+sources; the reference submodule remains at its recorded revision.
 
 The JSON manifest remains a separate list of module/type/export names. It is not
 used to implement reflection. Binary descriptors increase generated source size;

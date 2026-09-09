@@ -113,6 +113,10 @@ run = "bash scripts/build-go.sh"
 description = "Build the pinned capnp-zig generator as native and WASI commands"
 run = "bash scripts/build-zig.sh"
 
+[tasks."check:zig-sync"]
+description = "Verify prepared Zig sources and mirrored fixtures against the committed native manifest"
+run = "deno run --allow-read --allow-run=git scripts/check-zig-sync.ts"
+
 [tasks."build:wazero"]
 description = "Build the test host from the pinned wazero reference"
 run = "go -C tests/hosts/wazero build -mod=readonly -o ../../../build/hosts/wazero-run ."

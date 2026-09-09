@@ -1,4 +1,5 @@
 const std = @import("std");
+const output = @import("output.zig");
 const capnpc = @import("capnpc-zig");
 const reflection = capnpc.reflection;
 const message = capnpc.message;
@@ -100,9 +101,7 @@ fn seed(root: reflection.DynamicStruct.Builder, case: Case) !void {
 fn write(init: std.process.Init, name: []const u8, bytes: []const u8) !void {
     const filename = try std.fmt.allocPrint(init.gpa, "evolution-{s}.bin", .{name});
     defer init.gpa.free(filename);
-    const file = try std.Io.Dir.cwd().createFile(init.io, filename, .{});
-    defer file.close(init.io);
-    try file.writeStreamingAll(init.io, bytes);
+    try output.write(init, filename, bytes);
 }
 
 fn check(case: Case, schema: reflection.StructSchema, decoded: *message.Message) !void {

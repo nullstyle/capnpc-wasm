@@ -72,6 +72,11 @@ Deno.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming", 
       schemas: ["streaming.capnp"],
       consumer: "rpc_stream_consumer.zig",
     },
+    {
+      name: "generic",
+      schemas: ["generic_rpc.capnp", "generic_rpc_external.capnp"],
+      consumer: "generic_rpc_consumer.zig",
+    },
   ];
   await Deno.mkdir(`${root}/build/test`, { recursive: true });
   const work = await Deno.makeTempDir({

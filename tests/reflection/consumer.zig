@@ -1,4 +1,5 @@
 const std = @import("std");
+const output = @import("output.zig");
 const capnpc = @import("capnpc-zig");
 const reflection = capnpc.reflection;
 const message = capnpc.message;
@@ -12,9 +13,7 @@ const strings = std.testing.expectEqualStrings;
 const expectError = std.testing.expectError;
 
 fn write(init: std.process.Init, path: []const u8, bytes: []const u8) !void {
-    const file = try std.Io.Dir.cwd().createFile(init.io, path, .{});
-    defer file.close(init.io);
-    try file.writeStreamingAll(init.io, bytes);
+    try output.write(init, path, bytes);
 }
 
 fn checkMetadata(registry: reflection.Registry) !void {
@@ -376,6 +375,8 @@ fn generatedBuilderRoundtrip(init: std.process.Init) !void {
 }
 
 pub fn main(init: std.process.Init) !void {
+    const destination = try output.configure(init);
+    defer if (destination) |path| init.gpa.free(path);
     const registry = try values.Values.capnpSchema.load(init.gpa);
     defer registry.deinit();
     try checkMetadata(registry);
@@ -389,5 +390,6 @@ pub fn main(init: std.process.Init) !void {
     try @import("list_evolution_test.zig").run(init, registry);
     try @import("list_failure_test.zig").run(init, registry);
     try @import("generic_list_test.zig").run(init, registry);
+    try @import("mutation_corpus.zig").run(init, registry);
     try write(init, "schema.bin", registry.encodedRequest());
 }

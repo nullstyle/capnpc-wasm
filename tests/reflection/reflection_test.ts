@@ -154,13 +154,17 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
         "generated_builder_test",
         "builder_evolution_test",
         "double_far_validation_test",
+        "dynamic_failure_test",
+        "copy_limits_test",
+        "fuzz_test",
       ]
     ) {
       await t.step(`${target}: ${suite}`, async () => {
         const executable = `${work}/${suite}-${target}${
           target === "wasi" ? ".wasm" : ""
         }`;
-        const generatedDependency = suite === "generated_builder_test";
+        const generatedDependency = suite === "generated_builder_test" ||
+          suite === "fuzz_test";
         await command([
           "zig",
           "test",
@@ -210,12 +214,13 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
           `-femit-bin=${executable}`,
         ], root);
         await command(
-          target === "native" ? [executable] : [
+          target === "native" ? [executable, "."] : [
             "wasmtime",
             "run",
             "--dir",
             `${directory}::/`,
             executable,
+            ".",
           ],
           directory,
         );
@@ -227,6 +232,24 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
           `${directory}/scalars.bin`,
           directory,
         ], root);
+        const ablation = await new Deno.Command(oracle, {
+          args: [
+            `${work}/request.bin`,
+            `${directory}/schema.bin`,
+            `${directory}/values.bin`,
+            `${directory}/scalars.bin`,
+            directory,
+            "--inject-mismatch",
+          ],
+          stdout: "piped",
+          stderr: "piped",
+        }).output();
+        assert(
+          ablation.code === 2,
+          `C++ mutation mismatch gate did not reject: ${
+            decoder.decode(ablation.stderr)
+          }`,
+        );
       },
     );
   }
@@ -267,6 +290,15 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
           await Deno.readFile(`${work}/wasi/${filename}`),
           filename,
         );
+      }
+      for await (const entry of Deno.readDir(`${work}/native`)) {
+        if (entry.isFile && entry.name.startsWith("mutation-")) {
+          equalBytes(
+            await Deno.readFile(`${work}/native/${entry.name}`),
+            await Deno.readFile(`${work}/wasi/${entry.name}`),
+            entry.name,
+          );
+        }
       }
     },
   );

@@ -115,3 +115,13 @@ mise exec -- zig test build/src/capnp-zig/src/main.zig \
 The shared brands corpus tests the parent-relative import through the real
 compiler and hosts. The native `capnpc-zig-upstream` binary remains available to
 reproduce historical behavior and compare explicitly unchanged wire paths.
+
+`0008-harden-reflection-and-typed-rpc.patch` adds typed generic RPC
+applications, branded ancestor views and capability pipelines, bounded deferred
+streaming, copy/remapping rollback, and allocation/work budgets. The matching
+copied reflection runtime gains bounded loading and mutation, scalar Builder
+queries, explicit borrowed Reader conversion, and self-copy/OOM preservation.
+The exact native commit and full source/fixture digests live in
+[`generators/zig/sync.json`](../../generators/zig/sync.json); the build verifies
+that manifest without requiring the native checkout. These APIs remain
+Experimental, and existing Stable declarations are unchanged.

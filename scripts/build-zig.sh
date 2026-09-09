@@ -23,6 +23,8 @@ if [[ ! -f "$source_dir/.source-key" ]] ||
   printf '%s\n' "$source_key" > "$source_dir/.source-key"
 fi
 
+deno run --allow-read --allow-run=git scripts/check-zig-sync.ts
+
 # Compile main directly, without the RPC build graph or a second emitter. Keep
 # an unmodified historical oracle as well as matching patched native/WASI
 # commands. New generated APIs intentionally differ from the old source output.
