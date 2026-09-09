@@ -40,11 +40,11 @@ try {
 }
 ```
 
-See `examples/browser/` for a worker example with language selection and file
-downloads, and `examples/deno.ts` for a Deno example. Run
-`mise run example:browser` and open its HTTP URL; opening the HTML file directly
-shows launch instructions. The server only delivers static files; schema
-compilation runs in the browser.
+See [Schema Studio](../../examples/browser/README.md) for a complete browser
+workbench with multi-file editing, language selection, and ZIP downloads, and
+`examples/deno.ts` for a Deno example. Run `mise run example:browser` and open
+its HTTP URL; opening the HTML file directly shows launch instructions. The
+server only delivers static files; schema compilation runs in the browser.
 
 ## Reusing a compiled request
 

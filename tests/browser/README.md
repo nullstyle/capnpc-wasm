@@ -144,3 +144,15 @@ the driver directly to avoid rebuilding the SDK:
 mise run browser:install webkit
 mise exec -- deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/run.ts webkit
 ```
+
+## Schema Studio
+
+`mise run test:studio` exercises the actual browser workbench in all three
+engines. Its separate driver, `studio.ts`, keeps the SDK driver's offline and
+permission-revocation guarantees unchanged. It uses the same static handler as
+the example server and compares downloaded generated files with fresh native
+C++/Rust/Go/Zig output. It also covers workspace editing, error recovery,
+cancellation, binary imports/exports, file management, and responsive layouts.
+Evidence lives under `build/test/studio-*/`; browser CI retains failing fixtures
+and the complete Studio bundle. See the
+[Studio guide](../../examples/browser/README.md).

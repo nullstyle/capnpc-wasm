@@ -80,7 +80,7 @@ run = [
   "go -C generators/go vet capnproto.org/go/capnp/v3/capnpc-go",
   "go -C sdk/go vet -stdmethods=false ./...",
   "deno check --config sdk/typescript/deno.json --unstable-sloppy-imports sdk/typescript/mod.ts sdk/typescript/worker.ts",
-  "deno check --config tests/browser/deno.json --frozen tests/browser/test.ts tests/browser/install.ts tests/browser/run.ts",
+  "deno check --config tests/browser/deno.json --frozen tests/browser/test.ts tests/browser/install.ts tests/browser/run.ts tests/browser/studio.ts",
   "cargo fmt --manifest-path generators/rust/Cargo.toml -- --check",
   "cargo fmt --manifest-path tests/consumers/rust/Cargo.toml -- --check",
   "cargo clippy --locked --manifest-path generators/rust/Cargo.toml --all-targets -- -D warnings",
@@ -157,9 +157,19 @@ depends = ["build:sdk"]
 run = "deno run --no-prompt --allow-read=dist examples/deno.ts"
 
 [tasks."example:browser"]
-description = "Serve the browser worker example and local SDK assets"
+description = "Serve Schema Studio with its local compiler and generator assets"
+depends = ["build:studio"]
+run = "deno run --allow-read=dist/studio --allow-net=127.0.0.1:8080 scripts/serve-example.ts"
+
+[tasks."build:studio"]
+description = "Build the complete static Schema Studio website"
 depends = ["build:sdk"]
-run = "deno run --allow-read=examples/browser,dist --allow-net=127.0.0.1:8080 scripts/serve-example.ts"
+run = "deno run --allow-read --allow-write=dist/studio --allow-env=DENO_DIR --allow-run=deno scripts/build-studio.ts"
+
+[tasks."test:studio"]
+description = "Verify Schema Studio workflows and native output parity in real browsers"
+depends = ["build:native", "build:studio"]
+run = "deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/studio.ts"
 
 [tasks."release:prepare"]
 description = "Prepare a private versioned SDK archive with checksums and source/tool/reference provenance"

@@ -1,9 +1,13 @@
 {
   "version": "5",
   "specifiers": {
+    "npm:fflate@0.8.3": "0.8.3",
     "npm:playwright@1.63.0": "1.63.0"
   },
   "npm": {
+    "fflate@0.8.3": {
+      "integrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA=="
+    },
     "playwright-core@1.63.0": {
       "integrity": "sha512-rYCsBF/M5HjUch52bbtVONEFjv6Xu8sm8h72dNlR5bzIE1fvC/bxgspzkjSfU+MweEMmPM8KJebG6nnyxo5mCg==",
       "bin": true
@@ -18,6 +22,7 @@
   },
   "workspace": {
     "dependencies": [
+      "npm:fflate@0.8.3",
       "npm:playwright@1.63.0"
     ]
   }

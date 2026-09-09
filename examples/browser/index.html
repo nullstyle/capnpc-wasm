@@ -1,83 +1,156 @@
 <!doctype html>
 <html lang="en">
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>capnpc-wasm — Cap'n Proto in a browser</title>
-  <style>
-  body {
-    max-width: 64rem;
-    margin: 3rem auto;
-    padding: 0 1rem;
-    font: 16px system-ui;
-  }
-  textarea {
-    box-sizing: border-box;
-    width: 100%;
-    min-height: 12rem;
-    font: 15px monospace;
-    padding: 1rem;
-  }
-  button {
-    padding: .6rem 1rem;
-    margin: 1rem .5rem 0 0;
-  }
-  pre {
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    padding: 1rem;
-    background: #f3f4f5;
-  }
-  </style>
-  <h1>capnpc-wasm</h1>
-  <p>Compile a schema once, then generate C++, Rust, Go, or Zig in a browser worker.</p>
-  <div id="launch" hidden>
-    <p>Start the example from the repository root:</p>
-    <pre>mise run example:browser</pre>
-    <p><a href="http://127.0.0.1:8080/examples/browser/">Open the running example</a></p>
-  </div>
-  <label for="schema">person.capnp</label>
-  <textarea id="schema" spellcheck="false">@0xece4bf9c1f867623;
-using Cxx = import "/capnp/c++.capnp";
-$Cxx.namespace("example");
-using Go = import "/go.capnp";
-$Go.package("example");
-$Go.import("example/person");
-
-struct Person {
-  name @0 :Text;
-}</textarea>
-  <div>
-    <label for="language">Generate</label>
-    <select id="language">
-      <option value="all">All languages</option>
-      <option value="cpp">C++</option>
-      <option value="rust">Rust</option>
-      <option value="go">Go</option>
-      <option value="zig">Zig (capnp-zig)</option>
-    </select>
-    <button id="generate" disabled>Generate</button>
-    <button id="cancel" disabled>Cancel</button>
-  </div>
-  <p id="status" role="status">Loading Wasm modules…</p>
-  <label for="files">Generated file</label>
-  <select id="files" disabled></select>
-  <button id="download" disabled>Download file</button>
-  <pre id="output"></pre>
-  <script>
-  // This must be a classic inline script: browsers block module loading from file:.
-  if (location.protocol === "file:") {
-    document.querySelector("#launch").hidden = false;
-    document.querySelector("#status").textContent =
-      "Serve this example over HTTP to load its modules.";
-  } else {
-    const script = document.createElement("script");
-    script.type = "module";
-    script.src = "./main.js";
-    script.onerror = () => {
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description"
+      content="Edit Cap’n Proto schemas and generate C++, Rust, Go, and Zig locally in your browser.">
+    <meta name="theme-color" content="#12232b">
+    <title>Schema Studio · capnpc-wasm</title>
+    <link rel="stylesheet" href="./style.css">
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  </head>
+  <body>
+    <a class="skip-link" href="#source-panel">Skip to schema editor</a>
+    <header class="app-header">
+      <a class="brand" href="./" aria-label="Schema Studio home">
+        <svg class="brand-mark" viewBox="0 0 32 32" fill="none"
+          aria-hidden="true">
+          <path d="m16 3 12 7v12l-12 7L4 22V10L16 3Z" stroke="currentColor"
+            stroke-width="2" />
+          <path d="m4 10 12 7 12-7M16 17v12M10 6.5l12 7v12"
+            stroke="currentColor" stroke-width="2" />
+        </svg>
+        <span>Schema Studio<small>capnpc-wasm</small></span>
+      </a>
+      <div class="header-right">
+        <span
+          class="local-badge"><span class="status-dot"></span> Runs in your browser</span>
+        <a href="https://capnproto.org/language.html" target="_blank"
+          rel="noreferrer">Schema guide <span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/nullstyle/capnpc-wasm" target="_blank"
+          rel="noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+      </div>
+    </header>
+    <section class="toolbar" aria-label="Workspace actions">
+      <div class="example-picker">
+        <label for="examples">EXAMPLE</label>
+        <select id="examples" aria-label="Choose an example"></select>
+      </div>
+      <span class="toolbar-divider"></span>
+      <button id="import-files" class="button secondary">Import files</button>
+      <button id="import-folder" class="button secondary">Open folder</button>
+      <button id="download-workspace"
+        class="button quiet">Save workspace <span aria-hidden="true">↓</span></button>
+      <span class="toolbar-spacer"></span>
+      <button id="cancel" class="button secondary" hidden>Cancel</button>
+      <button id="generate-all" class="button secondary"
+        disabled>Generate all</button>
+      <button id="generate" class="button primary"
+        disabled><span aria-hidden="true">▷</span> <span id="generate-label">Generate C++</span><kbd id="shortcut">⌘ ↵</kbd></button>
+    </section>
+    <main class="workbench" id="workbench">
+      <aside class="workspace-panel" aria-label="Workspace files">
+        <div
+          class="panel-heading"><h2>Workspace</h2><button id="add-file" class="icon-button" aria-label="Add file" title="Add file">+</button></div>
+        <div
+          class="workspace-caption"><span id="file-count">2 files</span><span>Generate</span></div>
+        <nav id="workspace-files" aria-label="Source files"></nav>
+        <div class="workspace-help">
+          <span class="eyebrow">YOUR WORKSPACE, LOCALLY</span>
+          <p
+            id="example-description">Two files, shared types, and a message union.</p>
+          <p>Checked schemas get generated files. Imports resolve within this workspace.</p>
+          <details>
+            <summary>Imports &amp; shortcuts</summary>
+            <p>Standard Cap’n Proto and Go schemas are included. Put custom absolute imports in <code>include/</code>.</p>
+            <p><kbd>⌘/Ctrl Enter</kbd> Generate<br><kbd>⌘/Ctrl F</kbd> Find in editor<br><kbd>Esc</kbd> then <kbd>Tab</kbd> Leave editor</p>
+            <p>Workspace files stay in this tab. Save a ZIP to keep your changes.</p>
+          </details>
+        </div>
+      </aside>
+      <section class="source-panel editor-panel" id="source-panel"
+        aria-label="Schema editor" tabindex="-1">
+        <div class="panel-heading">
+          <div
+            class="file-title"><span class="file-glyph" aria-hidden="true">◇</span><h2 id="source-name">chat.capnp</h2></div>
+          <div
+            class="file-actions"><button id="rename-file" class="text-button">Rename</button><button id="remove-file" class="text-button">Delete</button></div>
+        </div>
+        <div id="source-editor" class="editor-host"></div>
+        <pre id="binary-preview" class="binary-preview" hidden></pre>
+        <div
+          class="editor-footer"><span id="source-kind">Cap’n Proto</span><span id="cursor-position">Ln 1, Col 1</span><span id="source-size"></span></div>
+      </section>
+      <div class="resize-handle" id="resize" role="separator"
+        aria-label="Resize editors" aria-orientation="vertical"
+        aria-valuemin="25" aria-valuemax="75" aria-valuenow="50"
+        tabindex="0"></div>
+      <section class="output-panel editor-panel" aria-label="Generated output">
+        <div
+          class="panel-heading output-heading"><h2>Generated code</h2><span id="output-badge" class="state-badge">Ready to generate</span></div>
+        <div class="language-bar" role="tablist" aria-label="Output language">
+          <button id="tab-cpp" role="tab" aria-selected="true"
+            aria-controls="output-content" data-language="cpp">C++</button>
+          <button id="tab-rust" role="tab" aria-selected="false"
+            aria-controls="output-content" tabindex="-1"
+            data-language="rust">Rust</button>
+          <button id="tab-go" role="tab" aria-selected="false"
+            aria-controls="output-content" tabindex="-1"
+            data-language="go">Go</button>
+          <button id="tab-zig" role="tab" aria-selected="false"
+            aria-controls="output-content" tabindex="-1"
+            data-language="zig">Zig</button>
+        </div>
+        <div id="output-content" role="tabpanel" aria-labelledby="tab-cpp">
+          <div
+            class="output-file-bar"><select id="output-files" aria-label="Generated file" disabled><option>No generated files</option></select><button id="copy-output" class="text-button" disabled>Copy</button><button id="download-file" class="icon-button" aria-label="Download generated file" title="Download file" disabled>↓</button></div>
+          <div id="output-editor" class="editor-host" hidden></div>
+          <div class="empty-state"
+            id="output-empty"><span class="empty-mark" aria-hidden="true">{ }</span><h3>One schema. Four languages.</h3><p>Generate native source code with the real Cap’n Proto toolchain, running in WebAssembly.</p><span>Edit a schema, then select Generate.</span></div>
+        </div>
+        <div
+          class="editor-footer"><span id="output-summary">No output yet</span><button id="download-all" class="text-button" disabled>Download outputs.zip <span aria-hidden="true">↓</span></button></div>
+      </section>
+    </main>
+    <details id="diagnostics" class="diagnostics">
+      <summary><span id="diagnostics-title">Compiler diagnostics</span><span>Details</span></summary>
+      <pre id="diagnostics-text">No diagnostics.</pre>
+    </details>
+    <footer
+      class="status-bar"><span class="status-indicator" id="status-indicator" data-state="loading"></span><span id="status" role="status" aria-live="polite">Preparing the editor…</span><span class="status-spacer"></span><span id="timing"></span><span class="footer-note">Schemas never leave this browser</span></footer>
+    <div id="notice" class="notice" role="status" hidden></div>
+    <input type="file" id="files-input" multiple hidden>
+    <input type="file" id="folder-input" webkitdirectory multiple hidden>
+    <dialog id="file-dialog">
+      <form
+        id="file-form"><div class="dialog-header"><h2 id="file-dialog-title">New file</h2><button type="button" class="icon-button close-dialog" aria-label="Close">×</button></div><label for="file-path">File path</label><input id="file-path" autocomplete="off" spellcheck="false" required placeholder="types/common.capnp"><p class="hint">Use folders to organize schemas and their imports.</p><p id="file-error" role="alert" class="form-error"></p><div class="dialog-actions"><button type="button" class="button secondary close-dialog">Cancel</button><button type="submit" class="button primary" id="file-submit">Create file</button></div></form>
+    </dialog>
+    <dialog id="confirm-dialog">
+      <form method="dialog">
+        <div class="dialog-header">
+          <h2 id="confirm-title">Replace workspace?</h2>
+        </div>
+        <p id="confirm-description"></p>
+        <div
+          class="dialog-actions"><button class="button secondary" value="cancel" autofocus>Cancel</button><button class="button primary" value="confirm" id="confirm-action">Replace</button></div>
+      </form>
+    </dialog>
+    <script>
+    if (location.protocol === "file:") {
       document.querySelector("#status").textContent =
-        "Could not load the SDK. Run mise run example:browser from the repository root.";
-    };
-    document.body.append(script);
-  }
-  </script>
+        "Run mise run example:browser and open http://127.0.0.1:8080/ to use Schema Studio.";
+    } else {
+      const script = document.createElement("script");
+      script.type = "module";
+      script.src = "./main.js";
+      script.onerror = () => {
+        document.querySelector("#status").textContent =
+          "Could not load Schema Studio. Run mise run build:studio, then reload this page.";
+        document.querySelector("#status-indicator").dataset.state = "error";
+      };
+      document.body.append(script);
+    }
+    </script>
+  </body>
 </html>

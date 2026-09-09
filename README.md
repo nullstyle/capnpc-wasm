@@ -87,7 +87,7 @@ so an application can compile once and generate different target sets later.
 
 ```sh
 mise run example:deno      # Rust generation using the bundled SDK
-mise run example:browser   # local worker example at http://127.0.0.1:8080/examples/browser/
+mise run example:browser   # Schema Studio at http://127.0.0.1:8080/
 ```
 
 The browser test compares C++, Rust, Go, and Zig output against native
@@ -96,8 +96,10 @@ also exercise invalid paths, diagnostic preservation, failed-job isolation, and
 cancellation of an infinite Wasm command. The shared
 [feature corpus](tests/fixtures/features/README.md) covers binary embeds, 64-bit
 limits, generic brands, pointer defaults, groups, and relative imports. The
-browser example supports language selection, viewing and downloading files, and
-reuse of the compiled request when its schema is unchanged. These are initial
+[Schema Studio](examples/browser/README.md) browser workbench supports
+multi-file schema editing, folder imports, C++/Rust/Go/Zig output, compiler
+diagnostics, and source/output ZIP downloads. It loads generators on demand and
+reuses the compiled request while its workspace is unchanged. These are initial
 workspace SDKs. The [release guide](docs/releases.md) describes building and
 testing a private installable candidate with `mise run test:package`; package
 publication and a stable release interface are pending.
