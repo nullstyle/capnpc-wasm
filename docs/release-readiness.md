@@ -12,6 +12,15 @@ exported, and verified so its failing writer and traversal controls remain
 available after a live reference update. Injected historical-source drift was
 rejected by the gate.
 
+The native transport follow-up fixes pending-accept shutdown on Windows and
+retains completed TCP receive bytes when deadlines or cancellation race a read.
+It also corrects QUIC test teardown ownership. Native verification is tracked in
+[CI 34309834241](https://github.com/nullstyle/capnp-zig/actions/runs/34309834241)
+and the separate
+[manual Nightly 34309838621](https://github.com/nullstyle/capnp-zig/actions/runs/34309838621).
+The synchronized Zig Wasm generator bytes are unchanged by those transport
+fixes.
+
 The TypeScript SDK now bounds guest linear memory and the bytes/counts used for
 workspaces, requests, outputs, stdout, and stderr. It requires original Wasm
 bytes to enforce memory ceilings. These are explicit per-workspace and

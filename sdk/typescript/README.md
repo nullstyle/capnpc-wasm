@@ -187,6 +187,13 @@ execution time as well as resources. The SDK is tested in the pinned Deno,
 Chromium, Firefox, and WebKit versions; the C++ modules require standardized
 Wasm exception handling.
 
+Repeated active-worker cancellation stalled in the older tested WebKit revisions
+2248 and 2311. The current WebKit 26.6 / revision 2359 passed the same stress
+case. The
+[browser evidence](../../tests/browser/README.md#engine-regression-evidence)
+records this engine comparison; upgrading the test engine does not repair older
+installed browsers. Validate the browser versions your application supports.
+
 ## Verification
 
 `mise run test` runs the Deno SDK tests using only read permission, including
