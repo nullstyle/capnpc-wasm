@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "nativeCommit": "b54749094222bce6c1f97ab072c5fbcb4e4dbe71",
-  "referenceCommit": "b54749094222bce6c1f97ab072c5fbcb4e4dbe71",
-  "sourceDigest": "1fa8890559590781697ee94ad44ac4852e2991d6ed9c5db49343912576521b8f",
+  "nativeCommit": "c8758351bb8fc13b8a094ee0af20233c7c0531ab",
+  "referenceCommit": "c8758351bb8fc13b8a094ee0af20233c7c0531ab",
+  "sourceDigest": "a73b6eb22e42915719091d510f78ce11bc1bbdd583539d82c16955f14df95b26",
   "sources": {
     "brand_fidelity_test.zig": "e4353d8f07c5690d1b9175df9d905a287235059c32f19c4f6f0a6d0dc169427a",
     "capnpc-zig/brand_fidelity.zig": "1b34fdfd34c86264d779a5515eae93c7f529fed5ce4c8869d903dd1ec1a916e0",
@@ -165,7 +165,7 @@
     "rpc/transport/tcp/connection.zig": "0283186cc131730ac90cf4801f013fe1c612e9e15d287524b14f1906126a81fc",
     "rpc/transport/tcp/runtime.zig": "13eec83de999b99ef3cfc4cf80ce2bb82029f2a4b1be6d5c602cd9fb3c39ed13",
     "rpc/transport/tcp/server.zig": "8e6e7dfa210e5f2c527d2525cfc6108bac6f64144cf21fd8882561518e207eea",
-    "rpc/transport/tcp/stream_transport.zig": "d9759e0c827c1d59c9fa73e22fd178882d6f034d8b69aa37e5dcfc4e231317e9",
+    "rpc/transport/tcp/stream_transport.zig": "a9d67624fd4e5b3ac160db23929ccaec1677e06bec1941f3af3fbab40b1cb740",
     "rpc/transport/wake_lock.zig": "774f3ba7b103fbfd272a39af57ba0445aad5734849e6bbc687afd971e8740dc0",
     "rpc/vat/host.zig": "0ca270d59e8e16e0ce9ca6c814820ba0875a5c85b532bcbc9861e3b84997326b",
     "rpc/vat/join.zig": "d55821ac6004f17cf9aae790e46a4c0bdcc41dac78b79a4dc615c6139b95892c",

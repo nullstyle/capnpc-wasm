@@ -15,12 +15,34 @@ rejected by the gate.
 
 The native transport follow-up fixes pending-accept shutdown on Windows and
 retains completed TCP receive bytes when deadlines or cancellation race a read.
-It also corrects QUIC test teardown ownership. Native verification is tracked in
-[CI 34309834241](https://github.com/nullstyle/capnp-zig/actions/runs/34309834241)
-and the separate
-[manual Nightly 34309838621](https://github.com/nullstyle/capnp-zig/actions/runs/34309838621).
-The synchronized Zig Wasm generator bytes are unchanged by those transport
-fixes.
+It also corrects QUIC test teardown ownership. The first native candidate,
+`b547490`, failed the Windows Debug and ReleaseSafe full suites in
+[CI 34309834241](https://github.com/nullstyle/capnp-zig/actions/runs/34309834241).
+Focused Windows probes isolated a stale rejected-operation slot followed by an
+indefinite wait before receive cancellation. The separate
+[manual Nightly 34309838621](https://github.com/nullstyle/capnp-zig/actions/runs/34309838621)
+passed, including all 17 fuzz targets with 179,606 total executions; the
+[per-target receipt](release-evidence/b547490-manual-nightly.json) preserves
+source hashes, iteration counts, and exit status. That manual run and its
+successful Windows soaks do not substitute for timed-read execution or count as
+a scheduled daily confidence cycle. The synchronized Zig Wasm generator bytes
+are unchanged by those transport fixes.
+
+The synchronized follow-up at native `c875835` repairs both Windows failures.
+Its runtime and tests match the successful
+[Windows probe 34314807091](https://github.com/nullstyle/capnp-zig/actions/runs/34314807091):
+all eight timed-read cases ran in Debug and ReleaseSafe with zero skips.
+Removing only the cancellation wake reproduced consumption of fourteen bytes
+arriving after the deadline in both modes; the repaired reads returned Timeout
+and preserved those bytes for the next read. The main CI now runs a named,
+bounded Windows timed-read executable before each full suite and preserves
+process diagnostics. Local Debug and ReleaseSafe transport suites each passed 53
+tests, with unchanged public API snapshots and a passing hardening gate. Full
+integration evidence is tracked in
+[CI 34315133881](https://github.com/nullstyle/capnp-zig/actions/runs/34315133881)
+and the fresh
+[manual Nightly 34315154577](https://github.com/nullstyle/capnp-zig/actions/runs/34315154577).
+Both must succeed before the initial hosted confidence checks are closed.
 
 The TypeScript SDK now bounds guest linear memory and the bytes/counts used for
 workspaces, requests, outputs, stdout, and stderr. It requires original Wasm
@@ -40,7 +62,13 @@ cancellation, and recovery run in each engine.
 
 Hosted CI starts from clean Linux and macOS checkouts and runs `mise run check`
 and `mise run test:package`. A separate Linux job installs the pinned browser
-engines and their system libraries, then requires all three engines to pass.
+engines and their system libraries, then requires all three engines to pass. The
+Apache-2.0 candidate `0b4bbf6` passed every job in
+[Wasm CI 34311506597](https://github.com/nullstyle/capnpc-wasm/actions/runs/34311506597).
+The companion capnp-deno schema-evolution and transport-closure repairs at
+`24ccd29` passed every job in
+[Deno CI 34312400044](https://github.com/nullstyle/capnp-deno/actions/runs/34312400044)
+on attempt 2, after retrying an HTTP 500 during the benchmark job's tool setup.
 
 The first hosted run,
 [34306671510](https://github.com/nullstyle/capnpc-wasm/actions/runs/34306671510),
@@ -73,7 +101,8 @@ revision.
 
 Seven consecutive successful scheduled native Nightly runs remain an elapsed
 time gate. Local tests and manual Nightly runs do not count as daily cycles. The
-release-confidence follow-up checks daily at 05:00 America/Anchorage, records
-exact run evidence, and reports actionable failures or completion. Relevant
+release-confidence follow-up temporarily checks the initial hosted repairs every
+fifteen minutes, then switches to daily at 05:00 America/Anchorage. It records
+exact run evidence and reports actionable failures or completion. Relevant
 runtime, generator, test, dependency, or gate changes restart the qualifying
 streak. Publication additionally requires an explicit release decision.
