@@ -182,3 +182,12 @@ When intentionally updating a tool, edit its pin, run `mise install` and
 `mise lock`, then run `mise run check` and review the lockfile diff. When
 updating a reference, review its upstream changes and record the new gitlink.
 Keep Zig's pin aligned with `ref/capnp-zig/mise.toml`.
+
+## License
+
+Copyright 2026 Scott Fleckenstein.
+
+Project-owned code, including the TypeScript and Go SDKs, is licensed under the
+[Apache License, Version 2.0](LICENSE). Reference sources and bundled upstream
+components retain their own licenses, distributed in the package's `licenses/`
+directory.

@@ -59,6 +59,23 @@ try {
   await command(["cmake", "-E", "tar", "xzf", archive], temporary);
   const extracted = `${temporary}/package`;
   await verifyRelease(extracted);
+  const packageMetadata = JSON.parse(
+    await Deno.readTextFile(`${extracted}/package.json`),
+  );
+  if (packageMetadata.license !== "Apache-2.0") {
+    throw new Error("package does not declare the Apache-2.0 project license");
+  }
+  const projectLicense = await Deno.readTextFile("LICENSE");
+  if (!projectLicense.includes("Version 2.0, January 2004")) {
+    throw new Error("project license is not Apache 2.0");
+  }
+  for (
+    const path of ["LICENSE", "sdk/go/LICENSE", "licenses/capnpc-wasm-LICENSE"]
+  ) {
+    if (await Deno.readTextFile(`${extracted}/${path}`) !== projectLicense) {
+      throw new Error(`packaged ${path} differs from the project license`);
+    }
+  }
   const manifestPath = `${extracted}/manifest.json`;
   const manifestBytes = await Deno.readFile(manifestPath);
   const altered = JSON.parse(new TextDecoder().decode(manifestBytes));
@@ -165,6 +182,7 @@ try {
         source: original.source,
         archiveSha256: originalHash,
         checks: [
+          "Apache-2.0 package and Go module licenses",
           "manifest integrity",
           "reproducible archive",
           "stale staging cleanup",

@@ -1,8 +1,9 @@
 # Release confidence
 
 The first candidate is `0.1.0-rc.1`. It is private and has not been published.
-Project licensing is still awaiting the owner's choice; candidate metadata uses
-`UNLICENSED` until then, with upstream licenses retained separately.
+Project-owned code and SDKs are licensed under Apache-2.0, with upstream
+licenses retained separately. The root and nested Go module both include the
+project license, and the package gate verifies the extracted license files.
 
 The Zig generator and runtime now come directly from the pristine pinned
 capnp-zig commit. Eight local patches and three copied reflection files have
@@ -75,5 +76,4 @@ time gate. Local tests and manual Nightly runs do not count as daily cycles. The
 release-confidence follow-up checks daily at 05:00 America/Anchorage, records
 exact run evidence, and reports actionable failures or completion. Relevant
 runtime, generator, test, dependency, or gate changes restart the qualifying
-streak. Publication additionally requires a license choice and an explicit
-release decision.
+streak. Publication additionally requires an explicit release decision.

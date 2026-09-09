@@ -59,6 +59,7 @@ for (const name of schemas) {
   );
 }
 await copy("ref/go-capnp/std/go.capnp", `${destination}/include/go.capnp`);
+await copy("LICENSE", `${destination}/licenses/capnpc-wasm-LICENSE`);
 for (
   const [name, license] of [
     ["capnproto", "LICENSE"],

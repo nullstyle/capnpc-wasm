@@ -3,8 +3,9 @@
 Version `0.1.0-rc.1` is an installable candidate for testing. It is not a
 published release or a promise of a stable SDK interface. `release.json` owns
 the package name, version, private flag, and project license selection.
-Candidates currently remain private and `UNLICENSED` until the project owner
-selects a license; upstream code retains the licenses shipped in `licenses/`.
+Project-owned code is licensed under Apache-2.0. Candidates remain private;
+upstream code retains the licenses shipped in `licenses/`. The archive includes
+the project license at `LICENSE` and `sdk/go/LICENSE`.
 
 From the source checkout, run:
 

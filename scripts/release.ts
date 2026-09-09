@@ -8,7 +8,7 @@ import {
 const metadata = JSON.parse(await Deno.readTextFile("release.json"));
 if (
   !/^\d+\.\d+\.\d+-rc\.\d+$/.test(metadata.version) ||
-  metadata.private !== true || !["MIT", "UNLICENSED"].includes(metadata.license)
+  metadata.private !== true || metadata.license !== "Apache-2.0"
 ) throw new Error("invalid private release-candidate metadata");
 const stem = `capnpc-wasm-${metadata.version}`;
 const destination = `dist/releases/${stem}`;
@@ -57,6 +57,7 @@ try {
       "go.mod",
       "go.sum",
       "README.md",
+      "LICENSE",
     ]
   ) await copy(`sdk/go/${path}`, `sdk/go/${path}`);
   await copy("scripts/verify-release.ts", "verify-release.ts");
@@ -69,13 +70,7 @@ try {
   await copy("docs/releases.md", "README.md");
   await copy("docs/releases.md", "docs/releases.md");
   await copy("sdk/typescript/README.md", "docs/typescript.md");
-  if (metadata.license === "MIT") {
-    await copy("LICENSE", "LICENSE");
-    await copy("LICENSE", "sdk/go/LICENSE");
-  } else {await Deno.writeTextFile(
-      `${pkg}/LICENSE`,
-      "UNLICENSED: No license has been granted for project-owned code. Upstream components retain their licenses in licenses/.\n",
-    );}
+  await copy("LICENSE", "LICENSE");
   await Deno.writeTextFile(
     `${pkg}/package.json`,
     JSON.stringify(
