@@ -50,14 +50,42 @@ manual run and does not count toward the daily streak.
 
 Native CI passed 24 of 25 jobs, including the Windows Debug full suite and both
 focused Windows timed-read gates. The remaining Windows ReleaseSafe job failed
-because its TCP connection teardown test executable stopped responding to the
-Zig build runner. The pinned runner emitted this error without an active test
-index, so the failure does not establish that a named teardown test hung. The
-[targeted Windows probe 34319397598](https://github.com/nullstyle/capnp-zig/actions/runs/34319397598)
-compares terminal and test-runner protocol execution against an empty control
-without changing runtime or test sources. Its results are pending. The initial
-hosted checks remain open; successful soaks and focused timeout tests do not
-replace this remaining gate.
+with an inactive Zig test-runner response timeout. Its original log does not
+identify the protocol phase or establish that a named teardown test hung. Both
+unchanged teardown callbacks passed repeated terminal, direct-protocol, and
+actual Maker execution in
+[probe 34319397598](https://github.com/nullstyle/capnp-zig/actions/runs/34319397598).
+
+Subsequent Windows probes isolated a pinned Zig process-inheritance defect:
+concurrently created child processes can retain each other's output-pipe
+handles. In
+[actual Maker probe 34320712747](https://github.com/nullstyle/capnp-zig/actions/runs/34320712747),
+14 Debug and 16 ReleaseSafe runners hit the unchanged 60-second response limit
+with all tests passed and their own processes already exited zero, while sibling
+processes kept their pipes open. Both serial controls passed all 16 tests and
+37 build steps. The
+[verified evidence receipt](release-evidence/windows-maker-inheritance.json)
+records exact source, artifact and raw-receipt hashes, process/pipe observations,
+and the limitation that the original c875835 process state was not captured.
+
+Native `04d3b62` applies the project-owned workaround and is synchronized in this
+Wasm candidate. It compiles each selected suite's exact prerequisites
+in parallel, waits for that invocation to exit, then runs the unchanged suite
+with one Maker job on Windows. It preserves test selection, test-internal
+concurrency, skip policy, time limits, and failure propagation. The original
+runtime, generator and test sources remain unchanged. Initial hosted checks stay
+open until the full Windows Debug, ReleaseSafe, ReleaseFast and QUIC gates pass
+with this workaround; the successful isolated controls do not replace them. Fresh verification runs are
+[native CI 34324587356](https://github.com/nullstyle/capnp-zig/actions/runs/34324587356)
+and
+[manual Nightly 34324612439](https://github.com/nullstyle/capnp-zig/actions/runs/34324612439).
+Both were in progress when recorded. The local compile/run phases passed:
+Debug ran 1,786/1,786 tests; ReleaseSafe ran 1,785/1,786 with the existing
+Debug-only test skipped. Both completed all 199 build steps. A comparison of
+real build configurations verified that all original execution nodes and flags
+were unchanged, and all three warmups retained exactly the corresponding
+compile/failure prerequisites with no test-runner execution. Formatting,
+workflow lint, and an independent command/graph review also passed.
 
 The TypeScript SDK now bounds guest linear memory and the bytes/counts used for
 workspaces, requests, outputs, stdout, and stderr. It requires original Wasm
@@ -84,7 +112,9 @@ The synchronized candidate `894890b` also passed every job in
 [Wasm CI 34315464935](https://github.com/nullstyle/capnpc-wasm/actions/runs/34315464935).
 Schema Studio at `a2326f6` passed all three jobs in
 [Wasm CI 34317631265](https://github.com/nullstyle/capnpc-wasm/actions/runs/34317631265),
-including the new Studio workflows in Chromium, Firefox, and WebKit. Studio's
+including the new Studio workflows in Chromium, Firefox, and WebKit. The subsequent
+evidence-only revision `bee74ef` also passed all three jobs in
+[Wasm CI 34319492314](https://github.com/nullstyle/capnpc-wasm/actions/runs/34319492314). Studio's
 local tests compare downloaded files with native C++/Rust/Go/Zig output and
 exercise folder imports, binary assets, diagnostics, cancellation, and stale
 results. The public SDK API, native runtime, generators, and reference pins are
@@ -129,8 +159,8 @@ revision.
 
 Seven consecutive successful scheduled native Nightly runs remain an elapsed
 time gate. Local tests and manual Nightly runs do not count as daily cycles. The
-release-confidence follow-up temporarily checks the initial hosted repairs every
-fifteen minutes, then switches to daily at 05:00 America/Anchorage. It records
+release-confidence follow-up checks the initial hosted repairs at a temporary
+interval, then switches to daily at 05:00 America/Anchorage. It records
 exact run evidence and reports actionable failures or completion. Relevant
 runtime, generator, test, dependency, or gate changes restart the qualifying
 streak. Publication additionally requires an explicit release decision.

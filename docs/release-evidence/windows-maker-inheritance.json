@@ -1,0 +1,166 @@
+{
+  "schemaVersion": 1,
+  "classification": "confirmed_windows_maker_timeout_from_concurrent_inherited_output_handles",
+  "run": {
+    "repository": "nullstyle/capnp-zig",
+    "id": 34320712747,
+    "url": "https://github.com/nullstyle/capnp-zig/actions/runs/34320712747",
+    "revision": "afacd39cf12708aa13267e84267be8932e14032e",
+    "branch": "diagnose/windows-timed-read",
+    "conclusion": "success",
+    "successMeans": "The expected concurrent failure and the successful serial control were both observed."
+  },
+  "toolchain": {
+    "zig": "0.17.0-dev.1683+5ceec001b",
+    "originalMakerSha256": "a8030d91998a10b6bc65e14dfa64f4ef37cd535e718862da58e3bad033cba48d",
+    "instrumentedMakerSha256": "32c34cacfece605da4f30a899ca4aa44508c5315fc04ff9a8495ee928630355a",
+    "sourcePath": "compiler/Maker/Step/Run.zig",
+    "instrumentation": "One observation-only insertion before existing timeout cleanup; removing it restores the pinned source byte-for-byte. Original response timeout and I/O behavior retained; installed library unchanged."
+  },
+  "experiment": {
+    "testRunnersPerPhase": 16,
+    "longLivedSiblingProcessesPerPhase": 16,
+    "parallelJobs": 32,
+    "serialJobs": 1,
+    "originalInactiveResponseTimeoutSeconds": 60,
+    "sharedSiblingDeadlineSeconds": 80,
+    "deadlineRefreshedForEachPhase": true,
+    "childrenPrecompiledBeforeDeadline": true,
+    "testBody": "No-op Zig test",
+    "phaseLifetimeSeconds": 150,
+    "compileLifetimeSeconds": 300
+  },
+  "modes": {
+    "Debug": {
+      "jobId": 102366484956,
+      "artifact": {
+        "id": 10091907203,
+        "name": "windows-maker-inheritance-Debug-34320712747",
+        "archiveSha256": "bca0c0e6b35187e5f866daa52f2a8402df7f4cc4778332efb2ee11d82e53a952",
+        "archiveDigestVerifiedAgainstGitHub": true,
+        "rawReceiptPath": "maker-inheritance/receipt.json",
+        "rawReceiptSha256": "e80c6bac57d89e985307d1f025d174590cb2d2fd8bc5f58a1924cf8e13ddb816",
+        "parallelLogPath": "maker-inheritance/parallel.log",
+        "serialLogPath": "maker-inheritance/serial.log",
+        "instrumentationReceiptPath": "maker-inheritance-instrumentation.json",
+        "copiedSourcePath": "maker-zig-lib/compiler/Maker/Step/Run.zig"
+      },
+      "parallel": {
+        "exitCode": 1,
+        "lifetimeLimitHit": false,
+        "elapsedSeconds": 80.031,
+        "responseTimeoutErrors": 14,
+        "qualifiedTimeoutObservations": 14,
+        "eachObservation": {
+          "activeTestIndex": null,
+          "allTestsDone": true,
+          "nextIndex": 4294967295,
+          "testCount": 1,
+          "passCount": 1,
+          "skipCount": 0,
+          "failCount": 0,
+          "crashCount": 0,
+          "testTimeoutCount": 0,
+          "leakCount": 0,
+          "errorLogCount": 0,
+          "nativeChildSignaled": true,
+          "exitCodeQuerySucceeded": true,
+          "nativeChildExitCode": 0,
+          "stdoutTerminalStatus": null,
+          "stdoutBufferedBytes": 0,
+          "stderrTerminalStatus": null
+        },
+        "completeMarkerRows": 14,
+        "timeoutElapsedNanosecondsRange": [
+          60000639200,
+          60012073100
+        ],
+        "buildSummary": "Build Summary: 22/37 steps succeeded (14 failed); 2/2 tests passed"
+      },
+      "serial": {
+        "exitCode": 0,
+        "lifetimeLimitHit": false,
+        "elapsedSeconds": 80.313,
+        "successfulBuildSteps": 37,
+        "totalBuildSteps": 37,
+        "passedTests": 16,
+        "totalTests": 16,
+        "skippedTests": 0,
+        "buildSummary": "Build Summary: 37/37 steps succeeded; 16/16 tests passed"
+      }
+    },
+    "ReleaseSafe": {
+      "jobId": 102366484727,
+      "artifact": {
+        "id": 10091905261,
+        "name": "windows-maker-inheritance-ReleaseSafe-34320712747",
+        "archiveSha256": "394a78d9b1bf39f6e6bf1900f34a759e78bc0e73ce276a794fdf724cc0837dbb",
+        "archiveDigestVerifiedAgainstGitHub": true,
+        "rawReceiptPath": "maker-inheritance/receipt.json",
+        "rawReceiptSha256": "a707661e89f095cbfec915682c971f810ac04eea29d2e41f64f4b48234f12ee3",
+        "parallelLogPath": "maker-inheritance/parallel.log",
+        "serialLogPath": "maker-inheritance/serial.log",
+        "instrumentationReceiptPath": "maker-inheritance-instrumentation.json",
+        "copiedSourcePath": "maker-zig-lib/compiler/Maker/Step/Run.zig"
+      },
+      "parallel": {
+        "exitCode": 1,
+        "lifetimeLimitHit": false,
+        "elapsedSeconds": 80.032,
+        "responseTimeoutErrors": 16,
+        "qualifiedTimeoutObservations": 16,
+        "eachObservation": {
+          "activeTestIndex": null,
+          "allTestsDone": true,
+          "nextIndex": 4294967295,
+          "testCount": 1,
+          "passCount": 1,
+          "skipCount": 0,
+          "failCount": 0,
+          "crashCount": 0,
+          "testTimeoutCount": 0,
+          "leakCount": 0,
+          "errorLogCount": 0,
+          "nativeChildSignaled": true,
+          "exitCodeQuerySucceeded": true,
+          "nativeChildExitCode": 0,
+          "stdoutTerminalStatus": null,
+          "stdoutBufferedBytes": 0,
+          "stderrTerminalStatus": null
+        },
+        "completeMarkerRows": 15,
+        "timeoutElapsedNanosecondsRange": [
+          60000169800,
+          60015573400
+        ],
+        "buildSummary": "Build Summary: 20/37 steps succeeded (16 failed)"
+      },
+      "serial": {
+        "exitCode": 0,
+        "lifetimeLimitHit": false,
+        "elapsedSeconds": 80.156,
+        "successfulBuildSteps": 37,
+        "totalBuildSteps": 37,
+        "passedTests": 16,
+        "totalTests": 16,
+        "skippedTests": 0,
+        "buildSummary": "Build Summary: 37/37 steps succeeded; 16/16 tests passed"
+      }
+    }
+  },
+  "originalFailure": {
+    "revision": "c8758351bb8fc13b8a094ee0af20233c7c0531ab",
+    "runId": 34315133881,
+    "jobId": 102349647462,
+    "mode": "ReleaseSafe",
+    "testRoot": "tests/rpc/transport/tcp/rpc_connection_teardown_test.zig",
+    "error": "test runner failed to respond for 1m1.611ms",
+    "phaseObserved": false
+  },
+  "limitations": [
+    "The original c875835 CI failure did not record metadata, native child exit, or pipe state at timeout. This experiment reproduces its exact failure mechanism and message, but does not retrospectively observe that original process.",
+    "The experiment uses an isolated graph and an observation-only copy of the pinned Maker library. It does not establish the duration or result of the full native Windows suite under serialization.",
+    "One ReleaseSafe diagnostic row has its trailing process handle/timing suffix interleaved with ordinary Maker output. All completed-result, clean-exit, and pending-pipe fields remain intact; fifteen other ReleaseSafe rows are complete.",
+    "No native main/runtime repair is part of this receipt. Actual full Debug/ReleaseSafe execution remains required after the selected project-owned workaround."
+  ]
+}

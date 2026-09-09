@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "nativeCommit": "c8758351bb8fc13b8a094ee0af20233c7c0531ab",
-  "referenceCommit": "c8758351bb8fc13b8a094ee0af20233c7c0531ab",
+  "nativeCommit": "04d3b62ad7e39a1f2f6c019e44e61c8a6d8f7413",
+  "referenceCommit": "04d3b62ad7e39a1f2f6c019e44e61c8a6d8f7413",
   "sourceDigest": "a73b6eb22e42915719091d510f78ce11bc1bbdd583539d82c16955f14df95b26",
   "sources": {
     "brand_fidelity_test.zig": "e4353d8f07c5690d1b9175df9d905a287235059c32f19c4f6f0a6d0dc169427a",
