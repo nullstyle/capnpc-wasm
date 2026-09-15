@@ -104,6 +104,16 @@ workspace SDKs. The [release guide](docs/releases.md) describes building and
 testing a private installable candidate with `mise run test:package`; package
 publication and a stable release interface are pending.
 
+## Repository toolchain integration
+
+The release archives include a small Bash/Wasmtime launcher for build systems.
+It runs schema compilation, binary conversion, and separately built WASI
+language generators with explicit filesystem roots, preserving binary streams
+and exit statuses. `mise run release:tools` creates a compiler-only archive for
+consumers that pin their own generators; `mise run test:package` checks both
+archive variants with real external consumers. See the
+[launcher contract and examples](docs/releases.md#repository-toolchain-launcher).
+
 ## Command modules
 
 After `mise run build`, create a request with the Wasm compiler, then feed it to

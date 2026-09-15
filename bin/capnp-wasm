@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Execute packaged WASI commands with one explicit filesystem capability.
+set -euo pipefail
+
+fail() {
+  printf 'capnp-wasm: %s\n' "$2" >&2
+  exit "$1"
+}
+
+usage='usage: capnp-wasm compiler --workspace ABS_DIR -- ARGS...
+       capnp-wasm generator --module ABS_WASM --output ABS_DIR -- ARGS...'
+[[ $# -ge 1 ]] || fail 64 "$usage"
+mode=$1
+shift
+case "$mode" in compiler|generator) ;; *) fail 64 "$usage" ;; esac
+
+workspace=''
+module=''
+output=''
+separator=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --)
+      separator=true
+      shift
+      break
+      ;;
+    --workspace)
+      [[ "$mode" == compiler && -z "$workspace" && $# -ge 2 ]] || fail 64 "$usage"
+      workspace=$2
+      shift 2
+      ;;
+    --module)
+      [[ "$mode" == generator && -z "$module" && $# -ge 2 ]] || fail 64 "$usage"
+      module=$2
+      shift 2
+      ;;
+    --output)
+      [[ "$mode" == generator && -z "$output" && $# -ge 2 ]] || fail 64 "$usage"
+      output=$2
+      shift 2
+      ;;
+    *) fail 64 "$usage" ;;
+  esac
+done
+[[ "$separator" == true ]] || fail 64 "missing -- before command arguments"
+
+package_root=$(cd -- "${BASH_SOURCE[0]%/*}/.." && pwd -P)
+[[ -r "$package_root/runtime/wasmtime-version" ]] || fail 78 'missing packaged runtime version'
+expected_version=$(< "$package_root/runtime/wasmtime-version")
+[[ "$expected_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 78 'invalid packaged runtime version'
+
+if [[ "$mode" == compiler ]]; then
+  [[ $# -gt 0 ]] || fail 64 'missing compiler arguments'
+  directory=$workspace
+  module="$package_root/wasm/capnp.wasm"
+else
+  directory=$output
+fi
+[[ "$directory" == /* && "$directory" != *::* ]] || fail 64 'filesystem root must be an absolute path without ::'
+[[ -d "$directory" && -r "$directory" && -x "$directory" ]] || fail 66 "filesystem root is not an accessible directory: $directory"
+directory=$(cd -- "$directory" && pwd -P)
+[[ "$directory" != *::* ]] || fail 64 'resolved filesystem root contains ::'
+if [[ "$mode" == generator ]]; then
+  [[ -w "$directory" ]] || fail 73 "output directory is not writable: $directory"
+fi
+[[ "$module" == /* && -f "$module" && -r "$module" ]] || fail 66 "module must be an absolute readable file: $module"
+
+runtime=${CAPNP_WASM_WASMTIME:-wasmtime}
+command -v "$runtime" >/dev/null 2>&1 || fail 69 "Wasmtime $expected_version is required; executable not found: $runtime"
+actual_version=$("$runtime" --version) || fail 69 'failed to read Wasmtime version'
+[[ "$actual_version" == "wasmtime $expected_version" || "$actual_version" == "wasmtime $expected_version "* ]] || fail 78 "expected Wasmtime $expected_version, got: $actual_version"
+
+# Arguments and binary streams pass through unchanged. exec preserves the guest
+# or runtime exit status, and no native compiler/generator fallback is attempted.
+exec "$runtime" run -W exceptions=y -S cwd=/ --dir "$directory::/" "$module" "$@"

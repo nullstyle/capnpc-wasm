@@ -6,11 +6,18 @@ import {
 } from "./verify-release.ts";
 
 const metadata = JSON.parse(await Deno.readTextFile("release.json"));
+const toolsOnly = Deno.args.includes("--tools-only");
+if (Deno.args.some((arg) => arg !== "--tools-only")) {
+  throw new Error("usage: release.ts [--tools-only]");
+}
+if (toolsOnly) metadata.name = "@nullstyle/capnp-wasm-tools";
 if (
   !/^\d+\.\d+\.\d+-rc\.\d+$/.test(metadata.version) ||
   metadata.private !== true || metadata.license !== "Apache-2.0"
 ) throw new Error("invalid private release-candidate metadata");
-const stem = `capnpc-wasm-${metadata.version}`;
+const stem = `${
+  toolsOnly ? "capnp-wasm-tools" : "capnpc-wasm"
+}-${metadata.version}`;
 const destination = `dist/releases/${stem}`;
 const staging = `dist/releases/.${stem}.staging`;
 await Deno.mkdir("dist/releases", { recursive: true });
@@ -47,29 +54,50 @@ async function copyTree(source: string, target: string) {
   }
 }
 try {
-  for (const directory of ["typescript", "wasm", "include", "licenses"]) {
+  for (
+    const directory of toolsOnly
+      ? ["include", "licenses"]
+      : ["typescript", "wasm", "include", "licenses"]
+  ) {
     await copyTree(`dist/${directory}`, directory);
   }
-  for (
-    const path of [
-      "compiler.go",
-      "memoryfs.go",
-      "go.mod",
-      "go.sum",
-      "README.md",
-      "LICENSE",
-    ]
-  ) await copy(`sdk/go/${path}`, `sdk/go/${path}`);
+  if (toolsOnly) await copy("dist/wasm/capnp.wasm", "wasm/capnp.wasm");
+  await copy("bin/capnp-wasm", "bin/capnp-wasm");
+  const wasmtimeVersion = /^wasmtime = "([0-9]+\.[0-9]+\.[0-9]+)"$/m.exec(
+    await Deno.readTextFile("mise.toml"),
+  )?.[1];
+  if (!wasmtimeVersion) {
+    throw new Error("missing exact Wasmtime pin in mise.toml");
+  }
+  await Deno.mkdir(`${pkg}/runtime`, { recursive: true });
+  await Deno.writeTextFile(
+    `${pkg}/runtime/wasmtime-version`,
+    `${wasmtimeVersion}\n`,
+  );
+  if (!toolsOnly) {
+    for (
+      const path of [
+        "compiler.go",
+        "memoryfs.go",
+        "go.mod",
+        "go.sum",
+        "README.md",
+        "LICENSE",
+      ]
+    ) await copy(`sdk/go/${path}`, `sdk/go/${path}`);
+  }
   await copy("scripts/verify-release.ts", "verify-release.ts");
   await copy("mise.toml", "provenance/mise.toml");
   await copy("mise.lock", "provenance/mise.lock");
-  await copy(
-    "generators/zig/historical-reference",
-    "provenance/zig-historical-reference",
-  );
+  if (!toolsOnly) {
+    await copy(
+      "generators/zig/historical-reference",
+      "provenance/zig-historical-reference",
+    );
+  }
   await copy("docs/releases.md", "README.md");
   await copy("docs/releases.md", "docs/releases.md");
-  await copy("sdk/typescript/README.md", "docs/typescript.md");
+  if (!toolsOnly) await copy("sdk/typescript/README.md", "docs/typescript.md");
   await copy("LICENSE", "LICENSE");
   await Deno.writeTextFile(
     `${pkg}/package.json`,
@@ -79,24 +107,33 @@ try {
         type: "module",
         description:
           "Cap'n Proto compiler and generators for browser workers, Deno, and WASI hosts",
-        main: "./typescript/mod.js",
-        types: "./typescript/mod.d.ts",
-        exports: {
-          ".": {
-            types: "./typescript/mod.d.ts",
-            import: "./typescript/mod.js",
+        ...(toolsOnly ? {} : {
+          main: "./typescript/mod.js",
+          types: "./typescript/mod.d.ts",
+        }),
+        exports: toolsOnly
+          ? {
+            "./wasm/*": "./wasm/*",
+            "./include/*": "./include/*",
+            "./manifest.json": "./manifest.json",
+          }
+          : {
+            ".": {
+              types: "./typescript/mod.d.ts",
+              import: "./typescript/mod.js",
+            },
+            "./worker": "./typescript/worker.js",
+            "./wasm/*": "./wasm/*",
+            "./include/*": "./include/*",
+            "./manifest.json": "./manifest.json",
           },
-          "./worker": "./typescript/worker.js",
-          "./wasm/*": "./wasm/*",
-          "./include/*": "./include/*",
-          "./manifest.json": "./manifest.json",
-        },
         files: [
-          "typescript",
+          "bin",
+          "runtime",
+          ...(toolsOnly ? [] : ["typescript", "sdk/go"]),
           "wasm",
           "include",
           "licenses",
-          "sdk/go",
           "provenance",
           "docs",
           "manifest.json",
@@ -158,50 +195,52 @@ try {
     }
     references[match[2]] = actual;
   }
-  const goDependency = JSON.parse(
-    await command([
-      "go",
-      "-C",
-      "sdk/go",
-      "mod",
-      "download",
-      "-json",
-      "github.com/tetratelabs/wazero",
-    ]),
-  );
-  const goRevision = JSON.parse(
-    await command([
-      "go",
-      "-C",
-      "sdk/go",
-      "list",
-      "-m",
-      "-json",
-      `github.com/tetratelabs/wazero@${references["ref/wazero"]}`,
-    ]),
-  );
-  if (
-    goRevision.Origin?.Hash !== references["ref/wazero"] ||
-    goRevision.Version !== goDependency.Version
-  ) {
-    throw new Error(
-      "SDK wazero pseudo-version does not match reference gitlink",
+  if (!toolsOnly) {
+    const goDependency = JSON.parse(
+      await command([
+        "go",
+        "-C",
+        "sdk/go",
+        "mod",
+        "download",
+        "-json",
+        "github.com/tetratelabs/wazero",
+      ]),
+    );
+    const goRevision = JSON.parse(
+      await command([
+        "go",
+        "-C",
+        "sdk/go",
+        "list",
+        "-m",
+        "-json",
+        `github.com/tetratelabs/wazero@${references["ref/wazero"]}`,
+      ]),
+    );
+    if (
+      goRevision.Origin?.Hash !== references["ref/wazero"] ||
+      goRevision.Version !== goDependency.Version
+    ) {
+      throw new Error(
+        "SDK wazero pseudo-version does not match reference gitlink",
+      );
+    }
+    await Deno.writeTextFile(
+      `${pkg}/provenance/go-dependency.json`,
+      JSON.stringify(
+        {
+          path: goDependency.Path,
+          version: goDependency.Version,
+          sum: goDependency.Sum,
+          goModSum: goDependency.GoModSum,
+          revision: goRevision.Origin.Hash,
+        },
+        null,
+        2,
+      ) + "\n",
     );
   }
-  await Deno.writeTextFile(
-    `${pkg}/provenance/go-dependency.json`,
-    JSON.stringify(
-      {
-        path: goDependency.Path,
-        version: goDependency.Version,
-        sum: goDependency.Sum,
-        goModSum: goDependency.GoModSum,
-        revision: goRevision.Origin.Hash,
-      },
-      null,
-      2,
-    ) + "\n",
-  );
   const manifest: ReleaseManifest = {
     format: 1,
     name: metadata.name,

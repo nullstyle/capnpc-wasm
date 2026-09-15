@@ -72,7 +72,7 @@ run = "bash scripts/doctor.sh"
 [tasks.check]
 description = "Check formatting, tooling, and native/Wasm parity across the test hosts"
 run = [
-  "shellcheck scripts/*.sh",
+  "shellcheck scripts/*.sh bin/capnp-wasm",
   "deno fmt --check README.md AGENTS.md ref/README.md patches/capnproto/README.md patches/capnp-zig/README.md generators/README.md generators/zig/README.md tests sdk examples scripts/*.ts",
   "deno lint tests sdk/typescript examples scripts/*.ts",
   "deno check --config tests/hosts/deno/deno.json --unstable-sloppy-imports tests/hosts/deno/main.ts",
@@ -179,4 +179,14 @@ run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/relea
 [tasks."test:package"]
 description = "Verify reproducible candidate packaging and clean external Deno/Go consumers"
 depends = ["release:prepare"]
-run = "deno run --allow-read --allow-write --allow-run=deno,go,cmake scripts/test-package.ts"
+run = "deno run --allow-read --allow-write --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts"
+
+[tasks."test:launcher"]
+description = "Check packaged Wasmtime launcher binary streams, filesystem roots, and failures"
+depends = ["release:prepare"]
+run = "deno run --allow-read --allow-write=build --allow-run=bash,wasmtime tests/package/launcher.ts"
+
+[tasks."release:tools"]
+description = "Prepare a private compiler-only archive for repository toolchain integrations"
+depends = ["build:sdk"]
+run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/release.ts --tools-only"

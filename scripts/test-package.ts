@@ -1,4 +1,5 @@
 import { sha256, verifyRelease } from "./verify-release.ts";
+import { checkLauncher } from "../tests/package/launcher.ts";
 
 const repository = Deno.cwd();
 const metadata = JSON.parse(await Deno.readTextFile("release.json"));
@@ -27,6 +28,24 @@ if (!receipt.startsWith(`${originalHash}  ${stem}.tgz\n`)) {
   throw new Error("archive does not match SHA256SUMS");
 }
 const original = await verifyRelease(`${directory}/package`);
+const toolsStem = `capnp-wasm-tools-${metadata.version}`;
+const toolsDirectory = `${repository}/dist/releases/${toolsStem}`;
+const toolsArchive = `${toolsDirectory}/${toolsStem}.tgz`;
+const prepareTools = [
+  "deno",
+  "run",
+  "--allow-read",
+  "--allow-write=dist",
+  "--allow-run=git,go",
+  "scripts/release.ts",
+  "--tools-only",
+];
+await command(prepareTools);
+const toolsHash = await sha256(await Deno.readFile(toolsArchive));
+await command(prepareTools);
+if (await sha256(await Deno.readFile(toolsArchive)) !== toolsHash) {
+  throw new Error("tools-only archive is not reproducible");
+}
 if (
   !receipt.includes(
     `${await sha256(
@@ -109,6 +128,19 @@ try {
     `${consumer}/node_modules/@nullstyle/capnpc-wasm`,
   );
   const installed = `${consumer}/node_modules/@nullstyle/capnpc-wasm`;
+  await checkLauncher(installed);
+  const toolsConsumer = `${temporary}/tools consumer`;
+  await Deno.mkdir(toolsConsumer);
+  await command(["cmake", "-E", "tar", "xzf", toolsArchive], toolsConsumer);
+  const toolsInstalled = `${toolsConsumer}/package`;
+  const toolsManifest = await verifyRelease(toolsInstalled);
+  if (
+    toolsManifest.files.some((file) =>
+      file.path.startsWith("typescript/") || file.path.startsWith("sdk/") ||
+      file.path.startsWith("wasm/capnpc-")
+    )
+  ) throw new Error("tools-only package contains SDK or generator modules");
+  await checkLauncher(toolsInstalled, installed);
   await Deno.copyFile("tests/package/consumer.ts", `${consumer}/consumer.ts`);
   await Deno.copyFile("tests/package/main.go", `${consumer}/main.go`);
   await Deno.writeTextFile(
@@ -181,6 +213,7 @@ try {
         version: metadata.version,
         source: original.source,
         archiveSha256: originalHash,
+        toolsArchiveSha256: toolsHash,
         checks: [
           "Apache-2.0 package and Go module licenses",
           "manifest integrity",
@@ -188,6 +221,9 @@ try {
           "stale staging cleanup",
           "tampered manifest rejection",
           "unexpected file rejection",
+          "external Wasmtime launcher compiler/C++/Zig and canonicalization",
+          "launcher paths with spaces, argument failures, and runtime pin",
+          "reproducible tools-only archive with external generator modules",
           "external npm-layout TypeScript declarations",
           "external npm-layout Deno direct/replay/worker",
           "external Go compile/replay",
