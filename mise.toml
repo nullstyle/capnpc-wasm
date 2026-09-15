@@ -179,7 +179,10 @@ run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/relea
 [tasks."test:package"]
 description = "Verify reproducible candidate packaging and clean external Deno/Go consumers"
 depends = ["release:prepare"]
-run = "deno run --allow-read --allow-write --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts"
+run = [
+  "deno run --allow-read --allow-write --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts",
+  "deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts",
+]
 
 [tasks."test:launcher"]
 description = "Check packaged Wasmtime launcher binary streams, filesystem roots, and failures"
@@ -190,3 +193,13 @@ run = "deno run --allow-read --allow-write=build --allow-run=bash,wasmtime tests
 description = "Prepare a private compiler-only archive for repository toolchain integrations"
 depends = ["build:sdk"]
 run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/release.ts --tools-only"
+
+[tasks."release:compiler-host"]
+description = "Prepare a private compiler and TypeScript host archive without language generators"
+depends = ["build:sdk"]
+run = "deno run --allow-read --allow-write=dist --allow-run=git scripts/release.ts --compiler-host"
+
+[tasks."test:compiler-host-package"]
+description = "Verify compiler-host packaging and an offline external Deno worker consumer"
+depends = ["release:compiler-host"]
+run = "deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts"

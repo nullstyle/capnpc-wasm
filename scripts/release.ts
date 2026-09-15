@@ -7,17 +7,25 @@ import {
 
 const metadata = JSON.parse(await Deno.readTextFile("release.json"));
 const toolsOnly = Deno.args.includes("--tools-only");
-if (Deno.args.some((arg) => arg !== "--tools-only")) {
-  throw new Error("usage: release.ts [--tools-only]");
+const compilerHost = Deno.args.includes("--compiler-host");
+if (
+  Deno.args.length > 1 ||
+  Deno.args.some((arg) => !["--tools-only", "--compiler-host"].includes(arg))
+) {
+  throw new Error("usage: release.ts [--tools-only | --compiler-host]");
 }
-if (toolsOnly) metadata.name = "@nullstyle/capnp-wasm-tools";
+const fullSdk = !toolsOnly && !compilerHost;
+const packageName = toolsOnly
+  ? "capnp-wasm-tools"
+  : compilerHost
+  ? "capnp-wasm-compiler-host"
+  : "capnpc-wasm";
+metadata.name = `@nullstyle/${packageName}`;
 if (
   !/^\d+\.\d+\.\d+-rc\.\d+$/.test(metadata.version) ||
   metadata.private !== true || metadata.license !== "Apache-2.0"
 ) throw new Error("invalid private release-candidate metadata");
-const stem = `${
-  toolsOnly ? "capnp-wasm-tools" : "capnpc-wasm"
-}-${metadata.version}`;
+const stem = `${packageName}-${metadata.version}`;
 const destination = `dist/releases/${stem}`;
 const staging = `dist/releases/.${stem}.staging`;
 await Deno.mkdir("dist/releases", { recursive: true });
@@ -55,26 +63,31 @@ async function copyTree(source: string, target: string) {
 }
 try {
   for (
-    const directory of toolsOnly
-      ? ["include", "licenses"]
-      : ["typescript", "wasm", "include", "licenses"]
+    const directory of [
+      ...(!toolsOnly ? ["typescript"] : []),
+      ...(fullSdk ? ["wasm"] : []),
+      "include",
+      "licenses",
+    ]
   ) {
     await copyTree(`dist/${directory}`, directory);
   }
-  if (toolsOnly) await copy("dist/wasm/capnp.wasm", "wasm/capnp.wasm");
-  await copy("bin/capnp-wasm", "bin/capnp-wasm");
-  const wasmtimeVersion = /^wasmtime = "([0-9]+\.[0-9]+\.[0-9]+)"$/m.exec(
-    await Deno.readTextFile("mise.toml"),
-  )?.[1];
-  if (!wasmtimeVersion) {
-    throw new Error("missing exact Wasmtime pin in mise.toml");
+  if (!fullSdk) await copy("dist/wasm/capnp.wasm", "wasm/capnp.wasm");
+  if (!compilerHost) {
+    await copy("bin/capnp-wasm", "bin/capnp-wasm");
+    const wasmtimeVersion = /^wasmtime = "([0-9]+\.[0-9]+\.[0-9]+)"$/m.exec(
+      await Deno.readTextFile("mise.toml"),
+    )?.[1];
+    if (!wasmtimeVersion) {
+      throw new Error("missing exact Wasmtime pin in mise.toml");
+    }
+    await Deno.mkdir(`${pkg}/runtime`, { recursive: true });
+    await Deno.writeTextFile(
+      `${pkg}/runtime/wasmtime-version`,
+      `${wasmtimeVersion}\n`,
+    );
   }
-  await Deno.mkdir(`${pkg}/runtime`, { recursive: true });
-  await Deno.writeTextFile(
-    `${pkg}/runtime/wasmtime-version`,
-    `${wasmtimeVersion}\n`,
-  );
-  if (!toolsOnly) {
+  if (fullSdk) {
     for (
       const path of [
         "compiler.go",
@@ -89,7 +102,7 @@ try {
   await copy("scripts/verify-release.ts", "verify-release.ts");
   await copy("mise.toml", "provenance/mise.toml");
   await copy("mise.lock", "provenance/mise.lock");
-  if (!toolsOnly) {
+  if (fullSdk) {
     await copy(
       "generators/zig/historical-reference",
       "provenance/zig-historical-reference",
@@ -105,8 +118,9 @@ try {
       {
         ...metadata,
         type: "module",
-        description:
-          "Cap'n Proto compiler and generators for browser workers, Deno, and WASI hosts",
+        description: compilerHost
+          ? "Cap'n Proto schema compiler for Deno and browser workers"
+          : "Cap'n Proto compiler and generators for browser workers, Deno, and WASI hosts",
         ...(toolsOnly ? {} : {
           main: "./typescript/mod.js",
           types: "./typescript/mod.d.ts",
@@ -128,9 +142,9 @@ try {
             "./manifest.json": "./manifest.json",
           },
         files: [
-          "bin",
-          "runtime",
-          ...(toolsOnly ? [] : ["typescript", "sdk/go"]),
+          ...(!compilerHost ? ["bin", "runtime"] : []),
+          ...(!toolsOnly ? ["typescript"] : []),
+          ...(fullSdk ? ["sdk/go"] : []),
           "wasm",
           "include",
           "licenses",
@@ -195,7 +209,7 @@ try {
     }
     references[match[2]] = actual;
   }
-  if (!toolsOnly) {
+  if (fullSdk) {
     const goDependency = JSON.parse(
       await command([
         "go",

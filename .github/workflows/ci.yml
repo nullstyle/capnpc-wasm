@@ -50,6 +50,11 @@ jobs:
         run: mise run check
       - name: Verify release archive and external package consumers
         run: mise run test:package
+      - name: Verify supported Deno worker execution and termination
+        run: |
+          mise install deno@2.6.8
+          mise exec deno@2.6.8 -- deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts
+          mise exec -- deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts "$(mise where deno@2.6.8)/bin/deno"
       - name: Verify checks leave tracked sources unchanged
         run: git diff --exit-code
       - name: Preserve failing test fixtures

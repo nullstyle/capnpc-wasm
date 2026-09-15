@@ -81,7 +81,54 @@ runtime version, licenses, and source provenance/integrity inventory. It omits
 SDK code and generator modules; repository consumers build generators matching
 their own runtime dependency pins. It uses the same `package/` extraction
 layout, manifest format, and verification procedure as the complete SDK archive.
-Both candidates remain private until a separate publication decision.
+The compiler-only archive has separately been published on the
+[SLCP toolchain release](https://github.com/nullstyle/slcp-zig/releases/tag/capnp-wasm-tools-v0.1.0-rc.2).
+That publication does not include SDK implementations or establish publication
+approval for either SDK archive.
+
+## Compiler and TypeScript host package
+
+`mise run release:compiler-host` prepares the private
+`@nullstyle/capnp-wasm-compiler-host` candidate at
+`dist/releases/capnp-wasm-compiler-host-0.1.0-rc.2/`. This flavor contains
+`wasm/capnp.wasm`, the same pinned `include/` tree, built `typescript/mod.js`,
+`mod.d.ts`, and `worker.js`, licenses, and complete integrity/provenance data.
+It omits language generator modules, the Go SDK, and the external Wasmtime
+launcher. The compiler and include bytes match the compiler-only toolchain
+archive; TypeScript execution needs no Wasmtime install.
+
+Import `createCompiler` or `createWorkerCompiler` from the installed package.
+Supply the packaged compiler bytes with `generators: {}`, then call
+`compile({ files, includeFiles, entrypoints, generators: [] })` to receive
+unpacked `CodeGeneratorRequest` bytes. This is the existing SDK API; the package
+does not add a TypeScript generator or an `encode`/`decode` command API. All
+asset loading belongs to the consumer. After loading bytes and a worker script
+into a blob URL, jobs and worker restarts can run without filesystem, network,
+or process permission. Keep the blob URL alive until the worker is disposed.
+Worker execution requires Deno 2.6.8 and has its documented two-second engine
+termination grace; unsupported Deno versions fail before starting a worker.
+Direct compilation is also tested on Deno 2.9.6 and has no hard execution
+deadline.
+
+`mise run test:compiler-host-package` checks reproducibility, complete extracted
+contents, modified/missing/extra-file rejection, and an external npm-layout Deno
+consumer with a fresh cache. It checks direct/worker request parity, imports and
+binary embeds, diagnostics, limits, active-guest cancellation, and recovery
+after restarting the worker offline on Deno 2.6.8. The default producer-runtime
+check instead verifies direct compilation and actionable worker-version
+rejection. On the supported Deno, an eight-second parent bound also encloses a
+real shared counter probe that confirms execution stops within the engine grace.
+To test another installed Deno without changing the producer pin:
+
+```sh
+mise exec -- deno run --allow-read --allow-write --allow-run \
+  scripts/test-compiler-host-package.ts /absolute/path/to/deno
+```
+
+The receipt is written to
+`build/test/compiler-host-package-<deno-version>.json`. This candidate remains
+private until an explicit SDK distribution decision. Build and verify a clean
+committed source revision before selecting publication hashes.
 
 ## Deno and npm-compatible JavaScript
 

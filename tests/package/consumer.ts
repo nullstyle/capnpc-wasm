@@ -2,6 +2,7 @@ import {
   createCompiler,
   createWorkerCompiler,
   defaultLimits,
+  supportedDenoWorkerVersion,
 } from "@nullstyle/capnpc-wasm";
 
 const root = new URL("./node_modules/@nullstyle/capnpc-wasm/", import.meta.url);
@@ -30,10 +31,20 @@ const compiler = await createCompiler(modules, {
   limits: { memoryPages: defaultLimits.memoryPages },
 });
 const result = await compiler.compile(request);
-const worker = await createWorkerCompiler(
-  new URL("typescript/worker.js", root),
-  modules,
-);
+const worker = Deno.version.deno === supportedDenoWorkerVersion
+  ? await createWorkerCompiler(new URL("typescript/worker.js", root), modules)
+  : undefined;
+if (!worker) {
+  try {
+    await createWorkerCompiler(new URL("typescript/worker.js", root), modules);
+    throw new Error("unsupported worker unexpectedly succeeded");
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !error.message.includes(`use Deno ${supportedDenoWorkerVersion}`)
+    ) throw error;
+  }
+}
 const expected: Record<string, string> = {
   cpp: "candidate.capnp.h",
   rust: "candidate_capnp.rs",
@@ -55,7 +66,7 @@ try {
     request: result.request,
     generators: languages,
   });
-  const threaded = await worker.compile(request);
+  const threaded = worker ? await worker.compile(request) : undefined;
   for (const language of languages) {
     if (!result.outputs[language]?.[expected[language]]?.length) {
       throw new Error(`missing ${language} package output`);
@@ -64,18 +75,20 @@ try {
       const hash = await digest(bytes);
       if (
         await digest(generated.outputs[language]![name]) !== hash ||
-        await digest(threaded.outputs[language]![name]) !== hash
+        (threaded && await digest(threaded.outputs[language]![name]) !== hash)
       ) throw new Error(`package replay/worker mismatch: ${language}/${name}`);
       hashes[`${language}/${name}`] = hash;
     }
   }
 } finally {
-  worker.dispose();
+  worker?.dispose();
 }
 await Deno.writeTextFile(
   new URL("./deno-result.json", import.meta.url),
   JSON.stringify(hashes),
 );
 console.log(
-  "External npm-layout Deno direct, replay, and worker consumers passed",
+  `External npm-layout Deno direct/replay and ${
+    worker ? "worker execution" : "worker runtime rejection"
+  } passed`,
 );

@@ -225,7 +225,7 @@ try {
           "launcher paths with spaces, argument failures, and runtime pin",
           "reproducible tools-only archive with external generator modules",
           "external npm-layout TypeScript declarations",
-          "external npm-layout Deno direct/replay/worker",
+          "external npm-layout Deno direct/replay and worker execution or explicit runtime rejection",
           "external Go compile/replay",
           "public pinned wazero without replacement",
           "cross-SDK generated-byte parity",

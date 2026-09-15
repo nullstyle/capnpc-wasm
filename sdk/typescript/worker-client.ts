@@ -14,6 +14,9 @@ import {
   type Modules,
 } from "./types.ts";
 
+/** Deno worker termination is verified only on this runtime revision. */
+export const supportedDenoWorkerVersion = "2.6.8";
+
 export interface JobOptions {
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -39,6 +42,18 @@ export async function createWorkerCompiler(
   modules: Modules,
   options: CompilerOptions = {},
 ): Promise<WorkerCompiler> {
+  const denoVersion = (globalThis as {
+    Deno?: { version?: { deno?: string } };
+  }).Deno?.version?.deno;
+  if (denoVersion && denoVersion !== supportedDenoWorkerVersion) {
+    throw new Error(
+      `Deno ${denoVersion} worker termination is not supported; use Deno ${supportedDenoWorkerVersion} for bounded worker compilation, or createCompiler for direct execution without a hard deadline`,
+    );
+  }
+  // Deno 2.6.8 requests forced isolate termination after a two-second grace.
+  // Keep restart outside that grace so repeated cancellation cannot accumulate
+  // still-running guests. Browsers terminate their workers without this delay.
+  const terminationGraceMs = denoVersion ? 2100 : 0;
   const limits = resolveLimits(options);
   // Keep private copies for restarting after cancellation; caller ownership stays intact.
   const snapshot = structuredClone(modules);
@@ -58,11 +73,42 @@ export async function createWorkerCompiler(
   let busy = false;
   let cancel: ((reason: unknown) => void) | undefined;
   let sequence = 0;
+  let restartAfter = 0;
 
   function stop() {
-    worker?.terminate();
+    if (worker) {
+      worker.terminate();
+      restartAfter = performance.now() + terminationGraceMs;
+    }
     worker = undefined;
     ready = false;
+  }
+
+  async function waitForTermination(
+    signal: AbortSignal | undefined,
+    deadline: number,
+  ): Promise<void> {
+    const waitMs = restartAfter - performance.now();
+    if (waitMs <= 0) return;
+    await new Promise<void>((resolve, reject) => {
+      const finish = (error?: unknown) => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        cancel = undefined;
+        if (error !== undefined) reject(error);
+        else resolve();
+      };
+      const abort = () => finish(signal!.reason);
+      const remaining = deadline - performance.now();
+      const timer = setTimeout(() => {
+        if (remaining < waitMs) {
+          finish(new DOMException("compilation timed out", "TimeoutError"));
+        } else finish();
+      }, Math.max(0, Math.min(waitMs, remaining)));
+      cancel = (reason) => finish(reason);
+      signal?.addEventListener("abort", abort, { once: true });
+      if (signal?.aborted) abort();
+    });
   }
 
   function exchange(
@@ -174,10 +220,12 @@ export async function createWorkerCompiler(
     const deadline = performance.now() + timeoutMs;
     try {
       if (!ready) {
+        await waitForTermination(signal, deadline);
+        if (disposed) throw new Error("worker compiler is disposed");
         await exchange(
           { kind: "init", modules: snapshot, options: { limits } },
           signal,
-          timeoutMs,
+          Math.max(0, deadline - performance.now()),
         );
         ready = true;
       }

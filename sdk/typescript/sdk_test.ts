@@ -5,6 +5,7 @@ import {
   createCompiler,
   createWorkerCompiler,
   type Modules,
+  supportedDenoWorkerVersion,
 } from "./mod.ts";
 import { runCommand } from "./runtime.ts";
 
@@ -68,6 +69,24 @@ async function rejects(
   }
   throw new Error(`expected ${name} rejection`);
 }
+
+function workerTest(name: string, fn: Deno.TestDefinition["fn"]) {
+  Deno.test({
+    name,
+    fn,
+    ignore: Deno.version.deno !== supportedDenoWorkerVersion,
+  });
+}
+
+Deno.test("SDK rejects unverified Deno worker runtimes before executing guests", async () => {
+  if (Deno.version.deno === supportedDenoWorkerVersion) return;
+  await rejects(
+    () =>
+      createWorkerCompiler(workerURL, { compiler: loopGuest, generators: {} }),
+    "Error",
+    `use Deno ${supportedDenoWorkerVersion}`,
+  );
+});
 
 function wasm(hex: string): Uint8Array {
   return Uint8Array.from(hex.match(/../g)!, (byte) => parseInt(byte, 16));
@@ -532,54 +551,57 @@ Deno.test("SDK generates from saved requests without running the frontend", asyn
   );
 });
 
-Deno.test("SDK worker generates saved requests with hard cancellation and reuse", async () => {
-  const { modules, request } = await fixture();
-  const expected = await (await createCompiler(modules)).compile(request);
-  const worker = await createWorkerCompiler(workerURL, {
-    ...modules,
-    compiler: trapGuest,
-    generators: { ...modules.generators, cpp: loopGuest },
-  });
-  const job = {
-    request: expected.request,
-    generators: ["rust", "go"] as const,
-  };
-  try {
-    equalOutputs(await worker.generate(job), {
-      outputs: { rust: expected.outputs.rust, go: expected.outputs.go },
+workerTest(
+  "SDK worker generates saved requests with hard cancellation and reuse",
+  async () => {
+    const { modules, request } = await fixture();
+    const expected = await (await createCompiler(modules)).compile(request);
+    const worker = await createWorkerCompiler(workerURL, {
+      ...modules,
+      compiler: trapGuest,
+      generators: { ...modules.generators, cpp: loopGuest },
     });
-    await rejects(() =>
-      worker.generate({ ...job, generators: ["cpp"] }, {
-        timeoutMs: 100,
-      }), "TimeoutError");
-    const controller = new AbortController();
-    const running = worker.generate({ ...job, generators: ["cpp"] }, {
-      signal: controller.signal,
-    });
-    const abortTimer = setTimeout(() => controller.abort(), 100);
+    const job = {
+      request: expected.request,
+      generators: ["rust", "go"] as const,
+    };
     try {
-      await rejects(() => running, "AbortError");
+      equalOutputs(await worker.generate(job), {
+        outputs: { rust: expected.outputs.rust, go: expected.outputs.go },
+      });
+      await rejects(() =>
+        worker.generate({ ...job, generators: ["cpp"] }, {
+          timeoutMs: 100,
+        }), "TimeoutError");
+      const controller = new AbortController();
+      const running = worker.generate({ ...job, generators: ["cpp"] }, {
+        signal: controller.signal,
+      });
+      const abortTimer = setTimeout(() => controller.abort(), 100);
+      try {
+        await rejects(() => running, "AbortError");
+      } finally {
+        clearTimeout(abortTimer);
+      }
+      equalOutputs(await worker.generate(job), {
+        outputs: { rust: expected.outputs.rust, go: expected.outputs.go },
+      });
+      const failure = await rejects(() =>
+        worker.generate({
+          ...job,
+          request: expected.request.slice(0, 12),
+        }), "CompileError");
+      assert(
+        failure instanceof CompileError && failure.stage === "rust",
+        "worker lost generator stage",
+      );
     } finally {
-      clearTimeout(abortTimer);
+      worker.dispose();
     }
-    equalOutputs(await worker.generate(job), {
-      outputs: { rust: expected.outputs.rust, go: expected.outputs.go },
-    });
-    const failure = await rejects(() =>
-      worker.generate({
-        ...job,
-        request: expected.request.slice(0, 12),
-      }), "CompileError");
-    assert(
-      failure instanceof CompileError && failure.stage === "rust",
-      "worker lost generator stage",
-    );
-  } finally {
-    worker.dispose();
-  }
-});
+  },
+);
 
-Deno.test("SDK worker matches core output and preserves errors", async () => {
+workerTest("SDK worker matches core output and preserves errors", async () => {
   const { modules, request } = await fixture();
   const core = await createCompiler(modules);
   const expected = await core.compile(request);
@@ -612,95 +634,104 @@ Deno.test("SDK worker matches core output and preserves errors", async () => {
   await rejects(() => worker.compile(request), "Error", "disposed");
 });
 
-Deno.test("SDK worker snapshots shared request and workspace bytes", async (t) => {
-  const { modules, request } = await fixture();
-  const expected = await (await createCompiler(modules)).compile(request);
-  const worker = await createWorkerCompiler(workerURL, modules);
-  try {
-    await t.step("standalone request", async () => {
-      const bytes = sharedBytes(expected.request);
-      const pending = worker.generate({
-        request: bytes,
-        generators: request.generators,
-      });
-      bytes.fill(0);
-      equalOutputs(await pending, expected);
-    });
-    await t.step("schema and include files", async () => {
-      const share = (files: CompileRequest["files"]) =>
-        Object.fromEntries(
-          Object.entries(files).map(([name, bytes]) => [
-            name,
-            sharedBytes(
-              typeof bytes === "string" ? encoder.encode(bytes) : bytes,
-            ),
-          ]),
-        );
-      const files = share(request.files);
-      const includeFiles = share(request.includeFiles!);
-      const pending = worker.compile({ ...request, files, includeFiles });
-      for (
-        const bytes of [...Object.values(files), ...Object.values(includeFiles)]
-      ) {
-        bytes.fill(0);
-      }
-      equalOutputs(await pending, expected);
-    });
-  } finally {
-    worker.dispose();
-  }
-});
-
-Deno.test("SDK worker kills running Wasm on timeout or abort and can restart", async () => {
-  const { modules } = await fixture();
-  const compilerBytes = sharedBytes(modules.compiler as Uint8Array);
-  const rustBytes = sharedBytes(modules.generators.rust as Uint8Array);
-  const loopBytes = sharedBytes(loopGuest);
-  const worker = await createWorkerCompiler(workerURL, {
-    compiler: compilerBytes,
-    generators: { cpp: loopBytes, rust: rustBytes },
-  });
-  // SharedArrayBuffer survives structuredClone; restart snapshots must copy it.
-  compilerBytes.fill(0);
-  rustBytes.fill(0);
-  loopBytes.fill(0);
-  const job = simpleRequest();
-  const recoveryJob: CompileRequest = { ...job, generators: ["rust"] };
-  const expected = await (await createCompiler(modules)).compile(recoveryJob);
-  try {
-    const timeout = worker.compile(job, { timeoutMs: 100 });
-    await rejects(() => worker.compile(job), "Error", "active job");
-    await rejects(() => timeout, "TimeoutError");
-    equalOutputs(await worker.compile(recoveryJob), expected);
-
-    const controller = new AbortController();
-    const aborted = worker.compile(job, { signal: controller.signal });
-    const abortTimer = setTimeout(() => controller.abort(), 100);
+workerTest(
+  "SDK worker snapshots shared request and workspace bytes",
+  async (t) => {
+    const { modules, request } = await fixture();
+    const expected = await (await createCompiler(modules)).compile(request);
+    const worker = await createWorkerCompiler(workerURL, modules);
     try {
-      await rejects(() => aborted, "AbortError");
+      await t.step("standalone request", async () => {
+        const bytes = sharedBytes(expected.request);
+        const pending = worker.generate({
+          request: bytes,
+          generators: request.generators,
+        });
+        bytes.fill(0);
+        equalOutputs(await pending, expected);
+      });
+      await t.step("schema and include files", async () => {
+        const share = (files: CompileRequest["files"]) =>
+          Object.fromEntries(
+            Object.entries(files).map(([name, bytes]) => [
+              name,
+              sharedBytes(
+                typeof bytes === "string" ? encoder.encode(bytes) : bytes,
+              ),
+            ]),
+          );
+        const files = share(request.files);
+        const includeFiles = share(request.includeFiles!);
+        const pending = worker.compile({ ...request, files, includeFiles });
+        for (
+          const bytes of [
+            ...Object.values(files),
+            ...Object.values(includeFiles),
+          ]
+        ) {
+          bytes.fill(0);
+        }
+        equalOutputs(await pending, expected);
+      });
     } finally {
-      clearTimeout(abortTimer);
+      worker.dispose();
     }
-    equalOutputs(await worker.compile(recoveryJob), expected);
-    const alreadyAborted = AbortSignal.abort();
-    await rejects(
-      () => worker.compile(job, { signal: alreadyAborted }),
-      "AbortError",
-    );
-    for (const timeoutMs of [0, -1, NaN, Infinity, 2_147_483_648]) {
+  },
+);
+
+workerTest(
+  "SDK worker kills running Wasm on timeout or abort and can restart",
+  async () => {
+    const { modules } = await fixture();
+    const compilerBytes = sharedBytes(modules.compiler as Uint8Array);
+    const rustBytes = sharedBytes(modules.generators.rust as Uint8Array);
+    const loopBytes = sharedBytes(loopGuest);
+    const worker = await createWorkerCompiler(workerURL, {
+      compiler: compilerBytes,
+      generators: { cpp: loopBytes, rust: rustBytes },
+    });
+    // SharedArrayBuffer survives structuredClone; restart snapshots must copy it.
+    compilerBytes.fill(0);
+    rustBytes.fill(0);
+    loopBytes.fill(0);
+    const job = simpleRequest();
+    const recoveryJob: CompileRequest = { ...job, generators: ["rust"] };
+    const expected = await (await createCompiler(modules)).compile(recoveryJob);
+    try {
+      const timeout = worker.compile(job, { timeoutMs: 100 });
+      await rejects(() => worker.compile(job), "Error", "active job");
+      await rejects(() => timeout, "TimeoutError");
+      equalOutputs(await worker.compile(recoveryJob), expected);
+
+      const controller = new AbortController();
+      const aborted = worker.compile(job, { signal: controller.signal });
+      const abortTimer = setTimeout(() => controller.abort(), 100);
+      try {
+        await rejects(() => aborted, "AbortError");
+      } finally {
+        clearTimeout(abortTimer);
+      }
+      equalOutputs(await worker.compile(recoveryJob), expected);
+      const alreadyAborted = AbortSignal.abort();
       await rejects(
-        () => worker.compile(job, { timeoutMs }),
-        "TypeError",
-        "timeoutMs",
+        () => worker.compile(job, { signal: alreadyAborted }),
+        "AbortError",
       );
+      for (const timeoutMs of [0, -1, NaN, Infinity, 2_147_483_648]) {
+        await rejects(
+          () => worker.compile(job, { timeoutMs }),
+          "TypeError",
+          "timeoutMs",
+        );
+      }
+      const disposed = worker.compile(job);
+      worker.dispose();
+      await rejects(() => disposed, "Error", "disposed");
+    } finally {
+      worker.dispose();
     }
-    const disposed = worker.compile(job);
-    worker.dispose();
-    await rejects(() => disposed, "Error", "disposed");
-  } finally {
-    worker.dispose();
-  }
-});
+  },
+);
 
 Deno.test("SDK bounds aggregate workspace bytes and entries before executing", async () => {
   const compiler = await createCompiler({
@@ -956,74 +987,77 @@ Deno.test("SDK accounts resizable buffer growth for stdout and stderr", async ()
   }
 });
 
-Deno.test("SDK worker propagates limits through failures, cancellation, and restart", async () => {
-  const worker = await createWorkerCompiler(workerURL, {
-    compiler: commandGuest([...writeX, ...writeX]),
-    generators: {
-      cpp: loopGuest,
-      rust: commandGuest([]),
-      zig: commandGuest([...writeX, ...writeX, ...writeX]),
-    },
-  }, {
-    limits: {
-      workspaceBytes: 2,
-      requestBytes: 2,
-      stdoutBytes: 2,
-      memoryPages: 1,
-    },
-  });
-  const job = {
-    files: { a: "é" },
-    entrypoints: ["a"],
-    generators: [] as const,
-  };
-  try {
-    equalBytes(
-      (await worker.compile(job)).request,
-      encoder.encode("xx"),
-      "worker limits",
-    );
-    await rejects(
-      () => worker.compile({ ...job, files: { a: "éx" } }),
-      "TypeError",
-      "workspaceBytes",
-    );
-    await rejects(
-      () =>
-        worker.generate({ request: new Uint8Array(3), generators: ["rust"] }),
-      "TypeError",
-      "requestBytes",
-    );
-    await rejects(
-      () =>
-        worker.generate({ request: new Uint8Array(1), generators: ["cpp"] }, {
-          timeoutMs: 50,
-        }),
-      "TimeoutError",
-    );
-    const failure = await rejects(
-      () =>
-        worker.generate({
-          request: new Uint8Array(1),
-          generators: ["rust", "zig"],
-        }),
-      "CompileError",
-      "stdoutBytes",
-    );
-    assert(
-      failure instanceof CompileError && failure.stage === "zig" &&
-        !("outputs" in failure),
-      "worker published earlier output after failure",
-    );
-    equalBytes(
-      (await worker.compile(job)).request,
-      encoder.encode("xx"),
-      "restarted worker limits",
-    );
-  } finally {
-    worker.dispose();
-  }
-});
+workerTest(
+  "SDK worker propagates limits through failures, cancellation, and restart",
+  async () => {
+    const worker = await createWorkerCompiler(workerURL, {
+      compiler: commandGuest([...writeX, ...writeX]),
+      generators: {
+        cpp: loopGuest,
+        rust: commandGuest([]),
+        zig: commandGuest([...writeX, ...writeX, ...writeX]),
+      },
+    }, {
+      limits: {
+        workspaceBytes: 2,
+        requestBytes: 2,
+        stdoutBytes: 2,
+        memoryPages: 1,
+      },
+    });
+    const job = {
+      files: { a: "é" },
+      entrypoints: ["a"],
+      generators: [] as const,
+    };
+    try {
+      equalBytes(
+        (await worker.compile(job)).request,
+        encoder.encode("xx"),
+        "worker limits",
+      );
+      await rejects(
+        () => worker.compile({ ...job, files: { a: "éx" } }),
+        "TypeError",
+        "workspaceBytes",
+      );
+      await rejects(
+        () =>
+          worker.generate({ request: new Uint8Array(3), generators: ["rust"] }),
+        "TypeError",
+        "requestBytes",
+      );
+      await rejects(
+        () =>
+          worker.generate({ request: new Uint8Array(1), generators: ["cpp"] }, {
+            timeoutMs: 50,
+          }),
+        "TimeoutError",
+      );
+      const failure = await rejects(
+        () =>
+          worker.generate({
+            request: new Uint8Array(1),
+            generators: ["rust", "zig"],
+          }),
+        "CompileError",
+        "stdoutBytes",
+      );
+      assert(
+        failure instanceof CompileError && failure.stage === "zig" &&
+          !("outputs" in failure),
+        "worker published earlier output after failure",
+      );
+      equalBytes(
+        (await worker.compile(job)).request,
+        encoder.encode("xx"),
+        "restarted worker limits",
+      );
+    } finally {
+      worker.dispose();
+    }
+  },
+);
 
 Deno.test("SDK bounds aggregate generator files at exact byte and entry boundaries", async () => {
   const { modules } = await fixture();

@@ -114,6 +114,13 @@ consumers that pin their own generators; `mise run test:package` checks both
 archive variants with real external consumers. See the
 [launcher contract and examples](docs/releases.md#repository-toolchain-launcher).
 
+`mise run release:compiler-host` prepares a separate private compiler/TypeScript
+host package for in-process Deno and browser consumers. It includes the
+compiler, schemas, bundled host and worker, integrity data and licenses, without
+language generator modules or the Go SDK. Its
+[package gate](docs/releases.md#compiler-and-typescript-host-package) verifies
+an offline external Deno consumer and worker cancellation/recovery.
+
 ## Command modules
 
 After `mise run build`, create a request with the Wasm compiler, then feed it to

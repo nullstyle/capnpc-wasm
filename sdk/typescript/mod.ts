@@ -24,6 +24,7 @@ export * from "./types.ts";
 export {
   createWorkerCompiler,
   type JobOptions,
+  supportedDenoWorkerVersion,
   type WorkerCompiler,
 } from "./worker-client.ts";
 
