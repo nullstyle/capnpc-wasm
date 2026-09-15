@@ -8,13 +8,26 @@ source_key="$revision:pristine-v1"
 historical_dir=build/src/capnp-zig-historical
 historical_revision="$(cat generators/zig/historical-reference)"
 
+# BSD tar can stop at the end markers before git has written the remaining
+# archive padding. With pipefail, that harmless early close becomes SIGPIPE (exit 141).
+# Finish the archive first, then publish only a fully extracted source tree.
+export_source() (
+  local source_revision="$1" destination="$2" key="$3" staging
+  staging="$(mktemp -d build/src/.capnp-zig-export.XXXXXX)"
+  trap 'rm -rf "$staging"' EXIT
+  git -C ref/capnp-zig archive --format=tar \
+    --output="$PWD/$staging/source.tar" "$source_revision" src/
+  mkdir "$staging/source"
+  tar -xf "$staging/source.tar" -C "$staging/source"
+  printf '%s\n' "$key" > "$staging/source/.source-key"
+  rm -rf "$destination"
+  mv "$staging/source" "$destination"
+)
+
 mkdir -p build/src build/native/bin build/wasm/bin build/zig/cache build/zig/bin
 if [[ ! -f "$source_dir/.source-key" ]] ||
    [[ "$(cat "$source_dir/.source-key")" != "$source_key" ]]; then
-  rm -rf "$source_dir"
-  mkdir -p "$source_dir"
-  git -C ref/capnp-zig archive "$revision" src/ | tar -x -C "$source_dir"
-  printf '%s\n' "$source_key" > "$source_dir/.source-key"
+  export_source "$revision" "$source_dir" "$source_key"
 fi
 
 if [[ ! -f "$historical_dir/.source-key" ]] ||
@@ -23,10 +36,7 @@ if [[ ! -f "$historical_dir/.source-key" ]] ||
     echo 'Historical Zig audit reference missing; run mise run refs:sync' >&2
     exit 1
   }
-  rm -rf "$historical_dir"
-  mkdir -p "$historical_dir"
-  git -C ref/capnp-zig archive "$historical_revision" src/ | tar -x -C "$historical_dir"
-  printf '%s\n' "$historical_revision" > "$historical_dir/.source-key"
+  export_source "$historical_revision" "$historical_dir" "$historical_revision"
 fi
 
 deno run --allow-read --allow-run=git scripts/check-zig-sync.ts
