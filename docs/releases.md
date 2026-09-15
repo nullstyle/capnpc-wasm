@@ -1,11 +1,36 @@
-# Private release candidates
+# Compiler releases and SDK candidates
 
-Version `0.1.0-rc.3` is an installable candidate for testing. It is not a
-published release or a promise of a stable SDK interface. `release.json` owns
-the package name, version, private flag, and project license selection.
-Project-owned code is licensed under Apache-2.0. Candidates remain private;
-upstream code retains the licenses shipped in `licenses/`. The archive includes
+The public source repository and canonical compiler download host is
+[nullstyle/capnpc-wasm](https://github.com/nullstyle/capnpc-wasm). The compiler
+archives below are published prereleases; full SDK registry publication and a
+stable SDK interface remain pending. `release.json` owns the package name,
+version, private registry flag, and project license selection. The `private`
+flag prevents accidental npm publication; it does not make GitHub release
+downloads private. Project-owned code is licensed under Apache-2.0; upstream
+code retains the licenses shipped in `licenses/`. The full SDK archive includes
 the project license at `LICENSE` and `sdk/go/LICENSE`.
+
+## Public compiler downloads
+
+| Package                        | Release                                                                                                  | Host runtime       |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- | ------------------ |
+| Compiler and Wasmtime launcher | [0.1.0-rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.2)         | Wasmtime 48.0.1    |
+| Compiler and TypeScript host   | [0.1.0-rc.3](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.3) | Deno worker: 2.6.8 |
+
+The earlier
+[compiler host rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.2)
+is also available. These three archives and their `SHA256SUMS` files were copied
+byte-for-byte from the former SLCP release host. Existing versions, archive
+hashes, manifests, and embedded provenance are unchanged. Historical SLCP
+download URLs remain available for already-pinned consumers.
+
+Publish future compiler assets to `nullstyle/capnpc-wasm`. Release tags point to
+the producer commit recorded in the archive manifest. Upload the verified
+archive and its `SHA256SUMS`; keep published assets immutable and use a new
+version for changed bytes. GitHub's generated source archives are separate from
+the compiler `.tgz` assets.
+
+## Prepare a full SDK candidate
 
 From the source checkout, run:
 
@@ -81,14 +106,14 @@ runtime version, licenses, and source provenance/integrity inventory. It omits
 SDK code and generator modules; repository consumers build generators matching
 their own runtime dependency pins. It uses the same `package/` extraction
 layout, manifest format, and verification procedure as the complete SDK archive.
-The earlier rc.2 compiler-only archive was separately published on the
-[SLCP toolchain release](https://github.com/nullstyle/slcp-zig/releases/tag/capnp-wasm-tools-v0.1.0-rc.2).
-That publication does not include SDK implementations or establish publication
-approval for either SDK archive.
+The published
+[rc.2 compiler-only archive](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.2)
+contains no SDK implementations. The compiler host below is a separate release
+flavor.
 
 ## Compiler and TypeScript host package
 
-`mise run release:compiler-host` prepares the private
+`mise run release:compiler-host` prepares the
 `@nullstyle/capnp-wasm-compiler-host` candidate at
 `dist/releases/capnp-wasm-compiler-host-0.1.0-rc.3/`. This flavor contains
 `wasm/capnp.wasm`, the same pinned `include/` tree, built `typescript/mod.js`,
@@ -132,9 +157,9 @@ mise exec -- deno run --allow-read --allow-write --allow-run \
 ```
 
 The receipt is written to
-`build/test/compiler-host-package-<deno-version>.json`. This candidate remains
-private until an explicit SDK distribution decision. Build and verify a clean
-committed source revision before selecting publication hashes.
+`build/test/compiler-host-package-<deno-version>.json`. Compiler host rc.2 and
+rc.3 are published at the links above. Build and verify a clean committed source
+revision before selecting hashes for a new release.
 
 ## Deno and npm-compatible JavaScript
 

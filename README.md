@@ -13,8 +13,9 @@ Go and Zig retain pristine upstream comparisons. Zig uses the matching pinned
 generator and runtime, including
 [binary schema reflection and generated views](generators/zig/README.md). The
 TypeScript SDK bounds guest memory, inputs, requests, diagnostics, and outputs.
-Installable release candidates are tested locally; publication and sustained
-nightly confidence remain release gates.
+Compiler archives are available from this repository's
+[public releases](https://github.com/nullstyle/capnpc-wasm/releases). Full SDK
+registry publication and sustained nightly confidence remain release gates.
 
 ## Bootstrap
 
@@ -100,9 +101,9 @@ limits, generic brands, pointer defaults, groups, and relative imports. The
 multi-file schema editing, folder imports, C++/Rust/Go/Zig output, compiler
 diagnostics, and source/output ZIP downloads. It loads generators on demand and
 reuses the compiled request while its workspace is unchanged. These are initial
-workspace SDKs. The [release guide](docs/releases.md) describes building and
-testing a private installable candidate with `mise run test:package`; package
-publication and a stable release interface are pending.
+workspace SDKs. The [release guide](docs/releases.md) describes public compiler
+downloads and testing a full SDK candidate with `mise run test:package`. Full
+SDK registry publication and a stable release interface are pending.
 
 ## Repository toolchain integration
 
@@ -114,12 +115,18 @@ consumers that pin their own generators; `mise run test:package` checks both
 archive variants with real external consumers. See the
 [launcher contract and examples](docs/releases.md#repository-toolchain-launcher).
 
-`mise run release:compiler-host` prepares a separate private compiler/TypeScript
-host package for in-process Deno and browser consumers. It includes the
-compiler, schemas, bundled host and worker, integrity data and licenses, without
-language generator modules or the Go SDK. Its
+`mise run release:compiler-host` prepares a separate compiler/TypeScript host
+package for in-process Deno and browser consumers. It includes the compiler,
+schemas, bundled host and worker, integrity data and licenses, without language
+generator modules or the Go SDK. Its
 [package gate](docs/releases.md#compiler-and-typescript-host-package) verifies
 an offline external Deno consumer and worker cancellation/recovery.
+
+Download the published
+[compiler-only rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.2)
+or
+[compiler host rc.3](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.3).
+Pin the archive and manifest hashes described in the release guide.
 
 ## Command modules
 
