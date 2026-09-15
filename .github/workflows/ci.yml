@@ -52,7 +52,9 @@ jobs:
         run: mise run test:package
       - name: Verify supported Deno worker execution and termination
         run: |
-          mise install deno@2.6.8
+          # Keep this additional runtime outside the project's lockfile update.
+          # mise 2026.9.1 otherwise prunes non-host WASI SDK option variants.
+          mise --cd "$RUNNER_TEMP" install deno@2.6.8
           mise exec deno@2.6.8 -- deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts
           mise exec -- deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts "$(mise where deno@2.6.8)/bin/deno"
       - name: Verify checks leave tracked sources unchanged
