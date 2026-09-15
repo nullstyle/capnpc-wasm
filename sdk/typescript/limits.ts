@@ -54,6 +54,18 @@ export function validateWorkspace(
   input: CompileRequest,
   limits: ResourceLimits,
 ): [Files, Files] {
+  const importPaths = input.importPaths ?? [];
+  if (
+    !Array.isArray(importPaths) || importPaths.length > limits.workspaceEntries
+  ) {
+    throw new TypeError("importPaths exceed workspaceEntries limit");
+  }
+  for (const path of [input.sourcePrefix ?? "", ...importPaths]) {
+    if (path !== "") checkPath(path, limits);
+  }
+  if (new Set(importPaths).size !== importPaths.length) {
+    throw new TypeError("duplicate importPaths");
+  }
   if (input.entrypoints.length > limits.workspaceEntries) {
     throw new TypeError("entrypoints exceed workspaceEntries limit");
   }

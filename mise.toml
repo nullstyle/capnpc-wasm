@@ -201,5 +201,5 @@ run = "deno run --allow-read --allow-write=dist --allow-run=git scripts/release.
 
 [tasks."test:compiler-host-package"]
 description = "Verify compiler-host packaging and an offline external Deno worker consumer"
-depends = ["release:compiler-host"]
+depends = ["release:compiler-host", "build:native"]
 run = "deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts"

@@ -36,6 +36,10 @@ export interface CompileRequest {
   files: Files;
   /** Standard schemas and annotations, staged beneath /include. */
   includeFiles?: Files;
+  /** Ordered include directories within files; searched before includeFiles. Empty means /src. */
+  importPaths?: readonly string[];
+  /** Strip this directory from requested source names; other files remain relative to /src. */
+  sourcePrefix?: string;
   entrypoints: readonly string[];
   /** An empty list compiles to a request without generating source. */
   generators: readonly Language[];

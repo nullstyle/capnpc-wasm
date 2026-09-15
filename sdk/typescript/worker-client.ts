@@ -212,6 +212,8 @@ export async function createWorkerCompiler(
       job = {
         files: copyFiles(sources),
         includeFiles: copyFiles(annotations),
+        importPaths: [...(compilation.importPaths ?? [])],
+        sourcePrefix: compilation.sourcePrefix ?? "",
         entrypoints: [...compilation.entrypoints],
         generators: [...compilation.generators],
       };

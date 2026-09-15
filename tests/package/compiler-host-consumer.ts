@@ -5,6 +5,7 @@ import {
   createWorkerCompiler,
   supportedDenoWorkerVersion,
 } from "@nullstyle/capnp-wasm-compiler-host";
+import { compilerPathFixture } from "./compiler-path-fixture.ts";
 
 const root = new URL(
   "./node_modules/@nullstyle/capnp-wasm-compiler-host/",
@@ -74,6 +75,15 @@ const result = await compiler.compile(request);
 assert(result.request.length > 0, "compiler produced no request");
 assert(Object.keys(result.outputs).length === 0, "unexpected generator output");
 const expectedHash = await digest(result.request);
+const pathResult = await compiler.compile(compilerPathFixture);
+const reversedPaths = await compiler.compile({
+  ...compilerPathFixture,
+  importPaths: [...compilerPathFixture.importPaths].reverse(),
+});
+assert(
+  await digest(pathResult.request) !== await digest(reversedPaths.request),
+  "include order was ignored",
+);
 const worker = Deno.version.deno === supportedDenoWorkerVersion
   ? await createWorkerCompiler(workerURL, {
     ...modules,
@@ -92,6 +102,11 @@ if (!worker) {
 }
 try {
   if (worker) {
+    assert(
+      await digest((await worker.compile(compilerPathFixture)).request) ===
+        await digest(pathResult.request),
+      "worker did not preserve sourcePrefix/importPaths",
+    );
     assert(
       await digest((await worker.compile(request)).request) === expectedHash,
       "direct and worker requests differ",
@@ -160,12 +175,22 @@ try {
     deno: Deno.version.deno,
     requestSha256: expectedHash,
     requestBytes: result.request.length,
+    pathRequest: btoa(
+      Array.from(pathResult.request, (byte) => String.fromCharCode(byte)).join(
+        "",
+      ),
+    ),
+    reversedPathRequest: btoa(
+      Array.from(reversedPaths.request, (byte) => String.fromCharCode(byte))
+        .join(""),
+    ),
     checks: [
       "external npm exports and TypeScript declarations",
       ...(worker
         ? ["direct and worker compiler request parity"]
         : ["unsupported Deno worker version rejected before execution"]),
       "imports, spaces, binary embeds and bundled streaming schema",
+      "ordered include roots, source prefix and parent imports/embeds",
       "no process or network permission; read revoked before execution",
       "malformed input diagnostics",
       ...(worker

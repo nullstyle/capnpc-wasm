@@ -1,6 +1,6 @@
 # Private release candidates
 
-Version `0.1.0-rc.2` is an installable candidate for testing. It is not a
+Version `0.1.0-rc.3` is an installable candidate for testing. It is not a
 published release or a promise of a stable SDK interface. `release.json` owns
 the package name, version, private flag, and project license selection.
 Project-owned code is licensed under Apache-2.0. Candidates remain private;
@@ -14,8 +14,8 @@ mise run release:prepare
 mise run test:package
 ```
 
-The output is under `dist/releases/capnpc-wasm-0.1.0-rc.2/`: a `package/`
-directory, the npm-compatible `capnpc-wasm-0.1.0-rc.2.tgz` archive, and
+The output is under `dist/releases/capnpc-wasm-0.1.0-rc.3/`: a `package/`
+directory, the npm-compatible `capnpc-wasm-0.1.0-rc.3.tgz` archive, and
 `SHA256SUMS`. Preparation starts from fresh staging directories and removes
 stale assets. Sorted tar entries, fixed permissions, zero ownership, and zero
 timestamps make archive bytes reproducible for the same source and built inputs.
@@ -75,13 +75,13 @@ arguments. These filesystem mappings are capabilities, not read-only mounts; use
 disposable workspaces and commit generated output only after success.
 
 `mise run release:tools` prepares
-`dist/releases/capnp-wasm-tools-0.1.0-rc.2/capnp-wasm-tools-0.1.0-rc.2.tgz`.
+`dist/releases/capnp-wasm-tools-0.1.0-rc.3/capnp-wasm-tools-0.1.0-rc.3.tgz`.
 This smaller archive includes the compiler, standard include schemas, launcher,
 runtime version, licenses, and source provenance/integrity inventory. It omits
 SDK code and generator modules; repository consumers build generators matching
 their own runtime dependency pins. It uses the same `package/` extraction
 layout, manifest format, and verification procedure as the complete SDK archive.
-The compiler-only archive has separately been published on the
+The earlier rc.2 compiler-only archive was separately published on the
 [SLCP toolchain release](https://github.com/nullstyle/slcp-zig/releases/tag/capnp-wasm-tools-v0.1.0-rc.2).
 That publication does not include SDK implementations or establish publication
 approval for either SDK archive.
@@ -90,7 +90,7 @@ approval for either SDK archive.
 
 `mise run release:compiler-host` prepares the private
 `@nullstyle/capnp-wasm-compiler-host` candidate at
-`dist/releases/capnp-wasm-compiler-host-0.1.0-rc.2/`. This flavor contains
+`dist/releases/capnp-wasm-compiler-host-0.1.0-rc.3/`. This flavor contains
 `wasm/capnp.wasm`, the same pinned `include/` tree, built `typescript/mod.js`,
 `mod.d.ts`, and `worker.js`, licenses, and complete integrity/provenance data.
 It omits language generator modules, the Go SDK, and the external Wasmtime
@@ -109,6 +109,12 @@ Worker execution requires Deno 2.6.8 and has its documented two-second engine
 termination grace; unsupported Deno versions fail before starting a worker.
 Direct compilation is also tested on Deno 2.9.6 and has no hard execution
 deadline.
+
+The rc.3 compiler host adds optional canonical `sourcePrefix` and ordered
+`importPaths` within the supplied files snapshot. The package gate compares
+complete canonical requests with the native compiler for both include orders,
+including a parent import and binary embed. Existing rc.2 archives remain
+immutable; consumers opt into the new version with new integrity pins.
 
 `mise run test:compiler-host-package` checks reproducibility, complete extracted
 contents, modified/missing/extra-file rejection, and an external npm-layout Deno
@@ -166,7 +172,7 @@ go mod tidy
 
 Supply `package/wasm/*.wasm` and any required `package/include/` schema bytes to
 the SDK. The eventual nested module tag must use the `sdk/go/v` prefix (for
-example `sdk/go/v0.1.0-rc.2`). Preparing a candidate does not create that tag or
+example `sdk/go/v0.1.0-rc.3`). Preparing a candidate does not create that tag or
 publish the npm package.
 
 ## Acceptance checks

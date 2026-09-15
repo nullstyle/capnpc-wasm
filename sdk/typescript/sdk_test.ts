@@ -92,6 +92,35 @@ function wasm(hex: string): Uint8Array {
   return Uint8Array.from(hex.match(/../g)!, (byte) => parseInt(byte, 16));
 }
 
+Deno.test("SDK confines compiler source prefixes and ordered import roots", async () => {
+  const compiler = await createCompiler({
+    compiler: trapGuest,
+    generators: {},
+  });
+  const job = {
+    files: { "example.capnp": "@0xece4bf9c1f867623; struct Example {}" },
+    entrypoints: ["example.capnp"],
+    generators: [] as [],
+  };
+  for (
+    const path of ["../escape", "/absolute", "a/../b", "a\\b", "a\0b", "a//b"]
+  ) {
+    await rejects(
+      () => compiler.compile({ ...job, sourcePrefix: path }),
+      "TypeError",
+    );
+    await rejects(
+      () => compiler.compile({ ...job, importPaths: [path] }),
+      "TypeError",
+    );
+  }
+  await rejects(
+    () => compiler.compile({ ...job, importPaths: ["", ""] }),
+    "TypeError",
+    "duplicate",
+  );
+});
+
 function sharedBytes(bytes: Uint8Array): Uint8Array {
   // Offset views also catch snapshots that copy the whole backing buffer.
   const view = new Uint8Array(

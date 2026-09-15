@@ -90,6 +90,31 @@ resolve normally within this snapshot. Absolute imports resolve through
 `$Go.package`/`$Go.import` annotations. Dependencies must be present before the
 job starts.
 
+`importPaths` optionally supplies ordered directories within `files`, searched
+before `/include` for absolute imports. `sourcePrefix` optionally chooses a
+directory within `files` to strip from requested filenames. Both use canonical
+relative POSIX directory names; `""` means the `/src` root. Absolute paths,
+backslashes, parent traversal and duplicate import roots are rejected. These
+options change compiler arguments only: schema text, read-only input isolation,
+and the binary request format remain unchanged. For example:
+
+```ts
+const result = await compiler.compile({
+  files: workspaceFiles,
+  entrypoints: ["project/schema/person.capnp"],
+  sourcePrefix: "project",
+  importPaths: ["project/vendor", "shared"],
+  generators: [],
+});
+// Requested filename: schema/person.capnp. Imports search project/vendor,
+// then shared, then the separately supplied includeFiles snapshot.
+```
+
+This lets a filesystem adapter stage a finite dependency graph containing parent
+imports and binary embeds, without copying entire include directories or
+rewriting schema contents. The caller supplies all referenced files; the SDK
+does not discover host paths.
+
 For Zig, supply `generators: { zig: moduleBytes }` with `capnpc-zig.wasm` and
 request `generators: ["zig"]`. Output uses `.zig` filenames and imports the
 `capnpc-zig` runtime module. Bind that name to the pinned library, as shown in

@@ -151,6 +151,8 @@ export async function createCompiler(
       const files = copyFiles(sources, "src/");
       const includes = copyFiles(annotations, "include/");
       const entrypoints = [...input.entrypoints];
+      const importPaths = [...(input.importPaths ?? [])];
+      const sourcePrefix = input.sourcePrefix ?? "";
       const selected = targets(input.generators);
       if (entrypoints.length === 0) {
         throw new TypeError("at least one entrypoint is required");
@@ -172,8 +174,10 @@ export async function createCompiler(
           "capnp",
           "compile",
           "--no-standard-import",
+          ...importPaths.map((path) => path ? `-I/src/${path}` : "-I/src"),
           "-I/include",
           "--src-prefix=/src",
+          ...(sourcePrefix ? [`--src-prefix=/src/${sourcePrefix}`] : []),
           "-o-",
           ...entrypoints.map((path) => `/src/${path}`),
         ],

@@ -1,4 +1,5 @@
 import { packageFiles, sha256, verifyRelease } from "./verify-release.ts";
+import { compilerPathFixture } from "../tests/package/compiler-path-fixture.ts";
 
 // Optional executable override verifies a supported older Deno without changing
 // the producer's own toolchain pin. The default is the current test executable.
@@ -49,6 +50,27 @@ async function mustReject(root: string, label: string) {
   }
   throw new Error(`${label} passed verification`);
 }
+async function canonical(bytes: Uint8Array): Promise<Uint8Array> {
+  const child = new Deno.Command(
+    `${repository}/build/native/bin/normalize-request`,
+    {
+      stdin: "piped",
+      stdout: "piped",
+      stderr: "piped",
+      signal: AbortSignal.timeout(8000),
+    },
+  ).spawn();
+  const output = child.output();
+  const writer = child.stdin.getWriter();
+  await writer.write(bytes);
+  await writer.close();
+  const normalized = await output;
+  if (!normalized.success) {
+    throw new Error(new TextDecoder().decode(normalized.stderr));
+  }
+  return normalized.stdout;
+}
+
 const prepare = [
   Deno.execPath(),
   "run",
@@ -133,6 +155,10 @@ try {
     "tests/package/compiler-host-consumer.ts",
     `${consumer}/consumer.ts`,
   );
+  await Deno.copyFile(
+    "tests/package/compiler-path-fixture.ts",
+    `${consumer}/compiler-path-fixture.ts`,
+  );
   await Deno.writeTextFile(
     `${consumer}/deno.json`,
     JSON.stringify({
@@ -154,6 +180,61 @@ try {
     { DENO_DIR: `${temporary}/fresh-deno-cache` },
   );
   const result = JSON.parse(output);
+  const nativeRoot = `${consumer}/native-paths`;
+  for (const [path, contents] of Object.entries(compilerPathFixture.files)) {
+    const target = `${nativeRoot}/${path}`;
+    await Deno.mkdir(target.slice(0, target.lastIndexOf("/")), {
+      recursive: true,
+    });
+    await Deno.writeFile(
+      target,
+      typeof contents === "string"
+        ? new TextEncoder().encode(contents)
+        : contents,
+    );
+  }
+  for (const reverse of [false, true]) {
+    const roots = [...compilerPathFixture.importPaths];
+    if (reverse) roots.reverse();
+    const native = await new Deno.Command(
+      `${repository}/build/native/bin/capnp`,
+      {
+        cwd: nativeRoot,
+        args: [
+          "compile",
+          "--no-standard-import",
+          ...roots.map((path) => `-I${path}`),
+          `--src-prefix=${compilerPathFixture.sourcePrefix}`,
+          "-o-",
+          ...compilerPathFixture.entrypoints,
+        ],
+        stdout: "piped",
+        stderr: "piped",
+        signal: AbortSignal.timeout(8000),
+      },
+    ).output();
+    if (!native.success) {
+      throw new Error(new TextDecoder().decode(native.stderr));
+    }
+    const encoded = reverse ? result.reversedPathRequest : result.pathRequest;
+    const guest = Uint8Array.from(
+      atob(encoded),
+      (value) => value.charCodeAt(0),
+    );
+    if (
+      await sha256(await canonical(guest)) !==
+        await sha256(await canonical(native.stdout))
+    ) {
+      throw new Error(
+        `source-prefix/ordered-root native request parity failed (${reverse})`,
+      );
+    }
+  }
+  delete result.pathRequest;
+  delete result.reversedPathRequest;
+  result.checks.push(
+    "complete canonical request parity with native compiler for both include orders",
+  );
   if (result.deno === "2.6.8") {
     const termination = JSON.parse(
       await command(
