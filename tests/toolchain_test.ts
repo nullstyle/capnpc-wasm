@@ -10,6 +10,8 @@ import {
   assertGuestDiagnostic,
   guestCommand,
   type GuestOptions,
+  moduleCommand,
+  TRAP_GUEST,
   TRAP_TEXT,
   type WasmHost,
   wasmHosts,
@@ -250,6 +252,8 @@ async function prepare() {
     await run([`${nativeBin}/capnp`, ...nativeUsageArgs]),
     "native usage error",
   );
+  const trapModule = `${work}/trap.wasm`;
+  await Deno.writeFile(trapModule, TRAP_GUEST);
 
   return {
     work,
@@ -265,6 +269,7 @@ async function prepare() {
     malformed,
     usage,
     goConflict,
+    trapModule,
   };
 }
 
@@ -696,6 +701,37 @@ for (const host of wasmHosts) {
         assert(
           generated.has("pérson.capnp.h") && generated.has("pérson.capnp.c++"),
           "UTF-8 output filename was corrupted",
+        );
+      },
+    );
+
+    await t.step(
+      "a trapping guest reports the host's trap status, not a diagnostic",
+      async () => {
+        const result = await run(
+          moduleCommand(host, data.trapModule, "trap", data.compilerRoot),
+        );
+        const stderr = decodeText(result.stderr);
+        assert(
+          result.signal === null && result.code === host.trapExitCode,
+          `trap guest ${
+            describeExit(result)
+          }; expected exit ${host.trapExitCode}; stderr:\n${stderr}`,
+        );
+        assert(result.stdout.length === 0, "trap guest wrote stdout");
+        assert(
+          TRAP_TEXT.test(stderr),
+          `trap guest stderr lacks runtime trap text:\n${stderr}`,
+        );
+        let rejection: string | undefined;
+        try {
+          assertGuestDiagnostic(result, "trap guest");
+        } catch (error) {
+          rejection = (error as Error).message;
+        }
+        assert(
+          rejection?.includes("expected a diagnostic (exit 1)"),
+          `the diagnostic oracle accepted a trap: ${rejection}`,
         );
       },
     );

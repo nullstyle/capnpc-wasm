@@ -117,6 +117,66 @@ export function guestCommand(
 }
 
 /**
+ * A minimal WASI command module that traps at once, for exercising the hosts'
+ * trap exit status. Source (wasm-tools parse):
+ *
+ *   (module (memory (export "memory") 1) (func (export "_start") unreachable))
+ */
+export const TRAP_GUEST = new Uint8Array([
+  0x00,
+  0x61,
+  0x73,
+  0x6d,
+  0x01,
+  0x00,
+  0x00,
+  0x00, // magic, version
+  0x01,
+  0x04,
+  0x01,
+  0x60,
+  0x00,
+  0x00, // type: () -> ()
+  0x03,
+  0x02,
+  0x01,
+  0x00, // function 0 has type 0
+  0x05,
+  0x03,
+  0x01,
+  0x00,
+  0x01, // memory: 1 page, no maximum
+  0x07,
+  0x13,
+  0x02, // exports: 2
+  0x06,
+  0x6d,
+  0x65,
+  0x6d,
+  0x6f,
+  0x72,
+  0x79,
+  0x02,
+  0x00, // "memory" memory 0
+  0x06,
+  0x5f,
+  0x73,
+  0x74,
+  0x61,
+  0x72,
+  0x74,
+  0x00,
+  0x00, // "_start" func 0
+  0x0a,
+  0x05,
+  0x01,
+  0x03,
+  0x00,
+  0x00,
+  0x0b, // code: unreachable; end
+]);
+
+/**
  * Text that only a runtime writes when a guest traps, throws an uncaught
  * exception, or fails to start. `*** Uncaught exception ***` is not listed: KJ
  * prints it for exceptions that its own main caught, which exit 1.
