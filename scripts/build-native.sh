@@ -2,6 +2,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
+# shellcheck source=scripts/lib/cmake-configure.sh
+source scripts/lib/cmake-configure.sh
+revision="$(git -C ref/capnproto rev-parse HEAD)"
 
 # LDFLAGS carries the linker fallback from scripts/lib/toolchain-env.sh when
 # no installed SDK links; CMake reads it only on the first configure.
@@ -9,7 +12,14 @@ cmake_args=()
 if [[ -n "${LDFLAGS:-}" ]]; then
   cmake_args+=(-DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS")
 fi
-cmake -S ref/capnproto -B build/native -G Ninja \
+# The CMake cache keeps the compilers, SDK, and linker flags of its first
+# configure; a changed toolchain stamp reconfigures from scratch.
+native_toolchain="cmake=$(cmake --version | head -n 1)"
+native_toolchain="$native_toolchain|cc=${CC:-cc}=$(clang --version | head -n 1)"
+native_toolchain="$native_toolchain|cxx=${CXX:-c++}=$(clang++ --version | head -n 1)"
+native_toolchain="$native_toolchain|SDKROOT=${SDKROOT:-}|LDFLAGS=${LDFLAGS:-}"
+native_toolchain="$native_toolchain|capnproto=$revision"
+configure_cmake build/native "$native_toolchain" -S ref/capnproto -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF \
   -DWITH_OPENSSL=OFF -DWITH_ZLIB=OFF -DWITH_FIBERS=OFF \
