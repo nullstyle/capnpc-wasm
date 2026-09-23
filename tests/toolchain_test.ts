@@ -1,117 +1,19 @@
-const root = Deno.cwd();
-const text = new TextDecoder();
-const native = `${root}/build/native/bin`;
-const wasm = `${root}/build/wasm/bin`;
+import { assert, assertBytesEqual, assertTreesEqual } from "./lib/assert.ts";
+import { copyTree, readTree } from "./lib/fs.ts";
+import { guestCommand, wasmHosts } from "./lib/hosts.ts";
+import {
+  canonicalRequest,
+  nativeCompile,
+  stageStandardIncludes,
+} from "./lib/oracle.ts";
+import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
+import { decodeText, expectSuccess, mustSucceed, run } from "./lib/process.ts";
+import { testSuite } from "./lib/workdir.ts";
 
-function assert(value: unknown, message: string): asserts value {
-  if (!value) throw new Error(message);
-}
-
-async function run(
-  command: string[],
-  input?: Uint8Array,
-  cwd = root,
-  env?: Record<string, string>,
-): Promise<Deno.CommandOutput> {
-  const child = new Deno.Command(command[0], {
-    args: command.slice(1),
-    cwd,
-    env,
-    stdin: input ? "piped" : "null",
-    stdout: "piped",
-    stderr: "piped",
-    signal: AbortSignal.timeout(60_000),
-  }).spawn();
-  const output = child.output();
-  if (input) {
-    const writer = child.stdin.getWriter();
-    try {
-      await writer.write(input);
-      await writer.close();
-    } catch (error) {
-      if (!(error instanceof Deno.errors.BrokenPipe)) throw error;
-    } finally {
-      writer.releaseLock();
-    }
-  }
-  return await output;
-}
-
-function success(result: Deno.CommandOutput, label: string): Uint8Array {
-  assert(
-    result.success,
-    `${label} exited ${result.code}: ${text.decode(result.stderr)}`,
-  );
-  return result.stdout;
-}
-
-async function copyTree(source: string, destination: string): Promise<void> {
-  await Deno.mkdir(destination, { recursive: true });
-  for await (const entry of Deno.readDir(source)) {
-    const from = `${source}/${entry.name}`;
-    const to = `${destination}/${entry.name}`;
-    if (entry.isDirectory) await copyTree(from, to);
-    else if (entry.isFile) await Deno.copyFile(from, to);
-    else throw new Error(`unsupported fixture entry ${from}`);
-  }
-}
-
-async function files(
-  directory: string,
-  prefix = "",
-): Promise<Map<string, Uint8Array>> {
-  const result = new Map<string, Uint8Array>();
-  for await (const entry of Deno.readDir(directory)) {
-    const name = `${prefix}${entry.name}`;
-    const path = `${directory}/${entry.name}`;
-    if (entry.isDirectory) {
-      for (const [key, value] of await files(path, `${name}/`)) {
-        result.set(key, value);
-      }
-    } else if (entry.isFile) result.set(name, await Deno.readFile(path));
-    else throw new Error(`unexpected generated entry ${path}`);
-  }
-  return result;
-}
-
-function equalBytes(
-  actual: Uint8Array,
-  expected: Uint8Array,
-  label: string,
-): void {
-  assert(
-    actual.length === expected.length &&
-      actual.every((value, i) => value === expected[i]),
-    `${label} differs (${actual.length} versus ${expected.length} bytes)`,
-  );
-}
-
-async function equalFiles(actual: string, expected: string): Promise<void> {
-  const left = await files(actual);
-  const right = await files(expected);
-  assert(
-    JSON.stringify([...left.keys()].sort()) ===
-      JSON.stringify([...right.keys()].sort()),
-    `generated file names differ in ${actual}`,
-  );
-  for (const [name, bytes] of left) {
-    equalBytes(bytes, right.get(name)!, `${actual}/${name}`);
-  }
-}
-
-async function canonicalRequest(request: Uint8Array): Promise<Uint8Array> {
-  return success(
-    await run([`${native}/normalize-request`], request),
-    "canonicalize CodeGeneratorRequest",
-  );
-}
+const suite = testSuite("toolchain-");
 
 async function prepare() {
-  await Deno.mkdir(`${root}/build/test`, { recursive: true });
-  const work = await Deno.makeTempDir({
-    dir: `${root}/build/test`,
-    prefix: "toolchain-",
-  });
+  const work = await suite.workDir();
   const compilerRoot = `${work}/input`;
   await copyTree(`${root}/tests/fixtures/schemas`, `${compilerRoot}/src`);
   await Deno.copyFile(
@@ -119,48 +21,36 @@ async function prepare() {
     `${compilerRoot}/src/pérson.capnp`,
   );
   await copyTree(`${root}/tests/fixtures/invalid`, `${compilerRoot}/invalid`);
-  await Deno.mkdir(`${compilerRoot}/include/capnp`, { recursive: true });
-  await Deno.copyFile(
-    `${root}/ref/capnproto/c++/src/capnp/c++.capnp`,
-    `${compilerRoot}/include/capnp/c++.capnp`,
-  );
-  await Deno.copyFile(
-    `${root}/ref/go-capnp/std/go.capnp`,
-    `${compilerRoot}/include/go.capnp`,
-  );
-  const request = success(
-    await run([
-      `${native}/capnp`,
-      "compile",
-      "--no-standard-import",
-      `-I${compilerRoot}/include`,
-      `--src-prefix=${compilerRoot}/src`,
-      "-o-",
-      `${compilerRoot}/src/person.capnp`,
-      `${compilerRoot}/src/types/common.capnp`,
-    ]),
-    "native compiler",
-  );
+  await stageStandardIncludes(`${compilerRoot}/include`);
+  const request = await nativeCompile([
+    `${compilerRoot}/src/person.capnp`,
+    `${compilerRoot}/src/types/common.capnp`,
+  ], {
+    include: [`${compilerRoot}/include`],
+    srcPrefix: `${compilerRoot}/src`,
+  });
   await Deno.writeFile(`${work}/native-request.bin`, request);
   const expected = `${work}/native-cpp`;
   await Deno.mkdir(expected);
-  success(
-    await run([`${native}/capnpc-c++`], request, expected),
-    "native C++ generator",
-  );
+  await mustSucceed([`${nativeBin}/capnpc-c++`], {
+    stdin: request,
+    cwd: expected,
+    label: "native C++ generator",
+  });
   assert(
-    (await files(expected)).size === 4,
+    (await readTree(expected)).size === 4,
     "expected two generated header/source pairs",
   );
   for (const language of ["rust", "go", "zig"]) {
     const directory = `${work}/native-${language}`;
     await Deno.mkdir(directory);
-    success(
-      await run([`${native}/capnpc-${language}`], request, directory),
-      `native ${language} generator`,
-    );
+    await mustSucceed([`${nativeBin}/capnpc-${language}`], {
+      stdin: request,
+      cwd: directory,
+      label: `native ${language} generator`,
+    });
     assert(
-      (await files(directory)).size === 2,
+      (await readTree(directory)).size === 2,
       `expected two ${language} files`,
     );
     if (language === "zig") {
@@ -169,23 +59,20 @@ async function prepare() {
       // byte identity with the older pristine generator is no longer a contract.
       const withoutReflection = `${work}/zig-without-reflection`;
       await Deno.mkdir(withoutReflection);
-      success(
-        await run(
-          [`${native}/capnpc-zig`, "--no-reflection"],
-          request,
-          withoutReflection,
-        ),
-        "Zig generator without reflection metadata",
-      );
-      const plainFiles = await files(withoutReflection);
-      const reflectedFiles = await files(directory);
+      await mustSucceed([`${nativeBin}/capnpc-zig`, "--no-reflection"], {
+        stdin: request,
+        cwd: withoutReflection,
+        label: "Zig generator without reflection metadata",
+      });
+      const plainFiles = await readTree(withoutReflection);
+      const reflectedFiles = await readTree(directory);
       assert(
-        JSON.stringify([...plainFiles.keys()].sort()) ===
-          JSON.stringify([...reflectedFiles.keys()].sort()),
+        JSON.stringify([...plainFiles.keys()]) ===
+          JSON.stringify([...reflectedFiles.keys()]),
         "--no-reflection changed generated Zig paths",
       );
       for (const [path, bytes] of plainFiles) {
-        const source = text.decode(bytes);
+        const source = decodeText(bytes);
         assert(
           !source.includes("pub const CAPNP_SCHEMA_REQUEST") &&
             !source.includes("pub const capnpSchema"),
@@ -206,29 +93,7 @@ async function prepare() {
 let baseline: ReturnType<typeof prepare> | undefined;
 const fixture = () => baseline ??= prepare();
 
-const hosts = [
-  { name: "wasmtime", command: ["wasmtime", "run", "-W", "exceptions=y"] },
-  { name: "wazero", command: [`${root}/build/hosts/wazero-run`] },
-  {
-    name: "wazero-interpreter",
-    command: [`${root}/build/hosts/wazero-run`, "--interpreter"],
-  },
-  {
-    name: "deno",
-    command: [
-      "deno",
-      "run",
-      "--unstable-sloppy-imports",
-      "--allow-read",
-      "--allow-write",
-      "--config",
-      `${root}/tests/hosts/deno/deno.json`,
-      `${root}/tests/hosts/deno/main.ts`,
-    ],
-  },
-];
-
-Deno.test("Wasm artifacts import only WASI Preview 1 and export command entrypoints", async () => {
+suite.test("Wasm artifacts import only WASI Preview 1 and export command entrypoints", async () => {
   for (
     const name of [
       "capnp",
@@ -239,16 +104,13 @@ Deno.test("Wasm artifacts import only WASI Preview 1 and export command entrypoi
       "capnpc-zig",
     ]
   ) {
-    const path = `${wasm}/${name}.wasm`;
-    success(
-      await run([
-        "wasm-tools",
-        "validate",
-        "--features=-legacy-exceptions,-threads,-shared-everything-threads,-memory64",
-        path,
-      ]),
-      `${name} feature profile`,
-    );
+    const path = `${wasmBin}/${name}.wasm`;
+    await mustSucceed([
+      "wasm-tools",
+      "validate",
+      "--features=-legacy-exceptions,-threads,-shared-everything-threads,-memory64",
+      path,
+    ], { label: `${name} feature profile` });
     const module = await WebAssembly.compile(await Deno.readFile(path));
     for (const imported of WebAssembly.Module.imports(module)) {
       assert(
@@ -276,7 +138,7 @@ Deno.test("Wasm artifacts import only WASI Preview 1 and export command entrypoi
   }
 });
 
-Deno.test("request comparison rejects trailing stdout and multiple messages", async () => {
+suite.test("request comparison rejects trailing stdout and multiple messages", async () => {
   const { request } = await fixture();
   for (
     const suffix of [new TextEncoder().encode("unexpected stdout"), request]
@@ -284,7 +146,9 @@ Deno.test("request comparison rejects trailing stdout and multiple messages", as
     const bytes = new Uint8Array(request.length + suffix.length);
     bytes.set(request);
     bytes.set(suffix, request.length);
-    const result = await run([`${native}/normalize-request`], bytes);
+    const result = await run([`${nativeBin}/normalize-request`], {
+      stdin: bytes,
+    });
     assert(!result.success, "request oracle accepted trailing bytes");
     assert(
       result.stdout.length === 0,
@@ -297,23 +161,18 @@ Deno.test("request comparison rejects trailing stdout and multiple messages", as
   }
 });
 
-for (const host of hosts) {
-  Deno.test(`${host.name}: native parity and failed-job behavior`, async (t) => {
+for (const host of wasmHosts) {
+  suite.test(`${host.name}: native parity and failed-job behavior`, async (t) => {
     const data = await fixture();
-    const guest = (tool: string, directory: string, args: string[] = []) => [
-      ...host.command,
-      "--dir",
-      `${directory}::/`,
-      `${wasm}/${tool}.wasm`,
-      ...args,
-    ];
+    const guest = (tool: string, directory: string, args: string[] = []) =>
+      guestCommand(host, tool, directory, args);
     let compiled: Uint8Array = new Uint8Array();
 
     await t.step(
       "compiler preserves the standard request semantics",
       async () => {
-        compiled = success(
-          await run(guest("capnp", data.compilerRoot, [
+        compiled = await mustSucceed(
+          guest("capnp", data.compilerRoot, [
             "compile",
             "--no-standard-import",
             "-I/include",
@@ -321,8 +180,8 @@ for (const host of hosts) {
             "-o-",
             "/src/person.capnp",
             "/src/types/common.capnp",
-          ])),
-          `${host.name} compiler`,
+          ]),
+          { label: `${host.name} compiler` },
         );
         await Deno.writeFile(`${data.work}/${host.name}-request.bin`, compiled);
         const semantic = await canonicalRequest(compiled);
@@ -334,7 +193,7 @@ for (const host of hosts) {
           `${data.work}/native-canonical.bin`,
           data.semantic,
         );
-        equalBytes(
+        assertBytesEqual(
           semantic,
           data.semantic,
           `request semantics; inspect ${data.work}`,
@@ -354,23 +213,20 @@ for (const host of hosts) {
           assert(request.length > 0, "compiler produced no request");
           const output = `${data.work}/${host.name}-${source}-cpp`;
           await Deno.mkdir(output);
-          success(
-            await run(guest("capnpc-c++", output), request),
-            `${host.name} C++ generator`,
-          );
-          await equalFiles(output, data.expected);
-          success(
-            await run([
-              "clang++",
-              "-std=c++23",
-              "-fsyntax-only",
-              `-I${root}/ref/capnproto/c++/src`,
-              `-I${output}`,
-              `${output}/person.capnp.c++`,
-              `${output}/types/common.capnp.c++`,
-            ]),
-            "generated C++ compilation",
-          );
+          await mustSucceed(guest("capnpc-c++", output), {
+            stdin: request,
+            label: `${host.name} C++ generator`,
+          });
+          await assertTreesEqual(output, data.expected, "generated C++");
+          await mustSucceed([
+            "clang++",
+            "-std=c++23",
+            "-fsyntax-only",
+            `-I${root}/ref/capnproto/c++/src`,
+            `-I${output}`,
+            `${output}/person.capnp.c++`,
+            `${output}/types/common.capnp.c++`,
+          ], { label: "generated C++ compilation" });
         },
       );
     }
@@ -388,16 +244,19 @@ for (const host of hosts) {
             assert(request.length > 0, "compiler produced no request");
             const output = `${data.work}/${host.name}-${source}-${language}`;
             await Deno.mkdir(output);
-            const result = await run(
-              guest(`capnpc-${language}`, output),
-              request,
-            );
-            success(result, `${host.name} ${language} generator`);
+            const result = await run(guest(`capnpc-${language}`, output), {
+              stdin: request,
+            });
+            expectSuccess(result, `${host.name} ${language} generator`);
             assert(
               result.stdout.length === 0,
               `${language} generator wrote to binary stdout`,
             );
-            await equalFiles(output, `${data.work}/native-${language}`);
+            await assertTreesEqual(
+              output,
+              `${data.work}/native-${language}`,
+              `generated ${language}`,
+            );
           },
         );
       }
@@ -407,14 +266,18 @@ for (const host of hosts) {
           async () => {
             const output = `${data.work}/${host.name}-zig-without-reflection`;
             await Deno.mkdir(output);
-            success(
-              await run(
-                guest("capnpc-zig", output, ["--no-reflection"]),
-                data.request,
-              ),
-              `${host.name} Zig without reflection`,
+            await mustSucceed(
+              guest("capnpc-zig", output, ["--no-reflection"]),
+              {
+                stdin: data.request,
+                label: `${host.name} Zig without reflection`,
+              },
             );
-            await equalFiles(output, `${data.work}/zig-without-reflection`);
+            await assertTreesEqual(
+              output,
+              `${data.work}/zig-without-reflection`,
+              "Zig without reflection",
+            );
           },
         );
       }
@@ -423,67 +286,56 @@ for (const host of hosts) {
         async () => {
           const output = `${data.work}/${host.name}-wasm-${language}`;
           if (language === "rust") {
-            success(
-              await run(
-                [
-                  "cargo",
-                  "test",
-                  "--locked",
-                  "--manifest-path",
-                  `${root}/tests/consumers/rust/Cargo.toml`,
-                ],
-                undefined,
-                root,
-                { CAPNPC_WASM_GENERATED_DIR: output },
-              ),
-              "generated Rust roundtrip",
-            );
+            // --frozen: the locked graph must already be in the local registry
+            // cache (build:rust fetches it), so this step never uses the network.
+            await mustSucceed([
+              "cargo",
+              "test",
+              "--frozen",
+              "--manifest-path",
+              `${root}/tests/consumers/rust/Cargo.toml`,
+            ], {
+              env: { CAPNPC_WASM_GENERATED_DIR: output },
+              label: "generated Rust roundtrip",
+            });
           } else if (language === "go") {
             // Preserve the byte-comparison tree; the consumer owns a separate copy.
             const consumer = `${data.work}/${host.name}-go-consumer`;
             await copyTree(output, consumer);
             await copyTree(`${root}/tests/consumers/go`, consumer);
-            success(
-              await run([
-                "go",
-                "-C",
-                consumer,
-                "mod",
-                "edit",
-                `-replace=capnproto.org/go/capnp/v3=${root}/ref/go-capnp`,
-              ]),
-              "select pinned Go runtime",
-            );
-            success(
-              await run([
-                "go",
-                "-C",
-                consumer,
-                "test",
-                "-mod=readonly",
-                "./...",
-              ]),
-              "generated Go roundtrip",
-            );
+            const offline = { GOFLAGS: "-mod=readonly", GOPROXY: "off" };
+            await mustSucceed([
+              "go",
+              "-C",
+              consumer,
+              "mod",
+              "edit",
+              `-replace=capnproto.org/go/capnp/v3=${root}/ref/go-capnp`,
+            ], { env: offline, label: "select pinned Go runtime" });
+            await mustSucceed([
+              "go",
+              "-C",
+              consumer,
+              "test",
+              "-mod=readonly",
+              "./...",
+            ], { env: offline, label: "generated Go roundtrip" });
           } else {
-            success(
-              await run([
-                "zig",
-                "test",
-                "--cache-dir",
-                `${root}/.cache/zig-local`,
-                "--dep",
-                "capnpc-zig",
-                "--dep",
-                "generated",
-                `-Mroot=${root}/tests/consumers/zig/roundtrip.zig`,
-                "--dep",
-                "capnpc-zig",
-                `-Mgenerated=${output}/person.zig`,
-                `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
-              ]),
-              "generated Zig roundtrip",
-            );
+            await mustSucceed([
+              "zig",
+              "test",
+              "--cache-dir",
+              zigCacheDir,
+              "--dep",
+              "capnpc-zig",
+              "--dep",
+              "generated",
+              `-Mroot=${root}/tests/consumers/zig/roundtrip.zig`,
+              "--dep",
+              "capnpc-zig",
+              `-Mgenerated=${output}/person.zig`,
+              `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
+            ], { label: "generated Zig roundtrip" });
           }
         },
       );
@@ -494,34 +346,35 @@ for (const host of hosts) {
       async () => {
         const output = `${data.work}/${host.name}-rust-output-option`;
         await Deno.mkdir(output);
-        success(
-          await run(
-            guest("capnpc-rust", output, ["--output-directory", "/generated"]),
-            data.request,
-          ),
+        await mustSucceed(
+          guest("capnpc-rust", output, ["--output-directory", "/generated"]),
+          { stdin: data.request, label: "Rust explicit output directory" },
+        );
+        await assertTreesEqual(
+          `${output}/generated`,
+          `${data.work}/native-rust`,
           "Rust explicit output directory",
         );
-        await equalFiles(`${output}/generated`, `${data.work}/native-rust`);
       },
     );
 
     await t.step("schema inspection matches native output", async () => {
-      const expected = success(
-        await run([`${native}/capnpc-capnp`], data.request),
-        "native inspection",
+      const expected = await mustSucceed([`${nativeBin}/capnpc-capnp`], {
+        stdin: data.request,
+        label: "native inspection",
+      });
+      const actual = await mustSucceed(
+        guest("capnpc-capnp", data.compilerRoot),
+        { stdin: data.request, label: "Wasm inspection" },
       );
-      const actual = success(
-        await run(guest("capnpc-capnp", data.compilerRoot), data.request),
-        "Wasm inspection",
-      );
-      equalBytes(actual, expected, "schema inspection");
+      assertBytesEqual(actual, expected, "schema inspection");
     });
 
     await t.step(
       "UTF-8 entrypoint paths survive WASI argument encoding",
       async () => {
-        const request = success(
-          await run(guest("capnp", data.compilerRoot, [
+        const request = await mustSucceed(
+          guest("capnp", data.compilerRoot, [
             "compile",
             "--no-standard-import",
             "-I/include",
@@ -529,16 +382,16 @@ for (const host of hosts) {
             "-o-",
             "/src/pérson.capnp",
             "/src/types/common.capnp",
-          ])),
-          "UTF-8 schema compile",
+          ]),
+          { label: "UTF-8 schema compile" },
         );
         const output = `${data.work}/${host.name}-unicode`;
         await Deno.mkdir(output);
-        success(
-          await run(guest("capnpc-c++", output), request),
-          "UTF-8 path generation",
-        );
-        const generated = await files(output);
+        await mustSucceed(guest("capnpc-c++", output), {
+          stdin: request,
+          label: "UTF-8 path generation",
+        });
+        const generated = await readTree(output);
         assert(
           generated.has("pérson.capnp.h") && generated.has("pérson.capnp.c++"),
           "UTF-8 output filename was corrupted",
@@ -582,10 +435,9 @@ for (const host of hosts) {
           async () => {
             const output = `${data.work}/${host.name}-${language}-${name}`;
             await Deno.mkdir(output);
-            const result = await run(
-              guest(`capnpc-${language}`, output),
-              input,
-            );
+            const result = await run(guest(`capnpc-${language}`, output), {
+              stdin: input,
+            });
             assert(!result.success, `${name} unexpectedly succeeded`);
             assert(
               result.stdout.length === 0,
@@ -593,7 +445,7 @@ for (const host of hosts) {
             );
             assert(result.stderr.length > 0, `${name} produced no diagnostic`);
             assert(
-              (await files(output)).size === 0,
+              (await readTree(output)).size === 0,
               `${name} left generated output`,
             );
           },
@@ -619,18 +471,18 @@ for (const host of hosts) {
         "guest generator launching produced stdout",
       );
       assert(
-        text.decode(result.stderr).includes("host"),
+        decodeText(result.stderr).includes("host"),
         "missing host orchestration diagnostic",
       );
     });
 
     await t.step("id uses host randomness", async () => {
-      const output = success(
-        await run(guest("capnp", data.compilerRoot, ["id"])),
-        "id",
+      const output = await mustSucceed(
+        guest("capnp", data.compilerRoot, ["id"]),
+        { label: "id" },
       );
       assert(
-        /^@0x[89a-f][0-9a-f]{15}\s*$/.test(text.decode(output)),
+        /^@0x[89a-f][0-9a-f]{15}\s*$/.test(decodeText(output)),
         "invalid schema ID",
       );
     });
