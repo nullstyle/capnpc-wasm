@@ -6,9 +6,18 @@ artifacts are `build/native/bin/capnpc-zig` and
 `build/wasm/bin/capnpc-zig.wasm`. Both use the upstream request reader,
 validator, and generator from the pristine pinned source. The former local
 compatibility patches and reflection copies are now part of capnp-zig itself.
-The build also exports the separately pinned historical audit revision and emits
-its command at `build/native/bin/capnpc-zig-upstream`. There is no second
-emitter or RPC transport dependency.
+The build also exports the separately pinned historical audit revision under
+`build/src/capnp-zig-historical` for the wire conformance probes; it no longer
+builds a command from it. There is no second emitter or RPC transport
+dependency.
+
+Each compile writes a stamp under `build/zig/` recording the Zig version, the
+exported source revision, the flags, and the build script itself. A repeated
+`mise run build:zig` skips compiles whose stamp matches, runs the native and
+WASI compiles concurrently otherwise, and replaces the copies under
+`build/native/bin` and `build/wasm/bin` only when their bytes change. The Zig
+cache under `build/zig/cache` is disposable; test compiles leave temporary build
+directories in `build/zig/cache/tmp`, so delete it when it grows.
 
 The compiler request is an unpacked Cap'n Proto message on stdin, bounded to 64
 MiB by upstream. Each requested `path/name.capnp` produces `path/name.zig`
@@ -69,8 +78,9 @@ The [Builder/reflection tests](../../tests/reflection/README.md),
 [generic API tests](../../tests/generator_api/README.md), RPC codegen tests, and
 [wire conformance suite](../../tests/wire/README.md) compile and execute the new
 surfaces on native Zig and WASI. Current native/Wasm output matches exactly; the
-old pristine Zig generator remains a historical oracle. These API changes
-intentionally alter its output even under `--no-reflection`.
+historical revision remains only a wire conformance control. These API changes
+intentionally alter generated output relative to it, even under
+`--no-reflection`.
 
 ## Reflection
 

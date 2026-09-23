@@ -17,9 +17,10 @@ The old audit revision is separately recorded in
 [`historical-reference`](../../generators/zig/historical-reference). Setup
 fetches that exact commit, and `build:zig` exports its sources into
 `build/src/capnp-zig-historical` without changing the live reference checkout.
-The historical `capnpc-zig-upstream` command and wire probes retain the original
-Layout A rejection and traversal-budget regression controls. This prevents a
-reference advance from silently erasing evidence of the fixes.
+The wire probes compile against that historical runtime and retain the original
+Layout A rejection and traversal-budget regression controls; the historical
+`capnpc-zig-upstream` command is no longer built, because no test consumed it.
+This prevents a reference advance from silently erasing evidence of the fixes.
 
 All production generation and generated-code consumers use the current native
 and WASI builds. Their output must match byte for byte, and the generated-code
