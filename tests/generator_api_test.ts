@@ -1,94 +1,49 @@
-const root = Deno.cwd();
-const decoder = new TextDecoder();
-const native = `${root}/build/native/bin`;
+import { assertBytesEqual } from "./lib/assert.ts";
+import { nativeCompile } from "./lib/oracle.ts";
+import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
+import { mustSucceed } from "./lib/process.ts";
+import { testSuite } from "./lib/workdir.ts";
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
+const suite = testSuite("generator-api-");
 
-async function run(args: string[], cwd: string, input?: Uint8Array) {
-  const child = new Deno.Command(args[0], {
-    args: args.slice(1),
-    cwd,
-    stdin: input ? "piped" : "null",
-    stdout: "piped",
-    stderr: "piped",
-    signal: AbortSignal.timeout(60_000),
-  }).spawn();
-  const result = child.output();
-  if (input) {
-    const writer = child.stdin.getWriter();
-    try {
-      await writer.write(input);
-      await writer.close();
-    } catch (error) {
-      if (!(error instanceof Deno.errors.BrokenPipe)) throw error;
-    } finally {
-      writer.releaseLock();
-    }
-  }
-  const output = await result;
-  assert(
-    output.success,
-    `${args[0]} exited ${output.code}: ${decoder.decode(output.stderr)}`,
-  );
-  return output.stdout;
-}
-
-Deno.test("Zig concrete generic APIs: native/WASI generation and executable views", async (t) => {
+suite.test("Zig concrete generic APIs: native/WASI generation and executable views", async (t) => {
   const cases: { name: string; schema: string; consumer: string }[] = JSON
     .parse(
       await Deno.readTextFile(`${root}/tests/generator_api/cases.json`),
     );
-  await Deno.mkdir(`${root}/build/test`, { recursive: true });
-  const work = await Deno.makeTempDir({
-    dir: `${root}/build/test`,
-    prefix: "generator-api-",
-  });
+  const work = await suite.workDir();
   const schemas = `${root}/tests/generator_api/schemas`;
   for (const profile of ["full", "compact"]) {
     for (const schema of new Set(cases.map((c) => c.schema))) {
       await t.step(
         `${profile}/${schema}: native and WASI source parity`,
         async () => {
-          const request = await run([
-            `${native}/capnp`,
-            "compile",
-            "--no-standard-import",
-            `--src-prefix=${schemas}`,
-            "-o-",
-            `${schemas}/${schema}`,
-          ], root);
+          const request = await nativeCompile([`${schemas}/${schema}`], {
+            srcPrefix: schemas,
+          });
           const directory = `${work}/${profile}/${schema}`;
           const a = `${directory}/native`;
           const b = `${directory}/wasi`;
           await Deno.mkdir(a, { recursive: true });
           await Deno.mkdir(b, { recursive: true });
           await Deno.writeFile(`${directory}/request.bin`, request);
-          await run(
-            [`${native}/capnpc-zig`, `--api-profile=${profile}`],
-            a,
-            request,
+          await mustSucceed(
+            [`${nativeBin}/capnpc-zig`, `--api-profile=${profile}`],
+            { cwd: a, stdin: request, label: "native Zig generator" },
           );
-          await run(
-            [
-              "wasmtime",
-              "run",
-              "--dir",
-              `${b}::/`,
-              `${root}/build/wasm/bin/capnpc-zig.wasm`,
-              `--api-profile=${profile}`,
-            ],
-            root,
-            request,
-          );
+          await mustSucceed([
+            "wasmtime",
+            "run",
+            "--dir",
+            `${b}::/`,
+            `${wasmBin}/capnpc-zig.wasm`,
+            `--api-profile=${profile}`,
+          ], { stdin: request, label: "Wasm Zig generator" });
           const filename = schema.replace(/\.capnp$/, ".zig");
-          const expected = await Deno.readFile(`${a}/${filename}`);
-          const actual = await Deno.readFile(`${b}/${filename}`);
-          assert(
-            actual.length === expected.length &&
-              actual.every((byte, i) => byte === expected[i]),
-            `${profile}/${schema}: generated sources differ`,
+          assertBytesEqual(
+            await Deno.readFile(`${b}/${filename}`),
+            await Deno.readFile(`${a}/${filename}`),
+            `${profile}/${schema}: generated sources`,
           );
           await Deno.copyFile(`${b}/${filename}`, `${directory}/generated.zig`);
         },
@@ -107,11 +62,11 @@ Deno.test("Zig concrete generic APIs: native/WASI generation and executable view
             const executable = `${directory}/${fixture.name}-${target}${
               target === "wasi" ? ".wasm" : ""
             }`;
-            await run([
+            await mustSucceed([
               "zig",
               "test",
               "--cache-dir",
-              `${root}/build/zig/cache`,
+              zigCacheDir,
               ...(target === "wasi"
                 ? ["-target", "wasm32-wasi", "--test-no-exec"]
                 : []),
@@ -120,9 +75,11 @@ Deno.test("Zig concrete generic APIs: native/WASI generation and executable view
               `-Mroot=${directory}/${fixture.consumer}`,
               `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
               `-femit-bin=${executable}`,
-            ], root);
+            ], { label: `${target} consumer build` });
             if (target === "wasi") {
-              await run(["wasmtime", "run", executable], root);
+              await mustSucceed(["wasmtime", "run", executable], {
+                label: "wasi consumer",
+              });
             }
           },
         );
