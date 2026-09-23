@@ -52,6 +52,7 @@ type Options = {
   };
 };
 type SDK = {
+  CompileError: new (...args: never[]) => Error;
   createCompiler(modules: Modules, options?: Options): Promise<Compiler>;
   createWorkerCompiler(
     url: string,
@@ -164,6 +165,36 @@ async function native(
   return output.stdout;
 }
 
+/** Run a native tool that must fail; returns its stderr text. */
+async function nativeFailure(args: string[], cwd: string): Promise<string> {
+  const output = await new Deno.Command(args[0], {
+    args: args.slice(1),
+    cwd,
+    stdin: "null",
+    stdout: "piped",
+    stderr: "piped",
+    signal: AbortSignal.timeout(60_000),
+  }).output();
+  assert(!output.success, `${args[0]} unexpectedly succeeded`);
+  return new TextDecoder().decode(output.stderr);
+}
+
+/** The oracle's normalization: strip staging prefixes, mask ids, drop kj stacks. */
+function normalizeDiagnostic(text: string, prefixes: string[] = []): string {
+  let result = text;
+  for (const prefix of prefixes) result = result.split(prefix).join("");
+  return result
+    .replace(/@0x[0-9a-f]{16}/g, "@0x<id>")
+    .split("\n")
+    .filter((line) => !line.startsWith("stack: "))
+    .join("\n");
+}
+
+// Host or engine failures leaking into guest diagnostics would look like this.
+const trapText =
+  /wasm trap|wasm error|failed to run main module|^wazero-run:|^deno-wasi-run:|unreachable|terminating due to uncaught|RuntimeError/m;
+const hostPath = /\/Users\/|\/home\/|[A-Za-z]:\\/;
+
 async function files(directory: string, prefix = ""): Promise<FileMap> {
   const result: FileMap = {};
   for await (const entry of Deno.readDir(directory)) {
@@ -246,6 +277,27 @@ async function prepare() {
   }
   for (const name of Object.keys(hostileGuests)) {
     assert(name in hostile, `embedded guest ${name} has no .wat source`);
+  }
+  // Native diagnostics for the invalid fixtures, staged like the SDK's /src,
+  // so both browser modes can be held to the native compiler's exact text.
+  const invalid = await files(`${root}/tests/fixtures/invalid`);
+  const invalidDirectory = `${work}/invalid`;
+  await writeFiles(`${invalidDirectory}/src`, invalid);
+  await Deno.mkdir(`${invalidDirectory}/include`);
+  const invalidNative: Record<string, string> = {};
+  for (const name of Object.keys(invalid)) {
+    invalidNative[name] = normalizeDiagnostic(
+      await nativeFailure([
+        `${root}/build/native/bin/capnp`,
+        "compile",
+        "--no-standard-import",
+        `-I${invalidDirectory}/include`,
+        `--src-prefix=${invalidDirectory}/src`,
+        "-o-",
+        `${invalidDirectory}/src/${name}`,
+      ], root),
+      [invalidDirectory],
+    );
   }
   const source = await files(`${root}/tests/fixtures/schemas`);
   const includes = {
@@ -368,7 +420,8 @@ async function prepare() {
   return {
     work,
     scenarios,
-    invalid: await files(`${root}/tests/fixtures/invalid`),
+    invalid,
+    invalidNative,
     memoryGuest: await Deno.readFile(`${work}/memory-limit.wasm`),
     streamGuest: await Deno.readFile(`${work}/stream-limit.wasm`),
     hostileGuests: hostile,
@@ -582,11 +635,17 @@ try {
         } catch (error) {
           const failure = error as Error & {
             stage?: string;
+            exitCode?: number;
             diagnostics?: { stage: string; stderr: string }[];
           };
           return {
             message: failure.message,
             stage: failure.stage,
+            exitCode: failure.exitCode,
+            isCompileError: error instanceof
+              (globalThis as BrowserGlobal).capnpTest.sdk.CompileError,
+            causeUndefined: failure.cause === undefined,
+            hasOutputs: "outputs" in (error as object),
             diagnostics: failure.diagnostics,
           };
         }
@@ -604,49 +663,77 @@ try {
           JSON.stringify(failure)
         }`,
       );
-      console.log(`PASS ${engine} ${host}: ${name} reports compiler failure`);
-    }
-
-    for (
-      const [name, request] of [
-        ["invalid segment table", new Uint8Array([255, 255, 255, 255])],
-        ["truncated", data.scenarios[0].request.slice(0, -1)],
-      ] as const
-    ) {
-      const failure = await page.evaluate(async ({ host, request }) => {
-        try {
-          await (globalThis as BrowserGlobal).capnpTest[host].generate({
-            request,
-            generators: ["zig"],
-          });
-          return null;
-        } catch (error) {
-          const failure = error as Error & {
-            stage?: string;
-            exitCode?: number;
-            diagnostics?: { stage: string; stderr: string }[];
-          };
-          return {
-            stage: failure.stage,
-            exitCode: failure.exitCode,
-            diagnostics: failure.diagnostics,
-            hasOutputs: "outputs" in failure,
-          };
-        }
-      }, { host, request });
       assert(
-        failure?.stage === "zig" &&
-          typeof failure.exitCode === "number" && failure.exitCode !== 0 &&
-          failure.diagnostics?.some((item) =>
-            item.stage === "zig" && item.stderr.length > 0
-          ) && !failure.hasOutputs,
-        `${host} did not preserve Zig ${name} failure: ${
+        failure.isCompileError && failure.exitCode === 1 &&
+          failure.causeUndefined && !failure.hasOutputs &&
+          failure.diagnostics!.every((item) => item.stage === "compiler"),
+        `${host} ${name} is not a clean compiler exit 1: ${
           JSON.stringify(failure)
         }`,
       );
-      console.log(
-        `PASS ${engine} ${host}: Zig rejects ${name} request without outputs`,
+      const stderr = failure.diagnostics!.map((item) => item.stderr).join("");
+      assert(
+        !trapText.test(stderr) && !hostPath.test(stderr),
+        `${host} ${name} diagnostics leak host or engine text: ${stderr}`,
       );
+      assert(
+        normalizeDiagnostic(stderr) === data.invalidNative[name],
+        `${host} ${name} diagnostics differ from native:\n${
+          normalizeDiagnostic(stderr)
+        }--- native\n${data.invalidNative[name]}`,
+      );
+      console.log(
+        `PASS ${engine} ${host}: ${name} reports compiler exit 1 with native diagnostics`,
+      );
+    }
+
+    for (const language of ["cpp", "zig"] as const) {
+      for (
+        const [name, request] of [
+          [
+            "invalid segment table",
+            new Uint8Array([255, 255, 255, 255, 0, 0, 0, 0]),
+          ],
+          ["truncated", data.scenarios[0].request.slice(0, 12)],
+        ] as const
+      ) {
+        const failure = await page.evaluate(
+          async ({ host, request, language }) => {
+            try {
+              await (globalThis as BrowserGlobal).capnpTest[host].generate({
+                request,
+                generators: [language],
+              });
+              return null;
+            } catch (error) {
+              const failure = error as Error & {
+                stage?: string;
+                exitCode?: number;
+                diagnostics?: { stage: string; stderr: string }[];
+              };
+              return {
+                stage: failure.stage,
+                exitCode: failure.exitCode,
+                diagnostics: failure.diagnostics,
+                hasOutputs: "outputs" in failure,
+              };
+            }
+          },
+          { host, request, language },
+        );
+        assert(
+          failure?.stage === language && failure.exitCode === 1 &&
+            failure.diagnostics?.some((item) =>
+              item.stage === language && item.stderr.length > 0
+            ) && !failure.hasOutputs,
+          `${host} did not preserve ${language} ${name} failure: ${
+            JSON.stringify(failure)
+          }`,
+        );
+        console.log(
+          `PASS ${engine} ${host}: ${language} rejects ${name} request with exit 1 and no outputs`,
+        );
+      }
     }
   }
 

@@ -20,8 +20,10 @@ import {
   loopGuest,
   malformedRequestGuest,
   name,
+  read,
   rejects,
   rejectsWith,
+  root,
   section,
   sharedBytes,
   simpleRequest,
@@ -1481,5 +1483,116 @@ Deno.test("SDK rejects engine-refused and foreign-import modules as TypeErrors w
     () => createCompiler({ compiler: foreign, generators: {} }),
     TypeError,
     "unsupported module import: env.f (function)",
+  );
+});
+
+// Host or engine failures leaking into guest diagnostics would look like this.
+const trapText =
+  /wasm trap|wasm error|failed to run main module|^wazero-run:|^deno-wasi-run:|unreachable|terminating due to uncaught|RuntimeError/m;
+const hostPath = /\/Users\/|\/home\/|[A-Za-z]:\\/;
+
+Deno.test("SDK reports invalid schemas as compiler exit 1 with clean diagnostics", async () => {
+  const { modules } = await fixture();
+  const compiler = await createCompiler(modules);
+  let count = 0;
+  for await (
+    const entry of Deno.readDir(new URL("tests/fixtures/invalid/", root))
+  ) {
+    if (!entry.name.endsWith(".capnp")) continue;
+    count++;
+    const source = await read(`tests/fixtures/invalid/${entry.name}`);
+    const error = await rejectsWith(
+      () =>
+        compiler.compile({
+          files: { [entry.name]: source },
+          entrypoints: [entry.name],
+          generators: ["cpp"],
+        }),
+      CompileError,
+    );
+    assert(
+      error.stage === "compiler" && error.exitCode === 1 &&
+        error.cause === undefined,
+      `${entry.name}: ${error.message} (exit ${error.exitCode})`,
+    );
+    assert(
+      error.diagnostics.length > 0 &&
+        error.diagnostics.every((item) => item.stage === "compiler"),
+      `${entry.name}: diagnostics ${JSON.stringify(error.diagnostics)}`,
+    );
+    const stderr = error.diagnostics.map((item) => item.stderr).join("");
+    assert(
+      !trapText.test(stderr) && !hostPath.test(stderr),
+      `${entry.name}: diagnostics leak host or engine text: ${stderr}`,
+    );
+    assert(!("outputs" in error), `${entry.name} exposed outputs`);
+  }
+  assert(count >= 4, "invalid fixtures are missing");
+});
+
+Deno.test("SDK reports malformed requests as generator exit 1 without outputs", async () => {
+  const { modules, request } = await fixture();
+  const compiler = await createCompiler(modules);
+  const valid =
+    (await compiler.compile({ ...request, generators: [] })).request;
+  const malformed: [string, Uint8Array][] = [
+    ["truncated", valid.slice(0, 12)],
+    ["invalid segment table", new Uint8Array([255, 255, 255, 255, 0, 0, 0, 0])],
+  ];
+  for (const language of ["cpp", "rust", "go", "zig"] as const) {
+    // An empty request never reaches a generator: it is invalid caller input.
+    await rejectsWith(
+      () =>
+        compiler.generate({
+          request: new Uint8Array(),
+          generators: [language],
+        }),
+      TypeError,
+      "request must contain unpacked CodeGeneratorRequest bytes",
+    );
+    for (const [label, bytes] of malformed) {
+      const error = await rejectsWith(
+        () => compiler.generate({ request: bytes, generators: [language] }),
+        CompileError,
+      );
+      assert(
+        error.stage === language && error.exitCode === 1 &&
+          error.diagnostics.some((item) =>
+            item.stage === language && item.stderr.length > 0
+          ) && !("outputs" in error),
+        `${language} ${label}: ${error.message} ${
+          JSON.stringify(error.diagnostics)
+        }`,
+      );
+      assert(
+        !error.diagnostics.some((item) => hostPath.test(item.stderr)),
+        `${language} ${label}: diagnostics leak a host path`,
+      );
+    }
+  }
+});
+
+Deno.test("SDK runs capnp id with host randomness", async () => {
+  const { modules } = await fixture();
+  const module = await WebAssembly.compile(new Uint8Array(modules.compiler));
+  const ids: string[] = [];
+  for (let i = 0; i < 2; i++) {
+    const result = await runCommand(
+      module,
+      ["capnp", "id"],
+      new Uint8Array(),
+      {},
+      true,
+    );
+    assert(
+      result.code === 0,
+      `capnp id exited ${result.code}: ${result.stderr}`,
+    );
+    ids.push(decoder.decode(result.stdout));
+  }
+  assert(
+    ids.every((id) => /^@0x[89a-f][0-9a-f]{15}\s*$/.test(id)) &&
+      ids[0] !== ids[1],
+    `capnp id produced ${JSON.stringify(ids)}`,
   );
 });
