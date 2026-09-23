@@ -2,23 +2,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
+# shellcheck source=scripts/lib/export-source.sh
+source scripts/lib/export-source.sh
 source_dir=build/src/capnproto
 patch_file=patches/capnproto/0001-wasi-command-tools.patch
 revision="$(git -C ref/capnproto rev-parse HEAD)"
 source_key="$revision:$(git hash-object "$patch_file")"
 
-# Export committed upstream sources. Reuse the snapshot only while both the
-# source revision and patch match, so ordinary builds stay incremental.
-mkdir -p build/src
-if [[ ! -f "$source_dir/.source-key" ]] ||
-   [[ "$(cat "$source_dir/.source-key")" != "$source_key" ]]; then
-  rm -rf "$source_dir"
-  mkdir -p "$source_dir"
-  git -C ref/capnproto archive "$revision" | tar -x -C "$source_dir"
-  git apply --check --directory="$source_dir" "$patch_file"
-  git apply --directory="$source_dir" "$patch_file"
-  printf '%s\n' "$source_key" > "$source_dir/.source-key"
-fi
+# Export the committed upstream sources with the port applied into a
+# disposable copy. The snapshot is reused while the revision and patch match
+# and its content digest is intact, so ordinary builds stay incremental.
+ensure_source_export ref/capnproto "$revision" "$source_dir" "$source_key" \
+  "$patch_file"
 
 sdk_path="$(mise where wasi-sdk)"
 # The cross build must not see the host linker fallback that
