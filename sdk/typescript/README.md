@@ -309,8 +309,8 @@ installed browsers. Validate the browser versions your application supports.
 
 ## Verification
 
-`mise run test:sdk` runs every test file under `sdk/typescript/` on the pinned
-Deno using only read permission: direct execution, explicit rejection of
+`mise run test:sdk-ts` runs every test file under `sdk/typescript/` on the
+pinned Deno using only read permission: direct execution, explicit rejection of
 unsupported worker runtimes, exact resource boundaries, oversized sparse output
 writes, descriptor renumbering, guest memory growth, input-shape and import-root
 validation, engine capability detection (`environment_test.ts`), and hostile
