@@ -1,16 +1,92 @@
-import { assert, assertBytesEqual, assertTreesEqual } from "./lib/assert.ts";
+import {
+  assert,
+  assertBytesEqual,
+  assertTextEqual,
+  assertTreesEqual,
+  firstDifference,
+} from "./lib/assert.ts";
 import { copyTree, readTree } from "./lib/fs.ts";
-import { guestCommand, wasmHosts } from "./lib/hosts.ts";
+import {
+  assertGuestDiagnostic,
+  guestCommand,
+  TRAP_TEXT,
+  wasmHosts,
+} from "./lib/hosts.ts";
 import {
   canonicalRequest,
+  type DiagnosticNormalization,
   nativeCompile,
+  normalizeDiagnostic,
   stageStandardIncludes,
 } from "./lib/oracle.ts";
 import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
-import { decodeText, expectSuccess, mustSucceed, run } from "./lib/process.ts";
+import {
+  decodeText,
+  describeExit,
+  expectSuccess,
+  mustSucceed,
+  run,
+} from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
 
 const suite = testSuite("toolchain-");
+
+const invalidSchemas = [
+  "syntax",
+  "missing-import",
+  "missing-id",
+  "unknown-type",
+];
+const generators = ["c++", "capnp", "rust", "go", "zig"];
+const nativeUsageArgs = ["compile", "--bogus"];
+// The plan's `-promises=false -schemas=false` alone is rejected by upstream
+// capnpc-go (String() methods need embedded schemas); that rejection is
+// compared with native as well.
+const goOptionArgs = [
+  "-promises=false",
+  "-schemas=false",
+  "-structstrings=false",
+];
+const goConflictArgs = ["-schemas=false"];
+
+/** Native reference behaviour for one failing input. */
+interface Reference {
+  code: number;
+  stderr: string;
+}
+
+function reference(result: Deno.CommandOutput, label: string): Reference {
+  assert(
+    result.signal === null && result.code === 1 && result.stdout.length === 0,
+    `${label}: native reference ${
+      describeExit(result)
+    } with ${result.stdout.length} stdout bytes`,
+  );
+  return { code: result.code, stderr: decodeText(result.stderr) };
+}
+
+/**
+ * Rewrites every NUL-terminated occurrence of a text in a request, keeping the
+ * length so pointers stay valid. "person.capnp" appears twice: as the file
+ * node's displayName (which capnpc-c++ uses for output paths) and as the
+ * requested file name (which the other generators use).
+ */
+function patchRequestText(request: Uint8Array, from: string, to: string) {
+  const encoder = new TextEncoder();
+  const source = encoder.encode(`${from}\0`);
+  const target = encoder.encode(`${to}\0`);
+  assert(source.length === target.length, "replacement must keep the length");
+  const bytes = request.slice();
+  let count = 0;
+  for (let i = 0; i + source.length <= bytes.length; i++) {
+    if (source.every((byte, j) => bytes[i + j] === byte)) {
+      bytes.set(target, i);
+      count++;
+    }
+  }
+  assert(count === 2, `expected two occurrences of ${from}, found ${count}`);
+  return bytes;
+}
 
 async function prepare() {
   const work = await suite.workDir();
@@ -81,12 +157,109 @@ async function prepare() {
       }
     }
   }
+  const inspection = await mustSucceed([`${nativeBin}/capnpc-capnp`], {
+    stdin: request,
+    label: "native inspection",
+  });
+
+  // Native Go generator options: the output must differ from the default
+  // output, so the parity step below proves the options took effect.
+  const goOptions = `${work}/native-go-options`;
+  await Deno.mkdir(goOptions);
+  await mustSucceed([`${nativeBin}/capnpc-go`, ...goOptionArgs], {
+    stdin: request,
+    cwd: goOptions,
+    label: "native Go generator with options",
+  });
+  assert(
+    firstDifference(
+      await Deno.readFile(`${goOptions}/person.capnp.go`),
+      await Deno.readFile(`${work}/native-go/person.capnp.go`),
+    ) !== -1,
+    "Go options did not change the generated output",
+  );
+  const goConflictDirectory = `${work}/native-go-option-conflict`;
+  await Deno.mkdir(goConflictDirectory);
+  const goConflict = reference(
+    await run([`${nativeBin}/capnpc-go`, ...goConflictArgs], {
+      stdin: request,
+      cwd: goConflictDirectory,
+    }),
+    "native Go option conflict",
+  );
+
+  // Native references for every failing input, compared with each host after
+  // normalization. The compiler prints paths relative to its working
+  // directory, so both spellings of the staging root are stripped.
+  const normalization: DiagnosticNormalization = {
+    stripPrefixes: [
+      `${compilerRoot}/`,
+      `${compilerRoot.slice(root.length + 1)}/`,
+    ],
+    programNames: { [`${nativeBin}/capnp`]: "capnp" },
+  };
+  const invalid = new Map<string, Reference>();
+  for (const name of invalidSchemas) {
+    invalid.set(
+      name,
+      reference(
+        await run([
+          `${nativeBin}/capnp`,
+          "compile",
+          "--no-standard-import",
+          `-I${compilerRoot}/include`,
+          "-o-",
+          `${compilerRoot}/invalid/${name}.capnp`,
+        ]),
+        `native ${name}`,
+      ),
+    );
+  }
+  const malformedInputs: [string, Uint8Array][] = [
+    ["empty", new Uint8Array()],
+    ["truncated", request.slice(0, 12)],
+    ["invalid-segment-table", new Uint8Array([255, 255, 255, 255, 0, 0, 0, 0])],
+  ];
+  const malformed = new Map<string, Reference>();
+  for (const [name, input] of malformedInputs) {
+    for (const language of generators) {
+      const directory = `${work}/native-${language}-${name}`;
+      await Deno.mkdir(directory);
+      malformed.set(
+        `${language}/${name}`,
+        reference(
+          await run([`${nativeBin}/capnpc-${language}`], {
+            stdin: input,
+            cwd: directory,
+          }),
+          `native ${language} ${name}`,
+        ),
+      );
+      assert(
+        (await readTree(directory)).size === 0,
+        `native ${language} left output for ${name}`,
+      );
+    }
+  }
+  const usage = reference(
+    await run([`${nativeBin}/capnp`, ...nativeUsageArgs]),
+    "native usage error",
+  );
+
   return {
     work,
     compilerRoot,
     request,
     expected,
+    inspection,
     semantic: await canonicalRequest(request),
+    traversal: patchRequestText(request, "person.capnp", "../out.capnp"),
+    normalization,
+    invalid,
+    malformedInputs,
+    malformed,
+    usage,
+    goConflict,
   };
 }
 
@@ -161,11 +334,61 @@ suite.test("request comparison rejects trailing stdout and multiple messages", a
   }
 });
 
+suite.test("request comparison distinguishes schemas and is deterministic", async () => {
+  const data = await fixture();
+  const other = await nativeCompile([
+    `${data.compilerRoot}/src/types/common.capnp`,
+  ], {
+    include: [`${data.compilerRoot}/include`],
+    srcPrefix: `${data.compilerRoot}/src`,
+  });
+  const semantic = await canonicalRequest(other);
+  assert(
+    data.semantic.length > 0 && semantic.length > 0,
+    "canonical request is empty",
+  );
+  assert(
+    firstDifference(semantic, data.semantic) !== -1,
+    "request oracle produced identical canonical output for different schemas",
+  );
+  assertBytesEqual(
+    await canonicalRequest(data.request),
+    data.semantic,
+    "canonical output of the same request",
+  );
+});
+
 for (const host of wasmHosts) {
   suite.test(`${host.name}: native parity and failed-job behavior`, async (t) => {
     const data = await fixture();
     const guest = (tool: string, directory: string, args: string[] = []) =>
       guestCommand(host, tool, directory, args);
+    const nativeOutput = (language: string) =>
+      language === "c++" ? data.expected : `${data.work}/native-${language}`;
+    /**
+     * A failing guest must behave like native: exit 1, nothing on stdout,
+     * the same diagnostic after normalization, and no host path in it.
+     */
+    const expectNativeDiagnostic = (
+      result: Deno.CommandOutput,
+      expected: Reference,
+      label: string,
+    ) => {
+      const stderr = assertGuestDiagnostic(result, label);
+      assert(
+        result.code === expected.code,
+        `${label}: exit ${result.code} differs from native exit ${expected.code}`,
+      );
+      assertTextEqual(
+        normalizeDiagnostic(stderr, data.normalization),
+        normalizeDiagnostic(expected.stderr, data.normalization),
+        `${label}: diagnostic differs from native`,
+      );
+      assert(
+        !stderr.includes(root) && !stderr.includes(".wasm"),
+        `${label}: diagnostic leaks the host path or module name:\n${stderr}`,
+      );
+    };
     let compiled: Uint8Array = new Uint8Array();
 
     await t.step(
@@ -254,7 +477,7 @@ for (const host of wasmHosts) {
             );
             await assertTreesEqual(
               output,
-              `${data.work}/native-${language}`,
+              nativeOutput(language),
               `generated ${language}`,
             );
           },
@@ -358,17 +581,80 @@ for (const host of wasmHosts) {
       },
     );
 
-    await t.step("schema inspection matches native output", async () => {
-      const expected = await mustSucceed([`${nativeBin}/capnpc-capnp`], {
+    await t.step("Go generator options match native", async () => {
+      const output = `${data.work}/${host.name}-go-options`;
+      await Deno.mkdir(output);
+      await mustSucceed(guest("capnpc-go", output, goOptionArgs), {
         stdin: data.request,
-        label: "native inspection",
+        label: `${host.name} Go generator with options`,
       });
-      const actual = await mustSucceed(
-        guest("capnpc-capnp", data.compilerRoot),
-        { stdin: data.request, label: "Wasm inspection" },
+      await assertTreesEqual(
+        output,
+        `${data.work}/native-go-options`,
+        "Go generator options",
       );
-      assertBytesEqual(actual, expected, "schema inspection");
+      const conflict = `${data.work}/${host.name}-go-option-conflict`;
+      await Deno.mkdir(conflict);
+      expectNativeDiagnostic(
+        await run(guest("capnpc-go", conflict, goConflictArgs), {
+          stdin: data.request,
+        }),
+        data.goConflict,
+        "Go option conflict",
+      );
+      assert(
+        (await readTree(conflict)).size === 0,
+        "Go option conflict left generated output",
+      );
     });
+
+    await t.step("schema inspection matches native output", async () => {
+      for (
+        const [source, request] of [["native", data.request], [
+          "wasm",
+          compiled,
+        ]] as const
+      ) {
+        assert(request.length > 0, "compiler produced no request");
+        const actual = await mustSucceed(
+          guest("capnpc-capnp", data.compilerRoot),
+          { stdin: request, label: `Wasm inspection of the ${source} request` },
+        );
+        assertBytesEqual(
+          actual,
+          data.inspection,
+          `schema inspection of the ${source} request`,
+        );
+      }
+    });
+
+    await t.step(
+      "generators read a regular-file stdin like a pipe",
+      async () => {
+        const stdinFile = `${data.work}/native-request.bin`;
+        for (const language of ["c++", "rust", "go", "zig"]) {
+          const output = `${data.work}/${host.name}-${language}-file-stdin`;
+          await Deno.mkdir(output);
+          await mustSucceed(guest(`capnpc-${language}`, output), {
+            stdinFile,
+            label: `${host.name} ${language} generator with file stdin`,
+          });
+          await assertTreesEqual(
+            output,
+            nativeOutput(language),
+            `${language} output from file stdin`,
+          );
+        }
+        assertBytesEqual(
+          await mustSucceed(guest("capnpc-capnp", data.compilerRoot), {
+            stdinFile,
+            label: "Wasm inspection with file stdin",
+          }),
+          data.inspection,
+          "schema inspection from file stdin",
+        );
+      },
+    );
 
     await t.step(
       "UTF-8 entrypoint paths survive WASI argument encoding",
@@ -399,10 +685,24 @@ for (const host of wasmHosts) {
       },
     );
 
-    for (
-      const name of ["syntax", "missing-import", "missing-id", "unknown-type"]
-    ) {
-      await t.step(`${name} fails without producing a request`, async () => {
+    await t.step(
+      "usage errors name the tool, not the host module path",
+      async () => {
+        const result = await run(
+          guest("capnp", data.compilerRoot, nativeUsageArgs),
+        );
+        expectNativeDiagnostic(result, data.usage, "unknown option");
+        const stderr = decodeText(result.stderr);
+        assert(
+          stderr.startsWith("capnp compile: --bogus: unrecognized option") &&
+            stderr.includes("Try 'capnp compile --help'"),
+          `usage diagnostic does not name the tool:\n${stderr}`,
+        );
+      },
+    );
+
+    for (const name of invalidSchemas) {
+      await t.step(`${name} fails with the native diagnostic`, async () => {
         const result = await run(guest("capnp", data.compilerRoot, [
           "compile",
           "--no-standard-import",
@@ -410,40 +710,25 @@ for (const host of wasmHosts) {
           "-o-",
           `/invalid/${name}.capnp`,
         ]));
-        assert(!result.success, `${name} unexpectedly succeeded`);
-        assert(
-          result.stdout.length === 0,
-          `${name} emitted a request despite failure`,
-        );
-        assert(result.stderr.length > 0, `${name} produced no diagnostic`);
+        expectNativeDiagnostic(result, data.invalid.get(name)!, name);
       });
     }
 
-    for (
-      const [name, input] of [
-        ["empty", new Uint8Array()],
-        ["truncated", data.request.slice(0, 12)],
-        [
-          "invalid-segment-table",
-          new Uint8Array([255, 255, 255, 255, 0, 0, 0, 0]),
-        ],
-      ] as const
-    ) {
-      for (const language of ["c++", "rust", "go", "zig"]) {
+    for (const [name, input] of data.malformedInputs) {
+      for (const language of generators) {
         await t.step(
-          `${name} ${language} generator input fails without output files`,
+          `${name} ${language} generator input fails with the native diagnostic and no output files`,
           async () => {
             const output = `${data.work}/${host.name}-${language}-${name}`;
             await Deno.mkdir(output);
             const result = await run(guest(`capnpc-${language}`, output), {
               stdin: input,
             });
-            assert(!result.success, `${name} unexpectedly succeeded`);
-            assert(
-              result.stdout.length === 0,
-              `${name} produced stdout despite failure`,
+            expectNativeDiagnostic(
+              result,
+              data.malformed.get(`${language}/${name}`)!,
+              `${name} ${language}`,
             );
-            assert(result.stderr.length > 0, `${name} produced no diagnostic`);
             assert(
               (await readTree(output)).size === 0,
               `${name} left generated output`,
@@ -451,6 +736,55 @@ for (const host of wasmHosts) {
           },
         );
       }
+    }
+
+    for (const language of generators) {
+      await t.step(
+        `${language} generator confines a traversal request to the output root`,
+        async () => {
+          const parent = `${data.work}/${host.name}-${language}-traversal`;
+          const output = `${parent}/root`;
+          await Deno.mkdir(output, { recursive: true });
+          const label = `${language} traversal request`;
+          const result = await run(guest(`capnpc-${language}`, output), {
+            stdin: data.traversal,
+          });
+          const stderr = decodeText(result.stderr);
+          assert(
+            result.signal === null && (result.code === 0 || result.code === 1),
+            `${label}: guest ${describeExit(result)}; stderr:\n${stderr}`,
+          );
+          assert(
+            !TRAP_TEXT.test(stderr),
+            `${label}: stderr contains runtime trap text:\n${stderr}`,
+          );
+          const escaped = [...(await readTree(parent)).keys()].filter((path) =>
+            !path.startsWith("root/")
+          );
+          assert(
+            escaped.length === 0,
+            `${label}: wrote outside the output root: ${escaped.join(", ")}`,
+          );
+          if (language === "capnp") {
+            // Schema inspection writes only stdout; the file name is unused.
+            expectSuccess(result, label);
+            assert(
+              (await readTree(output)).size === 0,
+              `${label}: wrote files`,
+            );
+          } else if (language === "go") {
+            // Upstream capnpc-go does not validate names. Every host resolves
+            // "../out.capnp.go" against the root, so the file lands inside it.
+            assert(result.stdout.length === 0, `${label}: wrote stdout`);
+          } else {
+            assertGuestDiagnostic(result, label);
+            assert(
+              (await readTree(output)).size === 0,
+              `${label}: wrote files before rejecting the request`,
+            );
+          }
+        },
+      );
     }
 
     await t.step("guest generator launching fails explicitly", async () => {
@@ -462,29 +796,46 @@ for (const host of wasmHosts) {
         "-oc++",
         "/src/person.capnp",
       ]));
+      const stderr = assertGuestDiagnostic(result, "guest generator launching");
       assert(
-        !result.success,
-        "guest generator launching unexpectedly succeeded",
-      );
-      assert(
-        result.stdout.length === 0,
-        "guest generator launching produced stdout",
-      );
-      assert(
-        decodeText(result.stderr).includes("host"),
+        stderr.includes("host"),
         "missing host orchestration diagnostic",
       );
     });
 
     await t.step("id uses host randomness", async () => {
-      const output = await mustSucceed(
-        guest("capnp", data.compilerRoot, ["id"]),
-        { label: "id" },
-      );
+      const ids: string[] = [];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const output = decodeText(
+          await mustSucceed(guest("capnp", data.compilerRoot, ["id"]), {
+            label: "id",
+          }),
+        );
+        assert(/^@0x[89a-f][0-9a-f]{15}\s*$/.test(output), "invalid schema ID");
+        ids.push(output.trim());
+      }
       assert(
-        /^@0x[89a-f][0-9a-f]{15}\s*$/.test(decodeText(output)),
-        "invalid schema ID",
+        ids[0] !== ids[1],
+        `two id invocations returned the same value ${
+          ids[0]
+        }; the host's random source is not random`,
       );
     });
   });
 }
+
+suite.test("raw Wasm requests are byte-identical across hosts", async () => {
+  const data = await fixture();
+  const [first, ...others] = wasmHosts;
+  const reference = await Deno.readFile(
+    `${data.work}/${first.name}-request.bin`,
+  );
+  assert(reference.length > 0, `${first.name} produced an empty request`);
+  for (const host of others) {
+    assertBytesEqual(
+      await Deno.readFile(`${data.work}/${host.name}-request.bin`),
+      reference,
+      `${host.name} raw request versus ${first.name}`,
+    );
+  }
+});
