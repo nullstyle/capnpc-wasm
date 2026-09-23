@@ -1,6 +1,7 @@
 import {
   checkWorkerRuntime,
   detectWorkerRuntime,
+  isBoundedWorkerSupported,
   supportedDenoWorkerVersion,
   supportsWasmExceptions as supportsFromEnvironment,
 } from "./environment.ts";
@@ -197,4 +198,31 @@ Deno.test("SDK detects standardized Wasm exception handling before compiling", a
     globalThis.Worker = RealWorker;
   }
   assert(supportsWasmExceptions(), "validate was not restored");
+});
+
+Deno.test("SDK reports bounded worker support as a predicate", () => {
+  assert(
+    isBoundedWorkerSupported({
+      Deno: { version: { deno: supportedDenoWorkerVersion } },
+    }) && isBoundedWorkerSupported({
+      Worker: class {},
+      navigator: {},
+      document: {},
+    }),
+    "verified runtimes were not reported as supported",
+  );
+  assert(
+    !isBoundedWorkerSupported({ Deno: { version: { deno: "2.9.6" } } }) &&
+      !isBoundedWorkerSupported({ Bun: {} }) &&
+      !isBoundedWorkerSupported({
+        process: { versions: { node: "24.0.0" } },
+      }) &&
+      !isBoundedWorkerSupported({}),
+    "unverified runtimes were reported as supported",
+  );
+  assert(
+    isBoundedWorkerSupported() ===
+      (Deno.version.deno === supportedDenoWorkerVersion),
+    "the test host was misclassified",
+  );
 });

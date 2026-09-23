@@ -28,6 +28,7 @@ export {
   type WorkerCompilerOptions,
 } from "./worker-client.ts";
 export {
+  isBoundedWorkerSupported,
   supportedDenoWorkerVersion,
   supportsWasmExceptions,
 } from "./environment.ts";

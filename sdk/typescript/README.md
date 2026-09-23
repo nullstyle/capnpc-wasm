@@ -199,11 +199,12 @@ verified to stop a running Wasm guest, which today means browsers and exactly
 **Deno 2.6.8** (exported as `supportedDenoWorkerVersion`). Other Deno versions,
 Bun, Node.js, and unrecognized hosts are rejected before any worker is created,
 with an `Error` that points to `createCompiler` for direct execution without a
-hard deadline. Deno 2.6.8 deliberately allows a two-second engine termination
-grace after `terminate()`; rejection does not mean guest CPU stopped
-immediately. The client waits 2.1 seconds before restarting a terminated Deno
-worker, and includes that wait in the next job's deadline; disposing the client
-during that wait rejects the waiting job at once. The
+hard deadline; `isBoundedWorkerSupported()` answers the same question as a
+predicate. Deno 2.6.8 deliberately allows a two-second engine termination grace
+after `terminate()`; rejection does not mean guest CPU stopped immediately. The
+client waits 2.1 seconds before restarting a terminated Deno worker, and
+includes that wait in the next job's deadline; disposing the client during that
+wait rejects the waiting job at once. The
 [runtime evidence](../../docs/deno-worker-termination.md) records a real shared
 counter that stops within the grace on 2.6.8 and continues on newer tested
 engines. Direct compilation remains tested on the producer's pinned Deno 2.9.6.

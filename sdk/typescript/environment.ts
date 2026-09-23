@@ -124,3 +124,19 @@ export function checkWorkerRuntime(
       );
   }
 }
+
+/**
+ * Whether createWorkerCompiler would be admitted on this host: browsers and
+ * the verified Deno release. Applications use it to choose between bounded
+ * worker execution and createCompiler without rehearsing the rejection.
+ */
+export function isBoundedWorkerSupported(
+  globals?: Record<string, unknown>,
+): boolean {
+  try {
+    checkWorkerRuntime(globals);
+    return true;
+  } catch {
+    return false;
+  }
+}
