@@ -279,6 +279,7 @@ func TestNewHonorsContext(t *testing.T) {
 	start := time.Now()
 	c, err := capnpcwasm.New(ctx, modules, testOptions()...)
 	elapsed := time.Since(start)
+	t.Logf("New with an expired context returned after %v", elapsed)
 	var failure *capnpcwasm.Error
 	if c != nil || !errors.Is(err, context.Canceled) || !errors.As(err, &failure) || failure.Stage != "modules" {
 		t.Fatalf("New with an expired context: %v, %v", c, err)
