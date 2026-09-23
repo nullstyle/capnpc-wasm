@@ -10,6 +10,7 @@ import {
   assertGuestDiagnostic,
   guestCommand,
   TRAP_TEXT,
+  type WasmHost,
   wasmHosts,
 } from "./lib/hosts.ts";
 import {
@@ -49,6 +50,8 @@ const goOptionArgs = [
   "-structstrings=false",
 ];
 const goConflictArgs = ["-schemas=false"];
+/** Raw requests compiled by each host, for the cross-host comparison. */
+const compiledRequests = new Map<string, Uint8Array>();
 
 /** Native reference behaviour for one failing input. */
 interface Reference {
@@ -408,6 +411,7 @@ for (const host of wasmHosts) {
           { label: `${host.name} compiler` },
         );
         await Deno.writeFile(`${data.work}/${host.name}-request.bin`, compiled);
+        compiledRequests.set(host.name, compiled);
         const semantic = await canonicalRequest(compiled);
         await Deno.writeFile(
           `${data.work}/${host.name}-canonical.bin`,
@@ -776,9 +780,17 @@ for (const host of wasmHosts) {
               `${label}: wrote files`,
             );
           } else if (language === "go") {
-            // Upstream capnpc-go does not validate names. Every host resolves
-            // "../out.capnp.go" against the root, so the file lands inside it.
+            // Upstream capnpc-go does not validate names, and Go's wasip1
+            // runtime cleans "../out.capnp.go" to "/out.capnp.go", so every
+            // host succeeds and both files land inside the root.
+            expectSuccess(result, label);
             assert(result.stdout.length === 0, `${label}: wrote stdout`);
+            const written = [...(await readTree(output)).keys()];
+            assert(
+              JSON.stringify(written) ===
+                JSON.stringify(["out.capnp.go", "types/common.capnp.go"]),
+              `${label}: unexpected Go output ${written.join(", ")}`,
+            );
           } else {
             const diagnostic = assertGuestDiagnostic(result, label);
             assert(
@@ -837,16 +849,21 @@ for (const host of wasmHosts) {
   });
 }
 
-suite.test("raw Wasm requests are byte-identical across hosts", async () => {
-  const data = await fixture();
+suite.test("raw Wasm requests are byte-identical across hosts", () => {
+  const requestOf = (host: WasmHost) => {
+    const request = compiledRequests.get(host.name);
+    assert(
+      request !== undefined,
+      `${host.name}: no compiled request; its compile step did not run (a --filter?) or failed`,
+    );
+    return request;
+  };
   const [first, ...others] = wasmHosts;
-  const reference = await Deno.readFile(
-    `${data.work}/${first.name}-request.bin`,
-  );
+  const reference = requestOf(first);
   assert(reference.length > 0, `${first.name} produced an empty request`);
   for (const host of others) {
     assertBytesEqual(
-      await Deno.readFile(`${data.work}/${host.name}-request.bin`),
+      requestOf(host),
       reference,
       `${host.name} raw request versus ${first.name}`,
     );
