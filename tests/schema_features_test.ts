@@ -3,11 +3,15 @@ import {
   createCompiler,
   type Language,
 } from "../sdk/typescript/mod.ts";
+import { assert, assertBytesEqual, assertTreesEqual } from "./lib/assert.ts";
+import { readTree, writeTree } from "./lib/fs.ts";
+import { canonicalRequest, nativeCompile } from "./lib/oracle.ts";
+import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
+import { mustSucceed } from "./lib/process.ts";
+import { testSuite } from "./lib/workdir.ts";
 
-const root = Deno.cwd();
-const native = `${root}/build/native/bin`;
+const suite = testSuite("features-");
 const fixtures = `${root}/tests/fixtures/features`;
-const decoder = new TextDecoder();
 const tools = {
   cpp: "capnpc-c++",
   rust: "capnpc-rust",
@@ -19,98 +23,24 @@ const manifest: {
   scenarios: { name: string; entrypoints: string[]; generators: Language[] }[];
 } = JSON.parse(await Deno.readTextFile(`${fixtures}/manifest.json`));
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
-function equalBytes(actual: Uint8Array, expected: Uint8Array, name: string) {
-  assert(actual.length === expected.length, `${name}: byte length differs`);
-  const offset = actual.findIndex((byte, i) => byte !== expected[i]);
-  assert(offset === -1, `${name}: bytes differ at offset ${offset}`);
-}
-
-async function command(
-  args: string[],
-  cwd: string,
-  stdin?: Uint8Array,
-): Promise<Uint8Array> {
-  const child = new Deno.Command(args[0], {
-    args: args.slice(1),
-    cwd,
-    stdin: stdin ? "piped" : "null",
-    stdout: "piped",
-    stderr: "piped",
-    signal: AbortSignal.timeout(60_000),
-  }).spawn();
-  const output = child.output();
-  if (stdin) {
-    const writer = child.stdin.getWriter();
-    try {
-      await writer.write(stdin);
-      await writer.close();
-    } catch (error) {
-      if (!(error instanceof Deno.errors.BrokenPipe)) throw error;
-    } finally {
-      writer.releaseLock();
-    }
-  }
-  const result = await output;
-  assert(
-    result.success,
-    `${args[0]} exited ${result.code}: ${decoder.decode(result.stderr)}`,
-  );
-  return result.stdout;
-}
-
-async function writeFiles(
-  directory: string,
-  files: Record<string, Uint8Array>,
-) {
-  for (const [name, bytes] of Object.entries(files)) {
-    const path = `${directory}/${name}`;
-    await Deno.mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true });
-    await Deno.writeFile(path, bytes);
-  }
-}
-
-async function outputFiles(directory: string, prefix = "") {
-  const files: Record<string, Uint8Array> = {};
-  for await (const entry of Deno.readDir(directory)) {
-    const path = `${directory}/${entry.name}`;
-    const name = `${prefix}${entry.name}`;
-    if (entry.isDirectory) {
-      Object.assign(files, await outputFiles(path, `${name}/`));
-    } else {
-      assert(entry.isFile, `unexpected generated entry ${path}`);
-      files[name] = await Deno.readFile(path);
-    }
-  }
-  return files;
-}
-
 let compilerPromise: Promise<Compiler>;
 function compiler() {
   return compilerPromise ??= (async () => {
-    const wasm = `${root}/build/wasm/bin`;
     return await createCompiler({
-      compiler: await Deno.readFile(`${wasm}/capnp.wasm`),
+      compiler: await Deno.readFile(`${wasmBin}/capnp.wasm`),
       generators: {
-        cpp: await Deno.readFile(`${wasm}/capnpc-c++.wasm`),
-        rust: await Deno.readFile(`${wasm}/capnpc-rust.wasm`),
-        go: await Deno.readFile(`${wasm}/capnpc-go.wasm`),
-        zig: await Deno.readFile(`${wasm}/capnpc-zig.wasm`),
+        cpp: await Deno.readFile(`${wasmBin}/capnpc-c++.wasm`),
+        rust: await Deno.readFile(`${wasmBin}/capnpc-rust.wasm`),
+        go: await Deno.readFile(`${wasmBin}/capnpc-go.wasm`),
+        zig: await Deno.readFile(`${wasmBin}/capnpc-zig.wasm`),
       },
     });
   })();
 }
 
 for (const scenario of manifest.scenarios) {
-  Deno.test(`TypeScript SDK schema features: ${scenario.name}`, async (t) => {
-    await Deno.mkdir(`${root}/build/test`, { recursive: true });
-    const work = await Deno.makeTempDir({
-      dir: `${root}/build/test`,
-      prefix: `features-${scenario.name}-`,
-    });
+  suite.test(`TypeScript SDK schema features: ${scenario.name}`, async (t) => {
+    const work = await suite.workDir(`${scenario.name}-`);
     const files: Record<string, Uint8Array> = {};
     for (const name of manifest.files) {
       files[name] = await Deno.readFile(`${fixtures}/workspace/${name}`);
@@ -121,17 +51,12 @@ for (const scenario of manifest.scenarios) {
       ),
       "go.capnp": await Deno.readFile(`${root}/ref/go-capnp/std/go.capnp`),
     };
-    await writeFiles(`${work}/src`, files);
-    await writeFiles(`${work}/include`, includeFiles);
-    const nativeRequest = await command([
-      `${native}/capnp`,
-      "compile",
-      "--no-standard-import",
-      `-I${work}/include`,
-      `--src-prefix=${work}/src`,
-      "-o-",
-      ...scenario.entrypoints.map((name) => `${work}/src/${name}`),
-    ], work);
+    await writeTree(`${work}/src`, files);
+    await writeTree(`${work}/include`, includeFiles);
+    const nativeRequest = await nativeCompile(
+      scenario.entrypoints.map((name) => `${work}/src/${name}`),
+      { include: [`${work}/include`], srcPrefix: `${work}/src`, cwd: work },
+    );
     const result = await (await compiler()).compile({
       files,
       includeFiles,
@@ -145,9 +70,9 @@ for (const scenario of manifest.scenarios) {
     await t.step(
       "canonical full CodeGeneratorRequest equals native",
       async () => {
-        equalBytes(
-          await command([`${native}/normalize-request`], work, result.request),
-          await command([`${native}/normalize-request`], work, nativeRequest),
+        assertBytesEqual(
+          await canonicalRequest(result.request),
+          await canonicalRequest(nativeRequest),
           `${scenario.name}: canonical request`,
         );
       },
@@ -157,38 +82,34 @@ for (const scenario of manifest.scenarios) {
       await t.step(`${language} generated bytes equal native`, async () => {
         const nativeOutput = `${work}/native-${language}`;
         await Deno.mkdir(nativeOutput);
-        const stdout = await command(
-          [`${native}/${tools[language]}`],
-          nativeOutput,
-          nativeRequest,
-        );
+        const stdout = await mustSucceed([`${nativeBin}/${tools[language]}`], {
+          cwd: nativeOutput,
+          stdin: nativeRequest,
+          label: `native ${language} generator`,
+        });
         assert(stdout.length === 0, `${language}: unexpected native stdout`);
-        const expected = await outputFiles(nativeOutput);
+        const expected = await readTree(nativeOutput);
         // Compare complete outputs against the maintained native command.
         // Zig's additive typed APIs intentionally differ from the pinned
         // pristine generator, even when binary reflection metadata is disabled.
-        const actual = result.outputs[language]!;
         assert(
-          Object.keys(expected).length ===
+          expected.size ===
             scenario.entrypoints.length * (language === "cpp" ? 2 : 1),
           `${language}: unexpected native output count`,
         );
-        assert(
-          JSON.stringify(Object.keys(actual).sort()) ===
-            JSON.stringify(Object.keys(expected).sort()),
-          `${language}: output paths differ`,
+        await assertTreesEqual(
+          result.outputs[language]!,
+          expected,
+          `${scenario.name}: ${language} output`,
         );
-        for (const [path, bytes] of Object.entries(expected)) {
-          equalBytes(actual[path], bytes, `${language}/${path}`);
-        }
       });
     }
 
     await t.step("generated C++ defaults and pointers roundtrip", async () => {
       const output = `${work}/sdk-cpp`;
-      await writeFiles(output, result.outputs.cpp!);
+      await writeTree(output, result.outputs.cpp!);
       const executable = `${work}/consumer`;
-      await command([
+      await mustSucceed([
         "clang++",
         "-std=c++23",
         `-I${root}/ref/capnproto/c++/src`,
@@ -202,8 +123,8 @@ for (const scenario of manifest.scenarios) {
         "-pthread",
         "-o",
         executable,
-      ], work);
-      await command([executable], work);
+      ], { cwd: work, label: "C++ consumer build" });
+      await mustSucceed([executable], { cwd: work, label: "C++ consumer" });
     });
 
     if (scenario.generators.includes("zig")) {
@@ -211,7 +132,7 @@ for (const scenario of manifest.scenarios) {
         "generated Zig defaults and pointers roundtrip",
         async () => {
           const output = `${work}/sdk-zig`;
-          await writeFiles(output, result.outputs.zig!);
+          await writeTree(output, result.outputs.zig!);
           // Keep nested generated imports inside the Zig module's root.
           await Deno.writeTextFile(
             `${output}/root.zig`,
@@ -219,11 +140,11 @@ for (const scenario of manifest.scenarios) {
               scenario.entrypoints[0].replace(/\.capnp$/, ".zig")
             }");\n`,
           );
-          await command([
+          await mustSucceed([
             "zig",
             "test",
             "--cache-dir",
-            `${root}/.cache/zig-local`,
+            zigCacheDir,
             "--dep",
             "capnpc-zig",
             "--dep",
@@ -237,7 +158,7 @@ for (const scenario of manifest.scenarios) {
                 : `${output}/root.zig`
             }`,
             `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
-          ], root);
+          ], { label: "Zig consumer" });
         },
       );
     }
