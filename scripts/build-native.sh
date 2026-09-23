@@ -4,7 +4,13 @@ cd "$(dirname "$0")/.."
 root="$PWD"
 # shellcheck source=scripts/lib/cmake-configure.sh
 source scripts/lib/cmake-configure.sh
-revision="$(git -C ref/capnproto rev-parse HEAD)"
+# shellcheck source=scripts/lib/refs.sh
+source scripts/lib/refs.sh
+
+# The native tools and the test oracle build from the working tree, so it
+# must be exactly the recorded upstream revision.
+require_pristine_ref capnproto
+revision="$(ref_revision capnproto)"
 
 # LDFLAGS carries the linker fallback from scripts/lib/toolchain-env.sh when
 # no installed SDK links; CMake reads it only on the first configure.

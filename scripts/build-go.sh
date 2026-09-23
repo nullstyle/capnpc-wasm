@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/lib/refs.sh
+source scripts/lib/refs.sh
+
+# The module replacement compiles the reference working tree, so it must be
+# exactly the recorded upstream revision.
+require_pristine_ref go-capnp
 
 # Build the pinned upstream main package directly, including its in-process
 # go/format implementation. Both targets use the same dependency lockfile.

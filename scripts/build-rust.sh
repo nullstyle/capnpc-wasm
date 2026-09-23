@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/lib/refs.sh
+source scripts/lib/refs.sh
+
+# Cargo compiles the reference working tree through path dependencies, so it
+# must be exactly the recorded upstream revision.
+require_pristine_ref capnproto-rust
 
 cargo build --locked --release --manifest-path generators/rust/Cargo.toml
 cargo build --locked --release --manifest-path generators/rust/Cargo.toml \

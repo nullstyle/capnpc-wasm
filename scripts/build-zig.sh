@@ -3,9 +3,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=scripts/lib/export-source.sh
 source scripts/lib/export-source.sh
+# shellcheck source=scripts/lib/refs.sh
+source scripts/lib/refs.sh
 
+require_pristine_ref capnp-zig
 source_dir=build/src/capnp-zig
-revision="$(git -C ref/capnp-zig rev-parse HEAD)"
+revision="$(ref_revision capnp-zig)"
 source_key="$revision:pristine-v1"
 historical_dir=build/src/capnp-zig-historical
 historical_revision="$(cat generators/zig/historical-reference)"

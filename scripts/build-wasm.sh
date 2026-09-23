@@ -6,9 +6,12 @@ root="$PWD"
 source scripts/lib/export-source.sh
 # shellcheck source=scripts/lib/cmake-configure.sh
 source scripts/lib/cmake-configure.sh
+# shellcheck source=scripts/lib/refs.sh
+source scripts/lib/refs.sh
 source_dir=build/src/capnproto
 patch_file=patches/capnproto/0001-wasi-command-tools.patch
-revision="$(git -C ref/capnproto rev-parse HEAD)"
+require_pristine_ref capnproto
+revision="$(ref_revision capnproto)"
 source_key="$revision:$(git hash-object "$patch_file")"
 
 # Export the committed upstream sources with the port applied into a
