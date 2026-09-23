@@ -158,6 +158,7 @@ run = "go -C tests/hosts/wazero build -mod=readonly -o ../../../build/hosts/waze
 [tasks.test]
 description = "Run every comparison suite: hosts, Zig, SDKs, and feature corpus (builds as needed)"
 depends = [
+  "test:harness",
   "test:zig-unit",
   "test:toolchain",
   "test:wire",
@@ -284,3 +285,7 @@ run = "deno run --allow-read --allow-write --allow-run scripts/test-compiler-hos
 [tasks."check:links"]
 description = "Check relative links and heading anchors in Markdown files outside ref/"
 run = "deno run --allow-read scripts/check-links.ts"
+
+[tasks."test:harness"]
+description = "Self-check the shared Deno test harness under tests/lib (no build, no permissions)"
+run = "deno test tests/lib/harness_test.ts"
