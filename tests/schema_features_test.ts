@@ -5,6 +5,7 @@ import {
 } from "../sdk/typescript/mod.ts";
 import { assert, assertBytesEqual, assertTreesEqual } from "./lib/assert.ts";
 import { readTree, writeTree } from "./lib/fs.ts";
+import { guestCommand, wasmHosts } from "./lib/hosts.ts";
 import { canonicalRequest, nativeCompile } from "./lib/oracle.ts";
 import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
 import { mustSucceed } from "./lib/process.ts";
@@ -104,6 +105,30 @@ for (const scenario of manifest.scenarios) {
         );
       });
     }
+
+    await t.step(
+      "schema inspection of the Wasm request equals native",
+      async () => {
+        // capnpc-capnp is shipped but has no SDK language; run the Wasm module
+        // on the SDK's request and compare with native on the native request.
+        const expected = await mustSucceed([`${nativeBin}/capnpc-capnp`], {
+          stdin: nativeRequest,
+          label: "native inspection",
+        });
+        const staging = `${work}/inspect`;
+        await Deno.mkdir(staging);
+        const actual = await mustSucceed(
+          guestCommand(wasmHosts[0], "capnpc-capnp", staging),
+          { stdin: result.request, label: "Wasm inspection" },
+        );
+        assert(expected.length > 0, "native inspection produced no output");
+        assertBytesEqual(
+          actual,
+          expected,
+          `${scenario.name}: schema inspection`,
+        );
+      },
+    );
 
     await t.step("generated C++ defaults and pointers roundtrip", async () => {
       const output = `${work}/sdk-cpp`;
