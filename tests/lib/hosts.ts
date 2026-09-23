@@ -55,9 +55,9 @@ export const wasmHosts: readonly WasmHost[] = [
 
 /**
  * The command line that runs `tool.wasm` on a host with `directory` as `/`.
- * Every host presents the tool name as the guest's argv[0], as the SDKs and
- * the launcher do; wazero-run and the Deno host derive it from the module
- * name, and Wasmtime needs --argv0.
+ * Every host presents the tool name as the guest's argv[0], as the SDKs do;
+ * wazero-run and the Deno host derive it from the module name, and Wasmtime
+ * needs --argv0.
  */
 export function guestCommand(
   host: WasmHost,

@@ -17,14 +17,14 @@ mise exec -- build/hosts/wazero-run --interpreter --dir build/host-empty::/ buil
 ```
 
 Arguments after the module path go to the command. The guest's `argv[0]` is the
-module file name without `.wasm` (`capnp`, `capnpc-c++`, ...), as the SDKs and
-the launcher pass it, so diagnostics never contain the host path. Stdin, stdout,
-and stderr are inherited; stdin is presented to the guest as a plain stream, so
-a redirected regular file behaves like a pipe. Host environment variables and
-directories are not inherited. Use repeatable `--dir host::guest` options to
-grant directories; for example, `--dir build/compiler-root::/`. Directory grants
-are writable, so use disposable staging directories when running generators.
-This is a test runner, not a host SDK or a publication mechanism.
+module file name without `.wasm` (`capnp`, `capnpc-c++`, ...), as the SDKs pass
+it, so diagnostics never contain the host path. Stdin, stdout, and stderr are
+inherited; stdin is presented to the guest as a plain stream, so a redirected
+regular file behaves like a pipe. Host environment variables and directories are
+not inherited. Use repeatable `--dir host::guest` options to grant directories;
+for example, `--dir build/compiler-root::/`. Directory grants are writable, so
+use disposable staging directories when running generators. This is a test
+runner, not a host SDK or a publication mechanism.
 
 ## Exit status
 
