@@ -52,6 +52,10 @@ GOCACHE = "{{config_root}}/.cache/go-build"
 GOTOOLCHAIN = "local"
 ZIG_GLOBAL_CACHE_DIR = "{{config_root}}/.cache/zig"
 PLAYWRIGHT_BROWSERS_PATH = "{{config_root}}/.cache/playwright"
+# Probe the pinned native linker on macOS and export a working SDKROOT (or
+# Xcode's linker) only when the default SDK cannot link. Runs after tools so it
+# sees the pinned compilers; exports nothing where the default link works.
+_.source = { path = "{{config_root}}/scripts/lib/toolchain-env.sh", tools = true }
 
 [tasks.setup]
 description = "Initialize pinned references and verify installed tools (run mise install first)"
