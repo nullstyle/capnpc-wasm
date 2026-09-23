@@ -58,6 +58,15 @@ PLAYWRIGHT_BROWSERS_PATH = "{{config_root}}/.cache/playwright"
 _.source = { path = "{{config_root}}/scripts/lib/toolchain-env.sh", tools = true }
 
 [vars]
+# Shared path lists so lint and fmt check and fix the same files.
+# docs/release-readiness.md and docs/capnp-zig-compatibility-audit.md are
+# excluded until T06 formats them; T06 removes the exclusion afterwards.
+# Deno applies relative --ignore paths only when their directory is the sole
+# positional path, so the exclusions are anchored globs.
+fmt_paths = "README.md AGENTS.md ref/README.md patches/capnproto/README.md patches/capnp-zig/README.md generators/README.md generators/zig/README.md docs tests sdk examples scripts/*.ts"
+fmt_ignore = "**/docs/release-readiness.md,**/docs/capnp-zig-compatibility-audit.md"
+go_dirs = "sdk/go tests/hosts/wazero tests/consumers/go tests/package"
+zig_dirs = "generators/zig tests/consumers/zig tests/wire tests/reflection tests/generator_api tests/rpc_codegen"
 # Environment the parity suites may read: the keep-test-dirs switch plus the
 # variables they forward to native compilers and the pinned language tools.
 suite_env = "CAPNP_KEEP_TEST_DIRS,PATH,HOME,TMPDIR,CC,CXX,SDKROOT,CARGO_TARGET_DIR,CARGO_HOME,RUSTUP_HOME,DENO_DIR,GOPATH,GOCACHE,GOTOOLCHAIN,GOFLAGS,GOPROXY,ZIG_GLOBAL_CACHE_DIR"
@@ -78,25 +87,40 @@ run = "git submodule status"
 description = "Check tool availability, Rust WASI target, SDK layout, and reference pins"
 run = "bash scripts/doctor.sh"
 
-[tasks.check]
-description = "Check formatting, tooling, and native/Wasm parity across the test hosts"
+[tasks.lint]
+description = "Static checks without a build: shell, formatting, lint, type checks, vet, clippy"
 run = [
-  "shellcheck scripts/*.sh bin/capnp-wasm",
-  "deno fmt --check README.md AGENTS.md ref/README.md patches/capnproto/README.md patches/capnp-zig/README.md generators/README.md generators/zig/README.md tests sdk examples scripts/*.ts",
+  "shellcheck bin/capnp-wasm $(find scripts -name '*.sh')",
+  "deno fmt --check --ignore={{vars.fmt_ignore}} {{vars.fmt_paths}}",
   "deno lint tests sdk/typescript examples scripts/*.ts",
+  # examples/deno.ts imports the built dist/ bundle; example:deno type-checks it.
+  "deno check scripts/*.ts",
   "deno check --config tests/hosts/deno/deno.json --unstable-sloppy-imports tests/hosts/deno/main.ts",
+  "deno check --config sdk/typescript/deno.json --unstable-sloppy-imports sdk/typescript/mod.ts sdk/typescript/worker.ts",
+  "deno check --config tests/browser/deno.json --frozen tests/browser/test.ts tests/browser/install.ts tests/browser/run.ts tests/browser/studio.ts",
+  'unformatted="$(gofmt -l {{vars.go_dirs}})" && test -z "$unformatted" || { echo "gofmt -l: $unformatted"; exit 1; }',
   "go -C tests/hosts/wazero vet ./...",
   "go -C generators/go vet capnproto.org/go/capnp/v3/capnpc-go",
   "go -C sdk/go vet -stdmethods=false ./...",
-  "deno check --config sdk/typescript/deno.json --unstable-sloppy-imports sdk/typescript/mod.ts sdk/typescript/worker.ts",
-  "deno check --config tests/browser/deno.json --frozen tests/browser/test.ts tests/browser/install.ts tests/browser/run.ts tests/browser/studio.ts",
   "cargo fmt --manifest-path generators/rust/Cargo.toml -- --check",
   "cargo fmt --manifest-path tests/consumers/rust/Cargo.toml -- --check",
   "cargo clippy --locked --manifest-path generators/rust/Cargo.toml --all-targets -- -D warnings",
-  "zig fmt --check generators/zig tests/consumers/zig tests/wire tests/reflection tests/generator_api tests/rpc_codegen",
-  { task = "doctor" },
-  { task = "test" },
+  "zig fmt --check {{vars.zig_dirs}}",
 ]
+
+[tasks.fmt]
+description = "Apply the formatters that lint checks: deno fmt, gofmt, cargo fmt, zig fmt"
+run = [
+  "deno fmt --ignore={{vars.fmt_ignore}} {{vars.fmt_paths}}",
+  "gofmt -l -w {{vars.go_dirs}}",
+  "cargo fmt --manifest-path generators/rust/Cargo.toml",
+  "cargo fmt --manifest-path tests/consumers/rust/Cargo.toml",
+  "zig fmt {{vars.zig_dirs}}",
+]
+
+[tasks.check]
+description = "Static checks, the tool doctor, and native/Wasm parity across the test hosts"
+depends = ["lint", "doctor", "test"]
 
 [tasks."build:native"]
 description = "Build the pristine upstream native tools and test oracle"
@@ -207,9 +231,9 @@ depends = ["build:native", "build:sdk"]
 run = "deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/run.ts"
 
 [tasks."example:deno"]
-description = "Generate Rust through the bundled SDK with no execution permissions"
+description = "Generate Rust through the bundled SDK with no execution permissions (type-checks the example)"
 depends = ["build:sdk"]
-run = "deno run --no-prompt --allow-read=dist examples/deno.ts"
+run = "deno run --check --no-prompt --allow-read=dist examples/deno.ts"
 
 [tasks."example:browser"]
 description = "Serve Schema Studio with its local compiler and generator assets"
