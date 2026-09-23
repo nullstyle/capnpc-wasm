@@ -188,6 +188,8 @@ run = "go -C tests/hosts/wazero build -mod=readonly -o ../../../build/hosts/waze
 
 # Each suite depends only on the build outputs it reads, so mise runs the
 # suites in parallel and `mise run --skip-deps test:<suite>` reruns one of them.
+# The parity suites keep a broad --allow-run: they spawn wasmtime, the wazero
+# host, the native tools, and the language toolchains (cargo, go, zig, clang++).
 [tasks.test]
 description = "Run every comparison suite: hosts, Zig, SDKs, and feature corpus (builds as needed)"
 depends = [
@@ -344,6 +346,9 @@ run = "deno run --allow-read --allow-write=dist --allow-run=git scripts/release.
 [tasks."test:compiler-host-package"]
 description = "Verify compiler-host packaging and an offline external Deno worker consumer"
 # The script prepares the compiler-host archive itself (twice, for reproducibility).
+# --allow-write stays unscoped (here and in test:deno-worker): the script makes
+# its work directory with Deno.makeTempDir() in the system temp dir, which no
+# path grant satisfies; a work directory under build/ would allow build,dist.
 depends = ["build:native", "build:sdk"]
 run = "deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts"
 
