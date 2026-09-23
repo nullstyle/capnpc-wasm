@@ -3,22 +3,27 @@
 The Deno suites under `tests/` import these modules instead of carrying their
 own copies of the subprocess, comparison, and directory helpers.
 
-| Module       | Exports                                                                                                                                                                     |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `paths.ts`   | `root`, `nativeBin`, `wasmBin`, `wazeroRun`, `buildTest`, `zigCacheDir`, `zigRuntime`                                                                                       |
-| `process.ts` | `run`, `mustSucceed`, `expectSuccess`, `describeExit`, `decodeText`, `childEnv`, `envGranted`, `envValue`, `ldflags`, `ENV_PASSTHROUGH`, `RunOptions`, `MustSucceedOptions` |
-| `fs.ts`      | `copyTree`, `readTree`, `writeTree`, `asTree`, `Tree`, `TreeLike`                                                                                                           |
-| `assert.ts`  | `assert`, `assertBytesEqual`, `assertTextEqual`, `assertTreesEqual`, `firstDifference`, `hexWindow`, `textOf`, `unifiedDiff`, `treePaths`                                   |
-| `workdir.ts` | `testSuite`, `keepTestDirs`, `TestSuite`                                                                                                                                    |
-| `oracle.ts`  | `nativeCompile`, `canonicalRequest`, `stageStandardIncludes`, `normalizeDiagnostic`, `clangxx`, `NativeCompileOptions`, `DiagnosticNormalization`                           |
-| `hosts.ts`   | `wasmHosts`, `guestCommand`, `assertGuestDiagnostic`, `TRAP_TEXT`, `HOST_TRAP_EXIT_CODE`, `WASMTIME_TRAP_EXIT_CODE`, `WasmHost`                                             |
+| Module       | Exports                                                                                                                                                                                  |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `paths.ts`   | `root`, `nativeBin`, `wasmBin`, `wazeroRun`, `buildTest`, `zigCacheDir`, `zigRuntime`                                                                                                    |
+| `process.ts` | `run`, `mustSucceed`, `expectSuccess`, `describeExit`, `decodeText`, `childEnv`, `envGranted`, `envValue`, `ldflags`, `ENV_PASSTHROUGH`, `RunOptions`, `RunResult`, `MustSucceedOptions` |
+| `fs.ts`      | `copyTree`, `readTree`, `writeTree`, `asTree`, `Tree`, `TreeLike`                                                                                                                        |
+| `assert.ts`  | `assert`, `assertBytesEqual`, `assertTextEqual`, `assertTreesEqual`, `firstDifference`, `hexWindow`, `textOf`, `unifiedDiff`, `treePaths`                                                |
+| `workdir.ts` | `testSuite`, `keepTestDirs`, `TestSuite`                                                                                                                                                 |
+| `oracle.ts`  | `nativeCompile`, `canonicalRequest`, `stageStandardIncludes`, `normalizeDiagnostic`, `clangxx`, `NativeCompileOptions`, `DiagnosticNormalization`                                        |
+| `hosts.ts`   | `wasmHosts`, `guestCommand`, `assertGuestDiagnostic`, `TRAP_TEXT`, `HOST_TRAP_EXIT_CODE`, `WASMTIME_TRAP_EXIT_CODE`, `WasmHost`                                                          |
 
 ## Processes and environment
 
-`run` spawns a command with captured binary stdout and stderr, a 60 s timeout,
-piped bytes (`stdin`) or a regular file (`stdinFile`) on standard input, and
-tolerates a child that exits before reading all of its input. `mustSucceed`
-returns stdout and fails with the exit status and stderr.
+`run` spawns a command with captured binary stdout and stderr, piped bytes
+(`stdin`) or a regular file (`stdinFile`) on standard input, and tolerates a
+child that exits before reading all of its input. After `timeoutMs` (60 s by
+default) the direct child receives SIGTERM, then SIGKILL 5 s later if it ignores
+that; once it has exited, `run` stops waiting for stdout and stderr, so a
+grandchild that inherited the pipes (a `cargo test` or `zig test` binary) cannot
+hold the call open, and the output captured until then is returned with
+`timedOut` set. `mustSucceed` returns stdout and fails with the exit status and
+stderr.
 
 Children receive only the variables in `ENV_PASSTHROUGH` plus the explicit `env`
 additions. The list must equal `[vars].suite_env` in `mise.toml`, which the six

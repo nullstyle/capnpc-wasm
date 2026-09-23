@@ -112,23 +112,54 @@ export interface RunOptions {
   cwd?: string;
   /** Additions to the pass-through environment. */
   env?: Record<string, string>;
-  /** Kills the child after this many milliseconds; defaults to 60 s. */
+  /**
+   * After this many milliseconds the direct child receives SIGTERM (and
+   * SIGKILL `killAfterMs` later if it is still running). Once it has exited,
+   * stdout and stderr are no longer awaited, so a grandchild that inherited
+   * the pipes (a `cargo test` or `zig test` binary, say) cannot hold the call
+   * open; the output captured until then is returned with `timedOut` set.
+   * Defaults to 60 s.
+   */
   timeoutMs?: number;
+  /** Grace between SIGTERM and SIGKILL after a timeout; defaults to 5 s. */
+  killAfterMs?: number;
+}
+
+/** A command's output; `timedOut` marks a run that hit `timeoutMs`. */
+export interface RunResult extends Deno.CommandOutput {
+  timedOut: boolean;
 }
 
 /** Runs a command to completion with captured binary stdout and stderr. */
 export async function run(
   command: readonly string[],
   options: RunOptions = {},
-): Promise<Deno.CommandOutput> {
-  const { stdin, stdinFile, cwd = root, env = {}, timeoutMs = 60_000 } =
-    options;
+): Promise<RunResult> {
+  const {
+    stdin,
+    stdinFile,
+    cwd = root,
+    env = {},
+    timeoutMs = 60_000,
+    killAfterMs = 5_000,
+  } = options;
   if (stdin && stdinFile) {
     throw new Error("run: stdin and stdinFile are mutually exclusive");
   }
   const argv = stdinFile
     ? ["sh", "-c", 'exec "$@" < "$0"', stdinFile, ...command]
     : [...command];
+  const controller = new AbortController();
+  let timedOut = false;
+  let exited = false;
+  let stopReading!: () => void;
+  const stop = new Promise<void>((resolve) => stopReading = resolve);
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+    // The child may have exited already while a grandchild holds the pipes.
+    if (exited) stopReading();
+  }, timeoutMs);
   const child = new Deno.Command(argv[0], {
     args: argv.slice(1),
     cwd,
@@ -136,23 +167,96 @@ export async function run(
     stdin: stdin ? "piped" : "null",
     stdout: "piped",
     stderr: "piped",
-    signal: AbortSignal.timeout(timeoutMs),
+    signal: controller.signal,
   }).spawn();
-  const output = child.output();
-  if (stdin) {
-    const writer = child.stdin.getWriter();
-    try {
-      await writer.write(stdin);
-      await writer.close();
-    } catch (error) {
-      // A child that exits before reading all of stdin still reports its own
-      // diagnostic; the broken pipe is not the failure of interest.
-      if (!(error instanceof Deno.errors.BrokenPipe)) throw error;
-    } finally {
-      writer.releaseLock();
+  const stdoutBytes = collect(child.stdout, stop);
+  const stderrBytes = collect(child.stderr, stop);
+  try {
+    if (stdin) {
+      const writer = child.stdin.getWriter();
+      try {
+        await writer.write(stdin);
+        await writer.close();
+      } catch (error) {
+        // A child that exits before reading all of stdin still reports its own
+        // diagnostic; the broken pipe is not the failure of interest.
+        if (!(error instanceof Deno.errors.BrokenPipe)) throw error;
+      } finally {
+        writer.releaseLock();
+      }
     }
+    const status = await waitForExit(child, controller.signal, killAfterMs);
+    exited = true;
+    if (timedOut) stopReading();
+    return {
+      ...status,
+      stdout: await stdoutBytes,
+      stderr: await stderrBytes,
+      timedOut,
+    };
+  } finally {
+    clearTimeout(timer);
+    stopReading();
   }
-  return await output;
+}
+
+/** Resolves the child's status, sending SIGKILL if SIGTERM was ignored. */
+async function waitForExit(
+  child: Deno.ChildProcess,
+  signal: AbortSignal,
+  killAfterMs: number,
+): Promise<Deno.CommandStatus> {
+  let killTimer: ReturnType<typeof setTimeout> | undefined;
+  const escalate = new Promise<"kill">((resolve) => {
+    const arm = () => {
+      killTimer = setTimeout(() => resolve("kill"), killAfterMs);
+    };
+    if (signal.aborted) arm();
+    else signal.addEventListener("abort", arm, { once: true });
+  });
+  try {
+    const outcome = await Promise.race([child.status, escalate]);
+    if (outcome !== "kill") return outcome;
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      // The child exited between the race and the kill.
+    }
+    return await child.status;
+  } finally {
+    clearTimeout(killTimer);
+  }
+}
+
+/** Reads a stream to EOF, or until `stop` resolves, into one array. */
+async function collect(
+  stream: ReadableStream<Uint8Array>,
+  stop: Promise<void>,
+): Promise<Uint8Array<ArrayBuffer>> {
+  const chunks: Uint8Array[] = [];
+  const reader = stream.getReader();
+  const stopped = stop.then(() => "stop" as const);
+  try {
+    while (true) {
+      const next = await Promise.race([reader.read(), stopped]);
+      if (next === "stop") {
+        await reader.cancel();
+        break;
+      }
+      if (next.done) break;
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
 }
 
 export interface MustSucceedOptions extends RunOptions {
@@ -185,11 +289,14 @@ export function expectSuccess(
   return result.stdout;
 }
 
-/** "exited 1" or "was killed by SIGTERM", for messages. */
-export function describeExit(result: Deno.CommandOutput): string {
-  return result.signal
+/** "exited 1", "was killed by SIGTERM" or "timed out ...", for messages. */
+export function describeExit(
+  result: Deno.CommandOutput & { timedOut?: boolean },
+): string {
+  const how = result.signal
     ? `was killed by ${result.signal}`
     : `exited ${result.code}`;
+  return result.timedOut ? `timed out and ${how}` : how;
 }
 
 const decoder = new TextDecoder();

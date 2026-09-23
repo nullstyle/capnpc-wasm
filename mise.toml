@@ -287,5 +287,8 @@ description = "Check relative links and heading anchors in Markdown files outsid
 run = "deno run --allow-read scripts/check-links.ts"
 
 [tasks."test:harness"]
-description = "Self-check the shared Deno test harness under tests/lib (no build, no permissions)"
-run = "deno test tests/lib/harness_test.ts"
+description = "Self-check the shared Deno test harness under tests/lib (no build; the process test may run sh)"
+run = [
+  "deno test tests/lib/harness_test.ts",
+  "deno test --allow-run=sh --allow-env --allow-read=tests/lib tests/lib/process_test.ts",
+]
