@@ -2,7 +2,6 @@ package capnpcwasm_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -26,15 +25,10 @@ func TestSchemaFeatures(t *testing.T) {
 	if err := json.Unmarshal(read(t, fixtures+"/manifest.json"), &manifest); err != nil {
 		t.Fatal(err)
 	}
-	compiler, err := capnpcwasm.New(t.Context(), loadModules(t))
-	if err != nil {
-		t.Fatal(err)
+	if testing.Short() {
+		t.Skip("native comparison of every feature scenario is skipped in short mode")
 	}
-	t.Cleanup(func() {
-		if err := compiler.Close(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
+	compiler := sharedCompiler(t)
 	for _, scenario := range manifest.Scenarios {
 		t.Run(scenario.Name, func(t *testing.T) {
 			request := capnpcwasm.Request{
@@ -49,13 +43,8 @@ func TestSchemaFeatures(t *testing.T) {
 			for _, path := range manifest.Files {
 				request.Files[path] = read(t, fixtures+"/workspace/"+path)
 			}
-			if err := os.MkdirAll(r+"/build/test", 0755); err != nil {
-				t.Fatal(err)
-			}
-			work, err := os.MkdirTemp(r+"/build/test", "go-features-"+scenario.Name+"-")
-			if err != nil {
-				t.Fatal(err)
-			}
+			// Kept on failure or with CAPNP_KEEP_TEST_DIRS=1, removed otherwise.
+			work := workDir(t, "go-features-"+scenario.Name+"-")
 			for directory, files := range map[string]map[string][]byte{
 				"src": request.Files, "include": request.IncludeFiles,
 			} {
