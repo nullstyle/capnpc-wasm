@@ -1,61 +1,19 @@
-const root = Deno.cwd();
-const decoder = new TextDecoder();
-const native = `${root}/build/native/bin`;
-const runtime = `${root}/build/src/capnp-zig/src`;
+import { assert, assertTreesEqual } from "./lib/assert.ts";
+import { readTree } from "./lib/fs.ts";
+import { nativeCompile } from "./lib/oracle.ts";
+import {
+  nativeBin,
+  root,
+  wasmBin,
+  zigCacheDir,
+  zigRuntime,
+} from "./lib/paths.ts";
+import { mustSucceed } from "./lib/process.ts";
+import { testSuite } from "./lib/workdir.ts";
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
+const suite = testSuite("rpc-codegen-");
 
-async function run(args: string[], cwd: string, input?: Uint8Array) {
-  const child = new Deno.Command(args[0], {
-    args: args.slice(1),
-    cwd,
-    stdin: input ? "piped" : "null",
-    stdout: "piped",
-    stderr: "piped",
-    signal: AbortSignal.timeout(60_000),
-  }).spawn();
-  const result = child.output();
-  if (input) {
-    const writer = child.stdin.getWriter();
-    try {
-      await writer.write(input);
-      await writer.close();
-    } catch (error) {
-      if (!(error instanceof Deno.errors.BrokenPipe)) throw error;
-    } finally {
-      writer.releaseLock();
-    }
-  }
-  const output = await result;
-  assert(
-    output.success,
-    `${args[0]} exited ${output.code}: ${decoder.decode(output.stderr)}`,
-  );
-  return output.stdout;
-}
-
-async function outputFiles(directory: string, prefix = "") {
-  const result = new Map<string, Uint8Array>();
-  for await (const entry of Deno.readDir(directory)) {
-    const path = `${prefix}${entry.name}`;
-    if (entry.isDirectory) {
-      for (
-        const [name, bytes] of await outputFiles(
-          `${directory}/${entry.name}`,
-          `${path}/`,
-        )
-      ) result.set(name, bytes);
-    } else {
-      assert(entry.isFile, `unexpected generated file type: ${path}`);
-      result.set(path, await Deno.readFile(`${directory}/${entry.name}`));
-    }
-  }
-  return result;
-}
-
-Deno.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming", async (t) => {
+suite.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming", async (t) => {
   const cases = [
     {
       name: "pipeline",
@@ -78,11 +36,7 @@ Deno.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming", 
       consumer: "generic_rpc_consumer.zig",
     },
   ];
-  await Deno.mkdir(`${root}/build/test`, { recursive: true });
-  const work = await Deno.makeTempDir({
-    dir: `${root}/build/test`,
-    prefix: "rpc-codegen-",
-  });
+  const work = await suite.workDir();
   const schemas = `${root}/tests/rpc_codegen/schemas`;
   for (const profile of ["full", "compact"]) {
     for (const fixture of cases) {
@@ -95,54 +49,37 @@ Deno.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming", 
           // The packaged schema tree must suffice for streaming. Imported
           // application schemas are explicitly requested so both modules are
           // generated and their complete outputs participate in parity checks.
-          const request = await run([
-            `${native}/capnp`,
-            "compile",
-            "--no-standard-import",
-            `-I${runtime}/rpc`,
-            `--src-prefix=${schemas}`,
-            "-o-",
-            ...fixture.schemas.map((schema) => `${schemas}/${schema}`),
-          ], root);
+          const request = await nativeCompile(
+            fixture.schemas.map((schema) => `${schemas}/${schema}`),
+            { include: [`${zigRuntime}/rpc`], srcPrefix: schemas },
+          );
           await Deno.mkdir(a, { recursive: true });
           await Deno.mkdir(b, { recursive: true });
-          await run(
-            [`${native}/capnpc-zig`, `--api-profile=${profile}`],
-            a,
-            request,
+          await mustSucceed(
+            [`${nativeBin}/capnpc-zig`, `--api-profile=${profile}`],
+            { cwd: a, stdin: request, label: "native Zig generator" },
           );
-          await run(
-            [
-              "wasmtime",
-              "run",
-              "--dir",
-              `${b}::/`,
-              `${root}/build/wasm/bin/capnpc-zig.wasm`,
-              `--api-profile=${profile}`,
-            ],
-            root,
-            request,
-          );
-          const expected = await outputFiles(a);
-          const actual = await outputFiles(b);
+          await mustSucceed([
+            "wasmtime",
+            "run",
+            "--dir",
+            `${b}::/`,
+            `${wasmBin}/capnpc-zig.wasm`,
+            `--api-profile=${profile}`,
+          ], { stdin: request, label: "Wasm Zig generator" });
           const names = fixture.schemas.map((s) =>
             s.replace(/\.capnp$/, ".zig")
           )
             .sort();
+          const expected = await readTree(a);
           assert(
-            JSON.stringify([...expected.keys()].sort()) ===
-                JSON.stringify(names) &&
-              JSON.stringify([...actual.keys()].sort()) ===
-                JSON.stringify(names),
-            `${profile}/${fixture.name}: unexpected generated paths`,
+            JSON.stringify([...expected.keys()]) === JSON.stringify(names),
+            `${profile}/${fixture.name}: unexpected generated paths ${
+              [...expected.keys()].join(", ")
+            }`,
           );
-          for (const [path, bytes] of expected) {
-            const other = actual.get(path)!;
-            assert(
-              bytes.length === other.length &&
-                bytes.every((byte, i) => byte === other[i]),
-              `${profile}/${fixture.name}/${path}: generated sources differ`,
-            );
+          await assertTreesEqual(b, expected, `${profile}/${fixture.name}`);
+          for (const path of names) {
             await Deno.copyFile(`${b}/${path}`, `${directory}/${path}`);
           }
           const primary = fixture.schemas[0].replace(/\.capnp$/, ".zig");
@@ -164,11 +101,11 @@ Deno.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming", 
             const executable = `${directory}/consumer-${target}${
               target === "wasi" ? ".wasm" : ""
             }`;
-            await run([
+            await mustSucceed([
               "zig",
               "test",
               "--cache-dir",
-              `${root}/build/zig/cache`,
+              zigCacheDir,
               ...(target === "wasi"
                 ? ["-target", "wasm32-wasi", "--test-no-exec"]
                 : []),
@@ -177,11 +114,13 @@ Deno.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming", 
               `-Mroot=${directory}/${fixture.consumer}`,
               "--dep",
               "capnpc-zig",
-              `-Mcapnpc-zig=${runtime}/lib.zig`,
+              `-Mcapnpc-zig=${zigRuntime}/lib.zig`,
               `-femit-bin=${executable}`,
-            ], root);
+            ], { label: `${target} consumer build` });
             if (target === "wasi") {
-              await run(["wasmtime", "run", executable], root);
+              await mustSucceed(["wasmtime", "run", executable], {
+                label: "wasi consumer",
+              });
             }
           },
         );
