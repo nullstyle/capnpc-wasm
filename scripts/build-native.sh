@@ -6,6 +6,9 @@ root="$PWD"
 source scripts/lib/cmake-configure.sh
 # shellcheck source=scripts/lib/refs.sh
 source scripts/lib/refs.sh
+# shellcheck source=scripts/lib/lock.sh
+source scripts/lib/lock.sh
+acquire_build_lock build/locks/native
 
 # The native tools and the test oracle build from the working tree, so it
 # must be exactly the recorded upstream revision.

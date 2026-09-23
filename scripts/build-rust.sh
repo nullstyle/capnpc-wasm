@@ -3,6 +3,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 # shellcheck source=scripts/lib/refs.sh
 source scripts/lib/refs.sh
+# shellcheck source=scripts/lib/lock.sh
+source scripts/lib/lock.sh
+acquire_build_lock build/locks/rust
 
 # Cargo compiles the reference working tree through path dependencies, so it
 # must be exactly the recorded upstream revision.

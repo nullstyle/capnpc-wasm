@@ -8,6 +8,9 @@ source scripts/lib/export-source.sh
 source scripts/lib/cmake-configure.sh
 # shellcheck source=scripts/lib/refs.sh
 source scripts/lib/refs.sh
+# shellcheck source=scripts/lib/lock.sh
+source scripts/lib/lock.sh
+acquire_build_lock build/locks/wasm
 source_dir=build/src/capnproto
 patch_file=patches/capnproto/0001-wasi-command-tools.patch
 require_pristine_ref capnproto

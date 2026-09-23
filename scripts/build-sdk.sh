@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# shellcheck source=scripts/lib/lock.sh
+source scripts/lib/lock.sh
 
-staging=dist/.sdk-staging
-backup=dist/.sdk-backup
+# One publisher at a time; unique staging and backup names keep a concurrent
+# invocation that is waiting for the lock from touching this run's files.
+mkdir -p build dist
+acquire_build_lock build/locks/sdk --no-trap
+staging="$(mktemp -d dist/.sdk-staging.XXXXXX)"
+backup="$(mktemp -d dist/.sdk-backup.XXXXXX)"
 published=("")
 cleanup() {
   local name
@@ -14,10 +20,10 @@ cleanup() {
     if [[ -d "$backup/$name" ]]; then mv "$backup/$name" "dist/$name"; fi
   done
   rm -rf "$staging" "$backup"
+  release_build_lock
 }
 trap cleanup EXIT
-rm -rf "$staging" "$backup"
-mkdir -p "$staging/typescript" "$backup"
+mkdir -p "$staging/typescript"
 deno bundle --config sdk/typescript/deno.json --unstable-sloppy-imports \
   --platform browser --format esm --declaration \
   -o "$staging/typescript/mod.js" sdk/typescript/mod.ts

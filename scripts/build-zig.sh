@@ -5,6 +5,9 @@ cd "$(dirname "$0")/.."
 source scripts/lib/export-source.sh
 # shellcheck source=scripts/lib/refs.sh
 source scripts/lib/refs.sh
+# shellcheck source=scripts/lib/lock.sh
+source scripts/lib/lock.sh
+acquire_build_lock build/locks/zig
 
 require_pristine_ref capnp-zig
 source_dir=build/src/capnp-zig
