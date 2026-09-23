@@ -98,6 +98,24 @@ memory size must remain at the configured two-page ceiling in every engine. A
 second command writes seven single-byte chunks under a six-byte stdout limit,
 catching quota bypasses when the shim grows a resizable ArrayBuffer in place.
 
+The hostile guests under `guests/` run in both modes as well. Each one-page
+command asks the host for more than the guest owns (oversized read iovec arrays,
+a 2 GiB random fill, a descriptor flood, writes at pointers outside memory),
+mutates the read-only compiler workspace, or publishes output names such as
+`__proto__` and `a\b`. Every call must finish in under a second with the
+expected errno bytes, a plain-object result, or a `CompileError`, without a host
+allocation proportional to the request. The driver assembles every
+`guests/*.wat` with the pinned `wasm-tools` (`parse`, then `strip --all`) and
+refuses to run if the bytes differ from the copies embedded in
+`sdk/typescript/testdata/hostile_guests.ts`, which the permission-restricted SDK
+tests use.
+
+Cancellation evidence is about the SDK client, not the engine: WebKit never
+stops a running Wasm guest on `terminate()`. Chromium stops it after about 2 s.
+Firefox is untested. The recovery cycles below show that replacement workers
+keep producing correct output; they do not show that the terminated guest
+stopped consuming CPU.
+
 Hosted CI runs `mise run check` from clean Linux and macOS checkouts. A separate
 Linux job installs the browser system libraries with the pinned Playwright CLI
 and executes this complete three-engine suite. Build trees are not restored from

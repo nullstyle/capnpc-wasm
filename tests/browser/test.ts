@@ -1,5 +1,6 @@
 import { chromium, firefox, webkit } from "./playwright.ts";
 import { selectedEngines } from "./engines.ts";
+import { hostileGuests } from "../../sdk/typescript/testdata/hostile_guests.ts";
 
 // This driver deliberately prepares its native oracle before browser execution,
 // then revokes its own process/network permissions for the offline SDK tests.
@@ -66,8 +67,21 @@ type BrowserState = {
   modules: Modules;
   memoryGuest: Uint8Array;
   streamGuest: Uint8Array;
+  hostileGuests?: Record<string, Uint8Array>;
 };
 type BrowserGlobal = typeof globalThis & { capnpTest: BrowserState };
+type HostileOutcome = {
+  request?: number[];
+  outputs?: Record<string, number[]>;
+  plain?: boolean;
+  error?: {
+    name: string;
+    message: string;
+    hasOutputs: boolean;
+    hasCause: boolean;
+  };
+  elapsed: number;
+};
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -193,6 +207,44 @@ async function prepare() {
       `${work}/${name}.wasm`,
     ], root);
   }
+  // The SDK tests embed these guests because they cannot spawn wasm-tools.
+  // Assemble every source here and refuse to run if either copy drifted.
+  const hostile: Record<string, Uint8Array> = {};
+  await Deno.mkdir(`${work}/guests`);
+  for await (const entry of Deno.readDir(`${root}/tests/browser/guests`)) {
+    if (!entry.name.endsWith(".wat")) continue;
+    const name = entry.name.slice(0, -".wat".length);
+    await native([
+      "wasm-tools",
+      "parse",
+      `${root}/tests/browser/guests/${entry.name}`,
+      "-o",
+      `${work}/guests/${name}.named.wasm`,
+    ], root);
+    await native([
+      "wasm-tools",
+      "strip",
+      "--all",
+      `${work}/guests/${name}.named.wasm`,
+      "-o",
+      `${work}/guests/${name}.wasm`,
+    ], root);
+    const bytes = await Deno.readFile(`${work}/guests/${name}.wasm`);
+    const embedded = hostileGuests[name];
+    assert(
+      embedded,
+      `tests/browser/guests/${entry.name} has no embedded copy in sdk/typescript/testdata/hostile_guests.ts`,
+    );
+    assert(
+      bytes.length === embedded.bytes.length &&
+        bytes.every((byte, index) => byte === embedded.bytes[index]),
+      `tests/browser/guests/${entry.name} no longer matches its embedded bytes; regenerate sdk/typescript/testdata/hostile_guests.ts`,
+    );
+    hostile[name] = bytes;
+  }
+  for (const name of Object.keys(hostileGuests)) {
+    assert(name in hostile, `embedded guest ${name} has no .wat source`);
+  }
   const source = await files(`${root}/tests/fixtures/schemas`);
   const includes = {
     "capnp/c++.capnp": await Deno.readTextFile(
@@ -317,6 +369,7 @@ async function prepare() {
     invalid: await files(`${root}/tests/fixtures/invalid`),
     memoryGuest: await Deno.readFile(`${work}/memory-limit.wasm`),
     streamGuest: await Deno.readFile(`${work}/stream-limit.wasm`),
+    hostileGuests: hostile,
   };
 }
 
@@ -704,6 +757,130 @@ try {
     );
     console.log(
       `PASS ${engine} ${host}: workspace/output/stream limits, recovery, and guest memory ceiling`,
+    );
+  }
+
+  // Hostile and probing guests: every guest-sized host bound, the read-only
+  // workspace, and result shapes must hold in each engine and both modes.
+  await page.evaluate((guests) => {
+    (globalThis as BrowserGlobal).capnpTest.hostileGuests = guests;
+  }, data.hostileGuests);
+  for (const host of ["direct", "worker"] as const) {
+    const outcomes = await page.evaluate(async ({ host, stages }) => {
+      const state = (globalThis as BrowserGlobal).capnpTest;
+      const outcomes: Record<string, HostileOutcome> = {};
+      for (const [name, stage] of Object.entries(stages)) {
+        const bytes = state.hostileGuests![name];
+        const modules: Modules = {
+          compiler: bytes,
+          generators: stage === "generator" ? { cpp: bytes } : {},
+        };
+        const started = performance.now();
+        const compiler = host === "direct"
+          ? await state.sdk.createCompiler(modules)
+          : await state.sdk.createWorkerCompiler(state.workerURL, modules);
+        try {
+          const result = stage === "compiler"
+            ? await compiler.compile({
+              files: { a: "x" },
+              includeFiles: {},
+              entrypoints: ["a"],
+              generators: [],
+            })
+            : await compiler.generate({
+              request: new Uint8Array(1),
+              generators: ["cpp"],
+            });
+          const files = result.outputs.cpp as
+            | Record<string, Uint8Array>
+            | undefined;
+          outcomes[name] = {
+            request: stage === "compiler"
+              ? Array.from((result as Result).request)
+              : undefined,
+            outputs: files
+              ? Object.fromEntries(
+                Object.entries(files).map((
+                  [path, data],
+                ) => [path, Array.from(data)]),
+              )
+              : undefined,
+            plain: files
+              ? Object.getPrototypeOf(files) === Object.prototype &&
+                Object.getPrototypeOf(result.outputs) === Object.prototype
+              : undefined,
+            elapsed: performance.now() - started,
+          };
+        } catch (error) {
+          outcomes[name] = {
+            error: {
+              name: (error as Error).name,
+              message: (error as Error).message,
+              hasOutputs: "outputs" in (error as object),
+              hasCause: (error as Error).cause !== undefined,
+            },
+            elapsed: performance.now() - started,
+          };
+        } finally {
+          if ("dispose" in compiler) compiler.dispose();
+        }
+      }
+      return outcomes;
+    }, {
+      host,
+      stages: Object.fromEntries(
+        Object.entries(hostileGuests).map(([name, guest]) => [
+          name,
+          guest.stage,
+        ]),
+      ),
+    });
+    for (const [name, guest] of Object.entries(hostileGuests)) {
+      const outcome = outcomes[name];
+      const label = `${host} ${name}`;
+      assert(outcome, `${label} produced no outcome`);
+      if (guest.expectError) {
+        assert(
+          outcome.error?.name === guest.expectError.name &&
+            outcome.error.message.includes(guest.expectError.message) &&
+            !outcome.error.hasOutputs && outcome.error.hasCause,
+          `${label} did not fail as expected: ${JSON.stringify(outcome)}`,
+        );
+      } else {
+        assert(
+          !outcome.error,
+          `${label} failed: ${JSON.stringify(outcome.error)}`,
+        );
+        if (guest.expectRequest) {
+          assert(
+            JSON.stringify(outcome.request) ===
+              JSON.stringify(guest.expectRequest),
+            `${label} reported ${JSON.stringify(outcome.request)}, expected ${
+              JSON.stringify(guest.expectRequest)
+            }`,
+          );
+        }
+        if (guest.expectOutputs) {
+          assert(
+            outcome.plain === true && outcome.outputs &&
+              JSON.stringify(Object.keys(outcome.outputs).sort()) ===
+                JSON.stringify(Object.keys(guest.expectOutputs).sort()) &&
+              Object.entries(guest.expectOutputs).every(([path, bytes]) =>
+                JSON.stringify(outcome.outputs![path]) === JSON.stringify(bytes)
+              ),
+            `${label} outputs differ: ${JSON.stringify(outcome)}`,
+          );
+        }
+      }
+      assert(
+        outcome.elapsed < 1000,
+        `${label} took ${outcome.elapsed.toFixed(0)} ms`,
+      );
+    }
+    console.log(
+      `PASS ${engine} ${host}: ${
+        Object.keys(hostileGuests).length
+      } hostile guests are bounded, read-only, and plainly shaped`,
     );
   }
 
