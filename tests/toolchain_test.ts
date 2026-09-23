@@ -9,6 +9,7 @@ import { copyTree, readTree } from "./lib/fs.ts";
 import {
   assertGuestDiagnostic,
   guestCommand,
+  type GuestOptions,
   TRAP_TEXT,
   type WasmHost,
   wasmHosts,
@@ -365,8 +366,12 @@ suite.test("request comparison distinguishes schemas and is deterministic", asyn
 for (const host of wasmHosts) {
   suite.test(`${host.name}: native parity and failed-job behavior`, async (t) => {
     const data = await fixture();
-    const guest = (tool: string, directory: string, args: string[] = []) =>
-      guestCommand(host, tool, directory, args);
+    const guest = (
+      tool: string,
+      directory: string,
+      args: string[] = [],
+      options: GuestOptions = {},
+    ) => guestCommand(host, tool, directory, args, options);
     const nativeOutput = (language: string) =>
       language === "c++" ? data.expected : `${data.work}/native-${language}`;
     /**
@@ -603,9 +608,12 @@ for (const host of wasmHosts) {
       const conflict = `${data.work}/${host.name}-go-option-conflict`;
       await Deno.mkdir(conflict);
       expectNativeDiagnostic(
-        await run(guest("capnpc-go", conflict, goConflictArgs), {
-          stdin: data.request,
-        }),
+        await run(
+          guest("capnpc-go", conflict, goConflictArgs, {
+            exportOnFailure: true,
+          }),
+          { stdin: data.request },
+        ),
         data.goConflict,
         "Go option conflict",
       );
@@ -728,9 +736,12 @@ for (const host of wasmHosts) {
           async () => {
             const output = `${data.work}/${host.name}-${language}-${name}`;
             await Deno.mkdir(output);
-            const result = await run(guest(`capnpc-${language}`, output), {
-              stdin: input,
-            });
+            const result = await run(
+              guest(`capnpc-${language}`, output, [], {
+                exportOnFailure: true,
+              }),
+              { stdin: input },
+            );
             expectNativeDiagnostic(
               result,
               data.malformed.get(`${language}/${name}`)!,
@@ -753,9 +764,12 @@ for (const host of wasmHosts) {
           const output = `${parent}/root`;
           await Deno.mkdir(output, { recursive: true });
           const label = `${language} traversal request`;
-          const result = await run(guest(`capnpc-${language}`, output), {
-            stdin: data.traversal,
-          });
+          const result = await run(
+            guest(`capnpc-${language}`, output, [], {
+              exportOnFailure: true,
+            }),
+            { stdin: data.traversal },
+          );
           const stderr = decodeText(result.stderr);
           assert(
             result.signal === null && (result.code === 0 || result.code === 1),

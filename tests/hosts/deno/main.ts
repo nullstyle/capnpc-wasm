@@ -105,8 +105,13 @@ async function writeAll(
 async function main(): Promise<number> {
   const args = [...Deno.args];
   let rootPath: string | undefined;
+  let exportAlways = false;
   while (args[0]?.startsWith("--")) {
     const option = args.shift();
+    if (option === "--export-always") {
+      exportAlways = true;
+      continue;
+    }
     if (option !== "--dir" || rootPath !== undefined) {
       throw new UsageError("only one --dir host::/ mount is supported");
     }
@@ -119,7 +124,7 @@ async function main(): Promise<number> {
   const modulePath = args[0];
   if (!modulePath) {
     throw new UsageError(
-      "usage: main.ts [--dir host::/] module.wasm [args...]",
+      "usage: main.ts [--dir host::/] [--export-always] module.wasm [args...]",
     );
   }
   // The guest sees the tool name (capnp, capnpc-c++, ...), as the SDKs pass
@@ -188,7 +193,12 @@ async function main(): Promise<number> {
     await writeAll(Deno.stdout, output.data);
     await writeAll(Deno.stderr, errors.data);
   }
-  if (code === 0 && root && rootPath) await exportDirectory(root, rootPath);
+  // Export is transactional: only a successful exit publishes the guest's
+  // files. --export-always is a test-only bypass so negative-path tests can
+  // observe what a failing guest wrote.
+  if (root && rootPath && (code === 0 || exportAlways)) {
+    await exportDirectory(root, rootPath);
+  }
   return code;
 }
 

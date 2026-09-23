@@ -11,7 +11,7 @@ own copies of the subprocess, comparison, and directory helpers.
 | `assert.ts`  | `assert`, `assertBytesEqual`, `assertTextEqual`, `assertTreesEqual`, `firstDifference`, `hexWindow`, `textOf`, `unifiedDiff`, `treePaths`                                                |
 | `workdir.ts` | `testSuite`, `keepTestDirs`, `TestSuite`                                                                                                                                                 |
 | `oracle.ts`  | `nativeCompile`, `canonicalRequest`, `stageStandardIncludes`, `normalizeDiagnostic`, `clangxx`, `NativeCompileOptions`, `DiagnosticNormalization`                                        |
-| `hosts.ts`   | `wasmHosts`, `guestCommand`, `assertGuestDiagnostic`, `TRAP_TEXT`, `HOST_TRAP_EXIT_CODE`, `WASMTIME_TRAP_EXIT_CODE`, `WasmHost`                                                          |
+| `hosts.ts`   | `wasmHosts`, `guestCommand`, `moduleCommand`, `assertGuestDiagnostic`, `TRAP_TEXT`, `TRAP_GUEST`, `HOST_TRAP_EXIT_CODE`, `WASMTIME_TRAP_EXIT_CODE`, `WasmHost`, `GuestOptions`           |
 
 ## Processes and environment
 

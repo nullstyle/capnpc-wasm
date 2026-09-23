@@ -13,6 +13,20 @@ export interface WasmHost {
   command: readonly string[];
   /** Exit status the host reports for a trap or an uncaught exception. */
   trapExitCode: number;
+  /**
+   * Host options that publish the guest's files even when it fails. The
+   * Deno host exports its in-memory filesystem only on exit 0; Wasmtime and
+   * wazero-run write through to the directory and need nothing.
+   */
+  failureExportArgs: readonly string[];
+}
+
+export interface GuestOptions {
+  /**
+   * Pass the host's `failureExportArgs`, so a negative-path step can assert
+   * on every host that a failing guest left no output behind.
+   */
+  exportOnFailure?: boolean;
 }
 
 /** Exit status wazero-run and the Deno host use for traps and host errors. */
@@ -26,16 +40,19 @@ export const wasmHosts: readonly WasmHost[] = [
     name: "wasmtime",
     command: ["wasmtime", "run", "-W", "exceptions=y"],
     trapExitCode: WASMTIME_TRAP_EXIT_CODE,
+    failureExportArgs: [],
   },
   {
     name: "wazero",
     command: [wazeroRun],
     trapExitCode: HOST_TRAP_EXIT_CODE,
+    failureExportArgs: [],
   },
   {
     name: "wazero-interpreter",
     command: [wazeroRun, "--interpreter"],
     trapExitCode: HOST_TRAP_EXIT_CODE,
+    failureExportArgs: [],
   },
   {
     name: "deno",
@@ -50,29 +67,53 @@ export const wasmHosts: readonly WasmHost[] = [
       `${root}/tests/hosts/deno/main.ts`,
     ],
     trapExitCode: HOST_TRAP_EXIT_CODE,
+    failureExportArgs: ["--export-always"],
   },
 ];
 
 /**
+ * The command line that runs any module on a host with `directory` as `/`
+ * and `argv0` as the guest's program name. wazero-run and the Deno host
+ * derive argv[0] from the module file name, and Wasmtime needs --argv0.
+ */
+export function moduleCommand(
+  host: WasmHost,
+  modulePath: string,
+  argv0: string,
+  directory: string,
+  args: readonly string[] = [],
+  options: GuestOptions = {},
+): string[] {
+  return [
+    ...host.command,
+    ...(host.name === "wasmtime" ? ["--argv0", argv0] : []),
+    ...(options.exportOnFailure ? host.failureExportArgs : []),
+    "--dir",
+    `${directory}::/`,
+    modulePath,
+    ...args,
+  ];
+}
+
+/**
  * The command line that runs `tool.wasm` on a host with `directory` as `/`.
- * Every host presents the tool name as the guest's argv[0], as the SDKs do;
- * wazero-run and the Deno host derive it from the module name, and Wasmtime
- * needs --argv0.
+ * Every host presents the tool name as the guest's argv[0], as the SDKs do.
  */
 export function guestCommand(
   host: WasmHost,
   tool: string,
   directory: string,
   args: readonly string[] = [],
+  options: GuestOptions = {},
 ): string[] {
-  return [
-    ...host.command,
-    ...(host.name === "wasmtime" ? ["--argv0", tool] : []),
-    "--dir",
-    `${directory}::/`,
+  return moduleCommand(
+    host,
     `${wasmBin}/${tool}.wasm`,
-    ...args,
-  ];
+    tool,
+    directory,
+    args,
+    options,
+  );
 }
 
 /**
