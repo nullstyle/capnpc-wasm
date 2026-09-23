@@ -92,15 +92,20 @@ function resolveWorkerURL(workerURL: string | URL): URL {
   }
 }
 
-/** Fresh job copies can be moved to the worker instead of cloned again. */
+/**
+ * Fresh job copies can be moved to the worker instead of cloned again. A
+ * buffer may appear once in a transfer list, and empty buffers gain nothing.
+ */
 function transferable(files: Record<string, Uint8Array>[]): Transferable[] {
-  const buffers: Transferable[] = [];
+  const buffers = new Set<ArrayBuffer>();
   for (const record of files) {
     for (const bytes of Object.values(record)) {
-      if (bytes.buffer instanceof ArrayBuffer) buffers.push(bytes.buffer);
+      if (bytes.buffer instanceof ArrayBuffer && bytes.buffer.byteLength > 0) {
+        buffers.add(bytes.buffer);
+      }
     }
   }
-  return buffers;
+  return [...buffers];
 }
 
 /**
@@ -272,7 +277,7 @@ export async function createWorkerCompiler(
         kind,
         request: { request: bytes, generators: job.generators },
       };
-      transfer = [bytes.buffer as ArrayBuffer];
+      transfer = transferable([{ request: bytes }]);
     } else {
       const job = validateCompile(request as CompileRequest, limits, supplied);
       const files = copyFiles(job.sources);

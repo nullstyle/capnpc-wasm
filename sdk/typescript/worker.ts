@@ -18,7 +18,7 @@ function transferable(result: unknown): Transferable[] {
   const collect = (value: unknown) => {
     if (
       value instanceof Uint8Array && value.buffer instanceof ArrayBuffer &&
-      !value.buffer.resizable
+      !value.buffer.resizable && value.buffer.byteLength > 0
     ) buffers.add(value.buffer);
   };
   const outcome = result as {
