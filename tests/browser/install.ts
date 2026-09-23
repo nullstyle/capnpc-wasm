@@ -1,11 +1,17 @@
 // Playwright's Node ZIP extractor stalls under the pinned Deno release. Keep
 // Playwright authoritative for platform/revision selection, but extract its
 // official archives with the already-managed CMake binary.
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { selectedEngines } from "./engines.ts";
 
+// mise.toml sets PLAYWRIGHT_BROWSERS_PATH to the project cache; mise.local.toml
+// can point it at a cache shared between worktrees. Playwright reads the same
+// variable at run time, so installation and use agree on the location.
 const root = Deno.cwd();
-const cache = `${root}/.cache/playwright`;
+const cache = resolve(
+  Deno.env.get("PLAYWRIGHT_BROWSERS_PATH") ?? `${root}/.cache/playwright`,
+);
 const config = new URL("./deno.json", import.meta.url);
 const plan = await new Deno.Command(Deno.execPath(), {
   args: [
