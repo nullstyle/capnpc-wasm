@@ -67,6 +67,8 @@ zig_dirs = "generators/zig tests/consumers/zig tests/wire tests/reflection tests
 # including what scripts/lib/toolchain-env.sh exports in its fallback mode
 # (SDKROOT, LDFLAGS, the host triple's CARGO_TARGET_*_RUSTFLAGS) and
 # RUSTUP_TOOLCHAIN, without which the rustup proxy runs the user default.
+# The supported Deno worker runtime has one source: sdk/typescript/worker-client.ts.
+worker_version_sed = 's/^export const supportedDenoWorkerVersion = .\([0-9][0-9.]*\).;$/\1/p'
 suite_env = "CAPNP_KEEP_TEST_DIRS,PATH,HOME,TMPDIR,CC,CXX,SDKROOT,LDFLAGS,CARGO_TARGET_DIR,CARGO_HOME,RUSTUP_HOME,RUSTUP_TOOLCHAIN,CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS,CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS,DENO_DIR,GOPATH,GOCACHE,GOTOOLCHAIN,GOFLAGS,GOPROXY,ZIG_GLOBAL_CACHE_DIR"
 
 [tasks.setup]
@@ -135,6 +137,11 @@ run = [
 [tasks.check]
 description = "Static checks, the tool doctor, and native/Wasm parity across the test hosts"
 depends = ["lint", "doctor", "test"]
+
+[tasks.ci]
+description = "Run the CI check job locally: check, package gates, the Deno worker lane, browser bootstrap, then require a clean tree"
+depends = ["check", "test:package", "test:deno-worker", "test:browser-bootstrap"]
+run = 'changes="$(git status --porcelain)" && test -z "$changes" || { echo "checks left tracked or untracked changes:"; echo "$changes"; exit 1; }'
 
 [tasks."build:native"]
 description = "Build the pristine upstream native tools and test oracle"
@@ -246,6 +253,34 @@ run = "deno run --config tests/browser/deno.json --frozen --allow-read --allow-w
 description = "Run offline SDK parity and cancellation in Chromium, Firefox, and WebKit"
 depends = ["build:native", "build:sdk"]
 run = "deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/run.ts"
+
+[tasks."deno-worker:install"]
+description = "Install the supported Deno worker runtime outside the project lock (version from sdk/typescript/worker-client.ts)"
+run = '''
+set -eu
+version="$(sed -n '{{vars.worker_version_sed}}' sdk/typescript/worker-client.ts)"
+test -n "$version" || { echo "supportedDenoWorkerVersion not found in sdk/typescript/worker-client.ts" >&2; exit 1; }
+# Install from a scratch directory: an install from the project would rewrite
+# mise.lock and prune the non-host WASI SDK variants it records.
+scratch="$(mktemp -d)"
+mise --cd "$scratch" install "deno@$version"
+rmdir "$scratch"
+'''
+
+[tasks."test:deno-worker"]
+description = "Run the SDK tests and the compiler-host gate on the supported Deno worker runtime (worker termination coverage)"
+depends = ["deno-worker:install", "build:native", "build:sdk"]
+run = '''
+set -eu
+version="$(sed -n '{{vars.worker_version_sed}}' sdk/typescript/worker-client.ts)"
+deno_bin="$(mise where "deno@$version")/bin/deno"
+"$deno_bin" test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/
+deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts "$deno_bin"
+'''
+
+[tasks."test:browser-bootstrap"]
+description = "Verify the Playwright bootstrap permission boundary without launching browsers"
+run = "deno test --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-env --allow-sys tests/browser/playwright_test.ts"
 
 [tasks."example:deno"]
 description = "Generate Rust through the bundled SDK with no execution permissions (type-checks the example)"
