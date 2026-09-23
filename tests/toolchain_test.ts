@@ -777,11 +777,21 @@ for (const host of wasmHosts) {
             // "../out.capnp.go" against the root, so the file lands inside it.
             assert(result.stdout.length === 0, `${label}: wrote stdout`);
           } else {
-            assertGuestDiagnostic(result, label);
+            const diagnostic = assertGuestDiagnostic(result, label);
             assert(
               (await readTree(output)).size === 0,
               `${label}: wrote files before rejecting the request`,
             );
+            if (language === "rust") {
+              // The wrapper validates names itself, so the message is the
+              // same on every host and natively instead of a host EPERM.
+              assert(
+                diagnostic.includes(
+                  "is not a relative path inside the output directory",
+                ),
+                `${label}: expected the wrapper's own rejection, got:\n${diagnostic}`,
+              );
+            }
           }
         },
       );
