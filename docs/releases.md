@@ -87,38 +87,107 @@ actions.
 
 ## Repository toolchain launcher
 
-Both archives include `bin/capnp-wasm`, a Bash launcher for Wasmtime. Its
-required version is generated from `mise.toml` into `runtime/wasmtime-version`;
-consumers install that exact Wasmtime version. The launcher accepts
-`CAPNP_WASM_WASMTIME` as a single executable path, or finds `wasmtime` on
-`PATH`. A missing or mismatched runtime fails immediately. Package integrity
-verification belongs to the consumer's bootstrap step.
+Both archives include `bin/capnp-wasm`, an executable Bash launcher for Wasmtime
+(`package.json` also lists it under `bin`). It resolves its package root through
+symlinks, from a bare name, and with `CDPATH` set, so it can be linked onto
+`PATH` or run as `bash package/bin/capnp-wasm`. The packaged Wasmtime version is
+generated from `mise.toml` into `runtime/wasmtime-version`. The launcher accepts
+that version, any newer patch release of the same `major.minor` series (with a
+one-line warning), or exactly the version named by
+`CAPNP_WASM_WASMTIME_ACCEPT_VERSION`; anything else fails before the guest
+starts. `CAPNP_WASM_WASMTIME` selects the executable, otherwise `wasmtime` on
+`PATH`. Package integrity verification belongs to the consumer's bootstrap step.
 
 ```sh
 # Stage project schemas and the required bundled includes in a fresh workspace.
 mkdir -p /absolute/work/input/include /absolute/work/output
 cp -R package/include/. /absolute/work/input/include/
 cp project/schema/example.capnp /absolute/work/input/
-bash package/bin/capnp-wasm compiler --workspace /absolute/work/input -- \
+package/bin/capnp-wasm compiler --workspace /absolute/work/input -- \
   compile --no-standard-import -I/include --src-prefix=/ -o- /example.capnp \
   > /absolute/work/request.bin
-bash package/bin/capnp-wasm generator \
+package/bin/capnp-wasm generator \
   --module /absolute/path/to/matching-capnpc-zig.wasm \
   --output /absolute/work/output -- < /absolute/work/request.bin
-bash package/bin/capnp-wasm compiler --workspace /absolute/work/input -- \
-  convert binary:canonical < /absolute/work/statement.bin \
-  > /absolute/work/statement.canonical.bin
+package/bin/capnp-wasm compiler -- convert binary:canonical \
+  < /absolute/work/statement.bin > /absolute/work/statement.canonical.bin
 ```
 
-The compiler receives only the workspace as guest `/`; the generator receives
-only its output directory as guest `/`. Both explicitly use guest current
-directory `/` and standardized Wasm exception handling. Filesystem roots must be
-existing absolute directories without Wasmtime's `::` mapping delimiter.
-Generator modules must be absolute readable files. Arguments after `--` and
-binary standard streams pass through unchanged; the launcher preserves command
-exit statuses. There is no native compiler fallback or shell evaluation of
-arguments. These filesystem mappings are capabilities, not read-only mounts; use
-disposable workspaces and commit generated output only after success.
+The compiler runs the packaged `capnp.wasm` with `argv[0]` set to `capnp`, so
+its diagnostics suggest `capnp compile --help`; a generator runs with its module
+basename (`capnpc-c++`, `capnpc-zig`). Both use guest current directory `/`,
+standardized Wasm exception handling, and an empty guest environment. Arguments
+after `--` and binary standard streams pass through unchanged. There is no
+native compiler fallback and no shell evaluation of arguments.
+
+Inputs are read-only and outputs are transactional:
+
+- `compiler --workspace ABS_DIR` copies the workspace (a clone on APFS and
+  reflink filesystems, otherwise a plain copy), removes write permission from
+  the copy, and maps only the copy as guest `/`. The original directory is never
+  opened by the guest, so it is byte-identical after successful and failed runs.
+  The root must be an existing absolute directory; `/` is refused, `$HOME`
+  produces a warning, and the copy is limited to 65536 entries and
+  `CAPNP_WASM_MAX_WORKSPACE` bytes of disk usage (default 256 MiB). Without
+  `--workspace` the guest sees an empty root, which is enough for `convert`,
+  `id`, and `--version`. Wasmtime honors host permissions; a root user loses the
+  read-only guarantee of the copy.
+- `generator --output ABS_DIR` maps an empty staging directory (a hidden sibling
+  of the output directory, or a hidden child when the parent is not writable) as
+  guest `/`. Files move into `--output` only after the generator exits 0. Before
+  the first move, every destination is checked: an existing directory where a
+  file belongs, a file where a directory belongs, a read-only file, or a symlink
+  at any destination or parent inside `--output` fails with exit 73 and leaves
+  the output directory unchanged. A failed or interrupted run removes the
+  staging directory and writes nothing.
+
+Confinement follows Wasmtime's preopen rules. Relative symlinks that resolve
+inside the mapped root are followed; absolute symlinks and symlinks that leave
+the root fail inside the guest with `Operation not permitted`, and `..` cannot
+climb above the root. The launcher warns up front about workspace symlinks that
+leave the root. Layouts that rely on such links must be staged with `cp -RL`
+first. Because the guest reads a real host directory, behavior follows the host
+filesystem: imports are case-insensitive on default macOS volumes but
+case-sensitive on Linux and in the SDKs, names containing backslashes are
+ordinary characters here but rejected by the SDKs, and path length is bounded by
+the host `PATH_MAX`. Schemas that build here may fail in the SDKs or on another
+host for these reasons.
+
+The guest environment is always empty. `CAPNPC_ZIG_*` variables (for example
+`CAPNPC_ZIG_API_PROFILE`) are not forwarded; the launcher prints a one-line
+warning when any is set, and the same choices are available as `capnpc-zig`
+command-line options. Guests are bounded:
+
+| Bound              | Default                        | Override                                    |
+| ------------------ | ------------------------------ | ------------------------------------------- |
+| Wasm stack         | 8 MiB (`-W max-wasm-stack`)    | none; sized to the guest's linear stack     |
+| Linear memory      | 256 MiB (`-W max-memory-size`) | `CAPNP_WASM_MAX_MEMORY` bytes, 16 MiB-4 GiB |
+| Execution time     | 300 s (`-W timeout`)           | `CAPNP_WASM_TIMEOUT` seconds, `0` disables  |
+| Workspace copy     | 256 MiB, 65536 entries         | `CAPNP_WASM_MAX_WORKSPACE` bytes            |
+| Wasmtime backtrace | 16 frames (`-D max-backtrace`) | none                                        |
+
+The stack bound compiles constant-reference chains 1500 deep, beyond the native
+compiler; native Wasmtime defaults trap near 170. Memory exhaustion is reported
+by the guest itself (a failed `memory.grow`), so it surfaces as the guest's own
+error. Overrides that are not whole numbers in range fail with exit 78. Exit
+statuses:
+
+| Exit  | Meaning                                                                                                                                                  |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Success                                                                                                                                                  |
+| 1-63  | Guest exit status, passed through unchanged (`capnp` uses 1 for schema and usage errors)                                                                 |
+| 64    | Launcher usage error: unknown mode or option, missing `--`, relative or `::` root, `/` as a root                                                         |
+| 65    | `--module` is not a WebAssembly binary                                                                                                                   |
+| 66    | Missing or unreadable workspace, output directory, or module                                                                                             |
+| 69    | Wasmtime executable not found, or its version could not be read                                                                                          |
+| 73    | Cannot stage the workspace, or cannot publish generator output (conflict, read-only, symlink, not writable)                                              |
+| 78    | Packaged runtime version missing, Wasmtime version rejected, or an invalid environment override                                                          |
+| 134   | Wasmtime trap: timeout (`wasm trap: interrupt`), stack exhaustion, or a guest fault; the module's basename and a bounded backtrace are printed on stderr |
+| 1     | Wasmtime could not load or instantiate a module whose magic bytes were valid                                                                             |
+| 128+N | The launcher was stopped by signal N after forwarding it to the guest and removing its staging directory                                                 |
+
+`capnp-wasm --help` prints this contract and `capnp-wasm --version` prints the
+package version and the packaged Wasmtime version, both with exit 0.
 
 `mise run release:tools` prepares
 `dist/releases/capnp-wasm-tools-0.1.0-rc.3/capnp-wasm-tools-0.1.0-rc.3.tgz`.
