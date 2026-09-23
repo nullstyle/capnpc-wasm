@@ -21,7 +21,7 @@ export type WasmModule = Uint8Array;
 
 /** Resource policy shared by direct and worker compiler factories. */
 export interface CompilerOptions {
-  /** Omitted limits use defaultLimits; zero disallows the corresponding resource. */
+  /** Omitted or undefined limits use defaultLimits; zero disallows the corresponding resource. */
   limits?: Partial<ResourceLimits>;
 }
 
@@ -36,10 +36,19 @@ export interface CompileRequest {
   files: Files;
   /** Standard schemas and annotations, staged beneath /include. */
   includeFiles?: Files;
-  /** Ordered include directories within files; searched before includeFiles. Empty means /src. */
+  /**
+   * Ordered directories within `files`, searched for absolute imports before
+   * includeFiles. An omitted or empty list adds no roots; the element `""`
+   * names the /src root itself. Every other entry must be a directory implied
+   * by a path in `files`.
+   */
   importPaths?: readonly string[];
-  /** Strip this directory from requested source names; other files remain relative to /src. */
+  /**
+   * Strip this directory of `files` from requested source names; other files
+   * remain relative to /src. `""` (the default) keeps names relative to /src.
+   */
   sourcePrefix?: string;
+  /** Paths present in `files`; at least one is required. */
   entrypoints: readonly string[];
   /** An empty list compiles to a request without generating source. */
   generators: readonly Language[];
@@ -59,7 +68,13 @@ export interface GenerationRequest {
 }
 
 export interface GenerationResult {
+  /**
+   * Plain objects keyed by language, then by the generator's relative output
+   * path. Output names are guest-chosen own properties; enumerate them with
+   * Object.keys/entries rather than `for...in` with inherited lookups.
+   */
   outputs: Partial<Record<Language, Record<string, Uint8Array>>>;
+  /** Every stage's stderr, in execution order, including successful stages. */
   diagnostics: Diagnostic[];
 }
 
@@ -74,6 +89,12 @@ export interface Compiler {
   generate(request: GenerationRequest): Promise<GenerationResult>;
 }
 
+/**
+ * A guest stage failed: a nonzero exit (`exitCode` set), a trap, or a host
+ * budget from ResourceLimits exceeded while the guest ran (the message names
+ * the limit; `cause` carries the underlying error). Identical in direct and
+ * worker execution.
+ */
 export class CompileError extends Error {
   override readonly name = "CompileError";
   constructor(

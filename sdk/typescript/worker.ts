@@ -1,14 +1,41 @@
 import { createCompiler } from "./mod.ts";
-import { CompileError, type Compiler } from "./types.ts";
+import {
+  encodeError,
+  type WorkerReply,
+  type WorkerRequest,
+} from "./protocol.ts";
+import type { Compiler } from "./types.ts";
 
 let compiler: Compiler | undefined;
 const scope = self as unknown as {
-  onmessage: (event: MessageEvent) => void;
-  postMessage: (data: unknown) => void;
+  onmessage: (event: MessageEvent<WorkerRequest>) => void;
+  postMessage: (data: WorkerReply, transfer?: Transferable[]) => void;
 };
+
+/** Result buffers are fresh private copies, so they can move without copying. */
+function transferable(result: unknown): Transferable[] {
+  const buffers = new Set<ArrayBuffer>();
+  const collect = (value: unknown) => {
+    if (
+      value instanceof Uint8Array && value.buffer instanceof ArrayBuffer &&
+      !value.buffer.resizable
+    ) buffers.add(value.buffer);
+  };
+  const outcome = result as {
+    request?: unknown;
+    outputs?: Record<string, Record<string, unknown>>;
+  };
+  collect(outcome?.request);
+  for (const files of Object.values(outcome?.outputs ?? {})) {
+    for (const bytes of Object.values(files)) collect(bytes);
+  }
+  return [...buffers];
+}
+
 scope.onmessage = async ({ data }) => {
+  let reply: WorkerReply;
   try {
-    let result;
+    let result: unknown;
     if (data.kind === "init") {
       compiler = await createCompiler(data.modules, data.options);
     } else if (data.kind === "compile" && compiler) {
@@ -16,20 +43,11 @@ scope.onmessage = async ({ data }) => {
     } else if (data.kind === "generate" && compiler) {
       result = await compiler.generate(data.request);
     } else throw new Error("worker is not initialized or message is invalid");
-    scope.postMessage({ id: data.id, result });
+    reply = { id: data.id, result };
   } catch (cause) {
-    const error = cause instanceof CompileError
-      ? {
-        name: cause.name,
-        message: cause.message,
-        stage: cause.stage,
-        diagnostics: cause.diagnostics,
-        exitCode: cause.exitCode,
-      }
-      : {
-        name: cause instanceof Error ? cause.name : "Error",
-        message: String(cause),
-      };
-    scope.postMessage({ id: data.id, error });
+    // Ordinary job failures are structured replies; the worker stays usable
+    // because every job already runs in fresh guest instances.
+    reply = { id: data.id, error: encodeError(cause) };
   }
+  scope.postMessage(reply, transferable(reply.result));
 };

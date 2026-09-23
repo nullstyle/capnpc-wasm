@@ -1,82 +1,36 @@
 import {
   CompileError,
   type CompileRequest,
-  type CompileResult,
   createCompiler,
   createWorkerCompiler,
+  type Files,
   type Modules,
   supportedDenoWorkerVersion,
 } from "./mod.ts";
 import { runCommand } from "./runtime.ts";
-
-const root = new URL("../../", import.meta.url);
-const workerURL = new URL("./worker.ts", import.meta.url);
-const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
-function equalBytes(
-  actual: Uint8Array,
-  expected: Uint8Array,
-  name: string,
-): void {
-  assert(actual.length === expected.length, `${name}: byte length differs`);
-  assert(
-    actual.every((byte, i) => byte === expected[i]),
-    `${name}: bytes differ`,
-  );
-}
-
-function equalOutputs(
-  actual: Pick<CompileResult, "outputs">,
-  expected: Pick<CompileResult, "outputs">,
-): void {
-  assert(
-    JSON.stringify(Object.keys(actual.outputs).sort()) ===
-      JSON.stringify(Object.keys(expected.outputs).sort()),
-    "output languages differ",
-  );
-  for (const language of ["cpp", "rust", "go", "zig"] as const) {
-    const actualFiles = actual.outputs[language];
-    const expectedFiles = expected.outputs[language];
-    if (!actualFiles || !expectedFiles) continue;
-    assert(
-      JSON.stringify(Object.keys(actualFiles).sort()) ===
-        JSON.stringify(Object.keys(expectedFiles).sort()),
-      `${language}: output paths differ`,
-    );
-    for (const [path, bytes] of Object.entries(actualFiles)) {
-      equalBytes(bytes, expectedFiles[path], `${language}/${path}`);
-    }
-  }
-}
-
-async function rejects(
-  operation: () => Promise<unknown>,
-  name: string,
-  message?: string,
-): Promise<Error> {
-  try {
-    await operation();
-  } catch (error) {
-    assert(error instanceof Error, "rejection was not an Error");
-    assert(error.name === name, `expected ${name}, received ${error}`);
-    if (message) assert(error.message.includes(message), error.message);
-    return error;
-  }
-  throw new Error(`expected ${name} rejection`);
-}
-
-function workerTest(name: string, fn: Deno.TestDefinition["fn"]) {
-  Deno.test({
-    name,
-    fn,
-    ignore: Deno.version.deno !== supportedDenoWorkerVersion,
-  });
-}
+import {
+  assert,
+  commandGuest,
+  decoder,
+  encoder,
+  equalBytes,
+  equalOutputs,
+  fixture,
+  leb,
+  loopGuest,
+  malformedRequestGuest,
+  name,
+  rejects,
+  rejectsWith,
+  section,
+  sharedBytes,
+  simpleRequest,
+  stderrTrapGuest,
+  trapGuest,
+  workerTest,
+  workerURL,
+  writeX,
+} from "./testdata/support.ts";
 
 Deno.test("SDK rejects unverified Deno worker runtimes before executing guests", async () => {
   if (Deno.version.deno === supportedDenoWorkerVersion) return;
@@ -87,10 +41,6 @@ Deno.test("SDK rejects unverified Deno worker runtimes before executing guests",
     `use Deno ${supportedDenoWorkerVersion}`,
   );
 });
-
-function wasm(hex: string): Uint8Array {
-  return Uint8Array.from(hex.match(/../g)!, (byte) => parseInt(byte, 16));
-}
 
 Deno.test("SDK confines compiler source prefixes and ordered import roots", async () => {
   const compiler = await createCompiler({
@@ -120,89 +70,6 @@ Deno.test("SDK confines compiler source prefixes and ordered import roots", asyn
     "duplicate",
   );
 });
-
-function sharedBytes(bytes: Uint8Array): Uint8Array {
-  // Offset views also catch snapshots that copy the whole backing buffer.
-  const view = new Uint8Array(
-    new SharedArrayBuffer(bytes.length + 16),
-    8,
-    bytes.length,
-  );
-  view.set(bytes);
-  return view;
-}
-
-// Tiny command modules make timeout and failure tests deterministic without a
-// tool subprocess. Each exports one memory and _start. loopGuest executes
-// `(loop (br 0))`; trapGuest executes `unreachable`.
-const loopGuest = wasm(
-  "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a0901070003400c000b0b",
-);
-const trapGuest = wasm(
-  "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a05010300000b",
-);
-// Writes the single byte 'x' to stdout using WASI fd_write, then exits normally.
-const malformedRequestGuest = wasm(
-  "0061736d01000000010c0260047f7f7f7f017f60000002230116776173695f736e617073686f745f70726576696577310866645f77726974650000030201010503010001071302066d656d6f72790200065f737461727400010a0f010d00410141004101410c10001a0b0b0f010041000b09080000000100000078",
-);
-// Writes 'x' to stderr before trapping, to exercise structured trap diagnostics.
-const stderrTrapGuest = wasm(
-  "0061736d01000000010c0260047f7f7f7f017f60000002230116776173695f736e617073686f745f70726576696577310866645f77726974650000030201010503010001071302066d656d6f72790200065f737461727400010a10010e00410241004101410c10001a000b0b0f010041000b09080000000100000078",
-);
-
-async function read(path: string): Promise<Uint8Array> {
-  return await Deno.readFile(new URL(path, root));
-}
-
-let fixturePromise: Promise<{ modules: Modules; request: CompileRequest }>;
-function fixture() {
-  return fixturePromise ??= (async () => {
-    const [
-      compiler,
-      cpp,
-      rust,
-      go,
-      zig,
-      person,
-      common,
-      cxxAnnotations,
-      goAnnotations,
-    ] = await Promise.all([
-      read("build/wasm/bin/capnp.wasm"),
-      read("build/wasm/bin/capnpc-c++.wasm"),
-      read("build/wasm/bin/capnpc-rust.wasm"),
-      read("build/wasm/bin/capnpc-go.wasm"),
-      read("build/wasm/bin/capnpc-zig.wasm"),
-      read("tests/fixtures/schemas/person.capnp"),
-      read("tests/fixtures/schemas/types/common.capnp"),
-      read("ref/capnproto/c++/src/capnp/c++.capnp"),
-      read("ref/go-capnp/std/go.capnp"),
-    ]);
-    return {
-      modules: { compiler, generators: { cpp, rust, go, zig } },
-      request: {
-        files: { "person.capnp": person, "types/common.capnp": common },
-        includeFiles: {
-          "capnp/c++.capnp": cxxAnnotations,
-          "go.capnp": goAnnotations,
-        },
-        entrypoints: ["person.capnp", "types/common.capnp"],
-        generators: ["cpp", "rust", "go", "zig"],
-      },
-    };
-  })();
-}
-
-function simpleRequest(name = "Person"): CompileRequest {
-  return {
-    files: {
-      "example.capnp":
-        `@0xece4bf9c1f867623; struct ${name} { value @0 :Text; }`,
-    },
-    entrypoints: ["example.capnp"],
-    generators: ["cpp"],
-  };
-}
 
 Deno.test("SDK generates all languages from one workspace", async () => {
   const { modules, request } = await fixture();
@@ -812,54 +679,6 @@ Deno.test("SDK bounds aggregate workspace bytes and entries before executing", a
   );
 });
 
-function leb(value: number): number[] {
-  const bytes: number[] = [];
-  do {
-    const part = value & 127;
-    value = Math.floor(value / 128);
-    bytes.push(part | (value ? 128 : 0));
-  } while (value);
-  return bytes;
-}
-function section(id: number, bytes: number[]): number[] {
-  return [id, ...leb(bytes.length), ...bytes];
-}
-function name(value: string): number[] {
-  const bytes = [...encoder.encode(value)];
-  return [...leb(bytes.length), ...bytes];
-}
-function commandGuest(
-  code: number[],
-  data: number[] = [8, 0, 0, 0, 1, 0, 0, 0, 120],
-  memory = [0, 1],
-): Uint8Array {
-  const body = [0, ...code, 0x0b];
-  return new Uint8Array([
-    0,
-    97,
-    115,
-    109,
-    1,
-    0,
-    0,
-    0,
-    ...section(1, [2, 0x60, 4, 0x7f, 0x7f, 0x7f, 0x7f, 1, 0x7f, 0x60, 0, 0]),
-    ...section(2, [
-      1,
-      ...name("wasi_snapshot_preview1"),
-      ...name("fd_write"),
-      0,
-      0,
-    ]),
-    ...section(3, [1, 1]),
-    ...section(5, [1, ...memory]),
-    ...section(7, [2, ...name("memory"), 2, 0, ...name("_start"), 0, 1]),
-    ...section(10, [1, ...leb(body.length), ...body]),
-    ...section(11, [1, 0, 0x41, 0, 0x0b, ...leb(data.length), ...data]),
-  ]);
-}
-const writeX = [0x41, 1, 0x41, 0, 0x41, 1, 0x41, 12, 0x10, 0, 0x1a];
-
 Deno.test("SDK caps unbounded and larger guest memories before execution", async () => {
   // Grow twice from one page, then emit memory.size as a byte. Two-page ceiling
   // makes the second growth fail inside Wasm without allocating a third page.
@@ -1399,5 +1218,268 @@ Deno.test("SDK path limits count user paths separately from internal mount and r
     () => writer.generate({ request: new Uint8Array(1), generators: ["cpp"] }),
     "CompileError",
     "pathBytes",
+  );
+});
+
+Deno.test("SDK reports input-shape mistakes with explicit messages", async () => {
+  const compiler = await createCompiler({
+    compiler: trapGuest,
+    generators: { cpp: trapGuest },
+  });
+  const job = simpleRequest();
+  await rejectsWith(
+    () =>
+      compiler.compile({
+        ...job,
+        entrypoints: "example.capnp" as unknown as string[],
+      }),
+    TypeError,
+    "entrypoints must be an array of paths",
+  );
+  await rejectsWith(
+    () => compiler.compile({ ...job, generators: "cpp" as unknown as ["cpp"] }),
+    TypeError,
+    "generators must be an array of language names",
+  );
+  await rejectsWith(
+    () =>
+      compiler.compile({
+        ...job,
+        importPaths: "vendor" as unknown as string[],
+      }),
+    TypeError,
+    "importPaths must be an array of directory paths",
+  );
+  await rejectsWith(
+    () => compiler.compile({ ...job, importPaths: [42 as unknown as string] }),
+    TypeError,
+    "expected a string path",
+  );
+  await rejectsWith(
+    () =>
+      compiler.compile({ ...job, entrypoints: [null as unknown as string] }),
+    TypeError,
+    "expected a string path",
+  );
+  await rejectsWith(
+    () => compiler.compile({ ...job, sourcePrefix: 7 as unknown as string }),
+    TypeError,
+    "expected a string path",
+  );
+  await rejectsWith(
+    () => compiler.compile({ ...job, files: null as unknown as Files }),
+    TypeError,
+    "files must be an object mapping paths to contents",
+  );
+  await rejectsWith(
+    () =>
+      compiler.generate({
+        request: new Uint8Array(1),
+        generators: "cpp" as unknown as ["cpp"],
+      }),
+    TypeError,
+    "generators must be an array of language names",
+  );
+  await rejectsWith(
+    () => compiler.generate({ request: new Uint8Array(1), generators: [] }),
+    TypeError,
+    "at least one generator is required",
+  );
+  // Undefined limit entries mean the default, like omitted fields.
+  const relaxed = await createCompiler({
+    compiler: malformedRequestGuest,
+    generators: {},
+  }, { limits: { outputBytes: undefined, memoryPages: undefined } });
+  equalBytes(
+    (await relaxed.compile({
+      files: { a: "" },
+      entrypoints: ["a"],
+      generators: [],
+    }))
+      .request,
+    encoder.encode("x"),
+    "undefined limits",
+  );
+  await rejectsWith(
+    () =>
+      createCompiler({ compiler: trapGuest, generators: {} }, {
+        limits: { outputBytes: null as unknown as number },
+      }),
+    TypeError,
+    "invalid resource limit: outputBytes",
+  );
+  await rejectsWith(
+    () =>
+      createCompiler({
+        compiler: trapGuest,
+        generators: { java: trapGuest } as unknown as Modules["generators"],
+      }),
+    TypeError,
+    "unknown generator: java",
+  );
+});
+
+Deno.test("SDK rejects import roots and source prefixes that are not directories in files", async () => {
+  // trapGuest traps as soon as it runs, so a TypeError proves the check ran first.
+  const compiler = await createCompiler({
+    compiler: trapGuest,
+    generators: {},
+  });
+  const job: CompileRequest = {
+    files: {
+      "project/schema/a.capnp": "",
+      "project/vendor/b.capnp": "",
+      "shared/c.capnp": "",
+    },
+    entrypoints: ["project/schema/a.capnp"],
+    generators: [],
+  };
+  await rejectsWith(
+    () => compiler.compile({ ...job, importPaths: ["nope"] }),
+    TypeError,
+    "importPath is not a directory in files: nope",
+  );
+  await rejectsWith(
+    () => compiler.compile({ ...job, importPaths: ["project/vendor/b.capnp"] }),
+    TypeError,
+    "importPath is not a directory in files: project/vendor/b.capnp",
+  );
+  await rejectsWith(
+    () => compiler.compile({ ...job, sourcePrefix: "nope" }),
+    TypeError,
+    "sourcePrefix is not a directory in files: nope",
+  );
+  await rejectsWith(
+    () => compiler.compile({ ...job, sourcePrefix: "shared/c.capnp" }),
+    TypeError,
+    "sourcePrefix is not a directory in files: shared/c.capnp",
+  );
+  // Directories implied only by includeFiles do not qualify.
+  await rejectsWith(
+    () =>
+      compiler.compile({
+        ...job,
+        includeFiles: { "inc/x.capnp": "" },
+        importPaths: ["inc"],
+      }),
+    TypeError,
+    "importPath is not a directory in files: inc",
+  );
+  // Real directories, including the root, reach the guest.
+  await rejects(
+    () =>
+      compiler.compile({
+        ...job,
+        importPaths: ["", "project/vendor", "shared"],
+        sourcePrefix: "project",
+      }),
+    "CompileError",
+    "trapped",
+  );
+});
+
+Deno.test("SDK searches import roots in the requested order", async () => {
+  const { modules } = await fixture();
+  const compiler = await createCompiler({
+    compiler: modules.compiler,
+    generators: {},
+  });
+  // Both roots provide /dep.capnp; the request names the field of the struct
+  // the compiler picked, so the first root listed must win.
+  const job: CompileRequest = {
+    files: {
+      "main.capnp":
+        '@0xece4bf9c1f867623; using Dep = import "/dep.capnp"; struct Main { dep @0 :Dep.Value; }',
+      "first/dep.capnp":
+        "@0x9c9e5ec72c9f6a21; struct Value { fromFirstRoot @0 :UInt8; }",
+      "second/dep.capnp":
+        "@0xb3d1a5f0c7e2d914; struct Value { fromSecondRoot @0 :UInt16; }",
+    },
+    entrypoints: ["main.capnp"],
+    generators: [],
+  };
+  const text = async (importPaths: string[]) =>
+    decoder.decode((await compiler.compile({ ...job, importPaths })).request);
+  const firstWins = await text(["first", "second"]);
+  const secondWins = await text(["second", "first"]);
+  assert(
+    firstWins.includes("fromFirstRoot") &&
+      !firstWins.includes("fromSecondRoot"),
+    "first import root was not searched first",
+  );
+  assert(
+    secondWins.includes("fromSecondRoot") &&
+      !secondWins.includes("fromFirstRoot"),
+    "reversed import roots were not searched in order",
+  );
+  await rejects(() => text([]), "CompileError");
+});
+
+Deno.test("SDK reports the requestBytes budget by when it is detected", async () => {
+  // A supplied request is rejected before any guest starts; the compiler's
+  // output is bounded while it runs.
+  const compiler = await createCompiler({
+    compiler: commandGuest([...writeX, ...writeX]),
+    generators: { cpp: commandGuest([]) },
+  }, { limits: { requestBytes: 1 } });
+  await rejectsWith(
+    () =>
+      compiler.generate({ request: new Uint8Array(2), generators: ["cpp"] }),
+    TypeError,
+    "request exceeds requestBytes limit",
+  );
+  const job: CompileRequest = {
+    files: { a: "" },
+    entrypoints: ["a"],
+    generators: [],
+  };
+  const failure = await rejects(
+    () => compiler.compile(job),
+    "CompileError",
+    "requestBytes",
+  );
+  assert(
+    failure instanceof CompileError && failure.stage === "compiler" &&
+      failure.exitCode === undefined && failure.cause instanceof Error &&
+      !("outputs" in failure),
+    "run-time requestBytes failure lost its shape",
+  );
+  const exact = await createCompiler({
+    compiler: commandGuest([...writeX]),
+    generators: {},
+  }, { limits: { requestBytes: 1 } });
+  equalBytes((await exact.compile(job)).request, encoder.encode("x"), "exact");
+});
+
+Deno.test("SDK rejects engine-refused and foreign-import modules as TypeErrors with a cause", async () => {
+  const refused = await rejectsWith(
+    () => createCompiler({ compiler: commandGuest([0x0c, 5]), generators: {} }),
+    TypeError,
+  );
+  assert(
+    refused.message.startsWith("the engine rejected the Wasm module: ") &&
+      refused.cause instanceof WebAssembly.CompileError,
+    `engine rejection lost its cause: ${refused.message}`,
+  );
+  const foreign = new Uint8Array([
+    0,
+    97,
+    115,
+    109,
+    1,
+    0,
+    0,
+    0,
+    ...section(1, [1, 0x60, 0, 0]),
+    ...section(2, [1, ...name("env"), ...name("f"), 0, 0]),
+    ...section(3, [1, 0]),
+    ...section(5, [1, 0, 1]),
+    ...section(7, [2, ...name("memory"), 2, 0, ...name("_start"), 0, 1]),
+    ...section(10, [1, 2, 0, 0x0b]),
+  ]);
+  await rejectsWith(
+    () => createCompiler({ compiler: foreign, generators: {} }),
+    TypeError,
+    "unsupported module import: env.f (function)",
   );
 });

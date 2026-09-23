@@ -1,12 +1,12 @@
-import { compileBounded } from "./wasm.ts";
+import { compileBounded, inspectModules } from "./wasm.ts";
 import {
-  checkPath,
   copyFiles,
   resolveLimits,
-  validateGeneration,
-  validateWorkspace,
+  validateCompile,
+  validateGenerate,
 } from "./limits.ts";
 import { CommandError, runCommand } from "./runtime.ts";
+import { requireWasmExceptions } from "./environment.ts";
 import {
   CompileError,
   type Compiler,
@@ -24,17 +24,21 @@ export * from "./types.ts";
 export {
   createWorkerCompiler,
   type JobOptions,
-  supportedDenoWorkerVersion,
   type WorkerCompiler,
+  type WorkerCompilerOptions,
 } from "./worker-client.ts";
+export {
+  supportedDenoWorkerVersion,
+  supportsWasmExceptions,
+} from "./environment.ts";
 
-const languages: readonly Language[] = ["cpp", "rust", "go", "zig"];
 const commands = {
   cpp: "capnpc-c++",
   rust: "capnpc-rust",
   go: "capnpc-go",
   zig: "capnpc-zig",
 };
+
 /**
  * Compile the supplied modules once, then run disk-free jobs in this JS thread.
  * Guest execution is synchronous; browsers should use createWorkerCompiler.
@@ -43,33 +47,16 @@ export async function createCompiler(
   modules: Modules,
   options: CompilerOptions = {},
 ): Promise<Compiler> {
+  requireWasmExceptions();
   const limits = resolveLimits(options);
+  const supplied = new Set(inspectModules(modules, limits.memoryPages));
   const compiler = await compileBounded(modules.compiler, limits.memoryPages);
   const generators = new Map<Language, WebAssembly.Module>();
-  for (const [language, module] of Object.entries(modules.generators)) {
-    if (!languages.includes(language as Language)) {
-      throw new TypeError(`unknown generator: ${language}`);
-    }
-    if (module !== undefined) {
-      generators.set(
-        language as Language,
-        await compileBounded(module, limits.memoryPages),
-      );
-    }
-  }
-
-  function targets(requested: readonly Language[]): Language[] {
-    if (requested.length > 4) throw new TypeError("too many generators");
-    const selected = [...requested];
-    if (new Set(selected).size !== selected.length) {
-      throw new TypeError("duplicate generators");
-    }
-    for (const target of selected) {
-      if (!generators.has(target)) {
-        throw new TypeError(`generator was not supplied: ${target}`);
-      }
-    }
-    return selected;
+  for (const language of supplied) {
+    generators.set(
+      language,
+      await compileBounded(modules.generators[language]!, limits.memoryPages),
+    );
   }
 
   async function execute(
@@ -113,7 +100,8 @@ export async function createCompiler(
     selected: Language[],
     diagnostics: Diagnostic[],
   ): Promise<GenerationResult> {
-    const outputs: GenerationResult["outputs"] = Object.create(null);
+    // Plain objects in both execution modes; language keys are SDK-chosen.
+    const outputs: GenerationResult["outputs"] = {};
     for (const language of selected) {
       const generated = await execute(
         language,
@@ -138,34 +126,14 @@ export async function createCompiler(
 
   return {
     async generate(input: GenerationRequest): Promise<GenerationResult> {
-      const selected = targets(input.generators);
-      if (selected.length === 0) {
-        throw new TypeError("at least one generator is required");
-      }
-      const request = validateGeneration(input, limits);
-      return await generate(new Uint8Array(request), selected, []);
+      const job = validateGenerate(input, limits, supplied);
+      return await generate(new Uint8Array(job.request), job.generators, []);
     },
     async compile(input: CompileRequest): Promise<CompileResult> {
       // Snapshot and validate the whole job before yielding to guest execution.
-      const [sources, annotations] = validateWorkspace(input, limits);
-      const files = copyFiles(sources, "src/");
-      const includes = copyFiles(annotations, "include/");
-      const entrypoints = [...input.entrypoints];
-      const importPaths = [...(input.importPaths ?? [])];
-      const sourcePrefix = input.sourcePrefix ?? "";
-      const selected = targets(input.generators);
-      if (entrypoints.length === 0) {
-        throw new TypeError("at least one entrypoint is required");
-      }
-      for (const path of entrypoints) {
-        checkPath(path, limits);
-        if (!Object.hasOwn(files, `src/${path}`)) {
-          throw new TypeError(`entrypoint is not in files: ${path}`);
-        }
-      }
-      if (new Set(entrypoints).size !== entrypoints.length) {
-        throw new TypeError("duplicate entrypoints");
-      }
+      const job = validateCompile(input, limits, supplied);
+      const files = copyFiles(job.sources, "src/");
+      const includes = copyFiles(job.annotations, "include/");
       const diagnostics: Diagnostic[] = [];
       const compiled = await execute(
         "compiler",
@@ -174,12 +142,14 @@ export async function createCompiler(
           "capnp",
           "compile",
           "--no-standard-import",
-          ...importPaths.map((path) => path ? `-I/src/${path}` : "-I/src"),
+          ...job.importPaths.map((path) => path ? `-I/src/${path}` : "-I/src"),
           "-I/include",
           "--src-prefix=/src",
-          ...(sourcePrefix ? [`--src-prefix=/src/${sourcePrefix}`] : []),
+          ...(job.sourcePrefix
+            ? [`--src-prefix=/src/${job.sourcePrefix}`]
+            : []),
           "-o-",
-          ...entrypoints.map((path) => `/src/${path}`),
+          ...job.entrypoints.map((path) => `/src/${path}`),
         ],
         new Uint8Array(),
         { ...files, ...includes },
@@ -193,16 +163,11 @@ export async function createCompiler(
           diagnostics,
         );
       }
-      if (compiled.stdout.length > limits.requestBytes) {
-        throw new CompileError(
-          "compiler request exceeds requestBytes limit",
-          "compiler",
-          diagnostics,
-        );
-      }
+      // runCommand bounds compiler stdout at requestBytes while the guest
+      // runs, so an oversized request already failed as a CompileError.
       return {
         request: compiled.stdout,
-        ...await generate(compiled.stdout, selected, diagnostics),
+        ...await generate(compiled.stdout, job.generators, diagnostics),
       };
     },
   };

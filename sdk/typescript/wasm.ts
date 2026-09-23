@@ -1,13 +1,20 @@
+import type { Language, Modules } from "./types.ts";
+
+const languages: readonly Language[] = ["cpp", "rust", "go", "zig"];
+
 /**
  * Bound a WASI command's one defined, unshared wasm32 memory before the engine
  * can instantiate it. Only the memory section changes; instruction/data bytes
  * and all other sections remain intact. The engine validates the final module.
  * https://webassembly.github.io/spec/core/binary/modules.html#memory-section
+ *
+ * This part is synchronous and engine-free so both factories can reject
+ * malformed module bytes on the calling thread with identical messages.
  */
-export async function compileBounded(
-  module: Uint8Array,
+export function boundMemory(
+  module: unknown,
   maximum: number,
-): Promise<WebAssembly.Module> {
+): Uint8Array<ArrayBuffer> {
   if (!(module instanceof Uint8Array)) {
     throw new TypeError(
       "Wasm module bytes are required to enforce memoryPages; opaque WebAssembly.Module objects cannot be inspected",
@@ -91,11 +98,69 @@ export async function compileBounded(
     bytes.subarray(memory.end),
     memory.start + memory.replacement.length,
   );
-  const compiled = await WebAssembly.compile(rewritten);
-  if (
-    WebAssembly.Module.imports(compiled).some((entry) =>
-      entry.kind === "memory"
-    )
-  ) throw new TypeError("imported guest memory is not supported");
+  return rewritten;
+}
+
+/**
+ * Validate the module set's shape and bytes without an engine. Both factories
+ * run this first so bad inputs surface as identical TypeErrors on the calling
+ * thread. Returns the generator languages that were supplied.
+ */
+export function inspectModules(modules: Modules, maximum: number): Language[] {
+  if (typeof modules !== "object" || modules === null) {
+    throw new TypeError(
+      "modules must be an object with compiler bytes and a generators map",
+    );
+  }
+  boundMemory(modules.compiler, maximum);
+  if (typeof modules.generators !== "object" || modules.generators === null) {
+    throw new TypeError(
+      "modules.generators must map language names to module bytes",
+    );
+  }
+  const supplied: Language[] = [];
+  for (const [language, module] of Object.entries(modules.generators)) {
+    if (!languages.includes(language as Language)) {
+      throw new TypeError(`unknown generator: ${language}`);
+    }
+    if (module !== undefined) {
+      boundMemory(module, maximum);
+      supplied.push(language as Language);
+    }
+  }
+  return supplied;
+}
+
+/** Compile bounded bytes; engine rejections become TypeErrors with a cause. */
+export async function compileBounded(
+  module: Uint8Array,
+  maximum: number,
+): Promise<WebAssembly.Module> {
+  const rewritten = boundMemory(module, maximum);
+  let compiled: WebAssembly.Module;
+  try {
+    compiled = await WebAssembly.compile(rewritten);
+  } catch (cause) {
+    throw new TypeError(
+      `the engine rejected the Wasm module: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+      { cause },
+    );
+  }
+  for (const entry of WebAssembly.Module.imports(compiled)) {
+    if (entry.kind === "memory") {
+      throw new TypeError("imported guest memory is not supported");
+    }
+    // Every WASI preview1 function is supplied; anything else would fail at
+    // instantiation with an engine LinkError inside every job.
+    if (
+      entry.module !== "wasi_snapshot_preview1" || entry.kind !== "function"
+    ) {
+      throw new TypeError(
+        `unsupported module import: ${entry.module}.${entry.name} (${entry.kind})`,
+      );
+    }
+  }
   return compiled;
 }

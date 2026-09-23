@@ -4,18 +4,26 @@ import {
   defaultLimits,
   type Files,
   type GenerationRequest,
+  type Language,
   type ResourceLimits,
 } from "./types.ts";
 
 export function resolveLimits(options: CompilerOptions = {}): ResourceLimits {
   const limits: ResourceLimits = { ...defaultLimits };
-  for (const [name, value] of Object.entries(options.limits ?? {})) {
+  const supplied = options.limits ?? {};
+  if (typeof supplied !== "object" || supplied === null) {
+    throw new TypeError("limits must be an object of resource limits");
+  }
+  for (const [name, value] of Object.entries(supplied)) {
+    // Forwarded optional configuration commonly carries undefined entries;
+    // they mean "use the default", exactly like an omitted field.
+    if (value === undefined) continue;
     if (
       !Object.hasOwn(limits, name) || !Number.isSafeInteger(value) || value < 0
     ) {
       throw new TypeError(`invalid resource limit: ${name}`);
     }
-    limits[name] = value;
+    limits[name as keyof ResourceLimits] = value;
   }
   if (limits.memoryPages < 1 || limits.memoryPages > 65536) {
     throw new TypeError("memoryPages must be between 1 and 65536");
@@ -36,11 +44,12 @@ function utf8Size(text: string, maximum: number): number {
   return size;
 }
 
-export function checkPath(path: string, limits: ResourceLimits): void {
-  if (
-    typeof path !== "string" ||
-    utf8Size(path, limits.pathBytes) > limits.pathBytes
-  ) {
+export function checkPath(
+  path: unknown,
+  limits: ResourceLimits,
+): asserts path is string {
+  if (typeof path !== "string") throw new TypeError("expected a string path");
+  if (utf8Size(path, limits.pathBytes) > limits.pathBytes) {
     throw new TypeError("path exceeds pathBytes limit");
   }
   if (
@@ -49,28 +58,94 @@ export function checkPath(path: string, limits: ResourceLimits): void {
   ) throw new TypeError(`expected a canonical relative POSIX path: ${path}`);
 }
 
-/** Validate both mounts before encoding or copying any file contents. */
-export function validateWorkspace(
+function validateGenerators(
+  requested: unknown,
+  supplied: ReadonlySet<Language>,
+): Language[] {
+  if (!Array.isArray(requested)) {
+    throw new TypeError("generators must be an array of language names");
+  }
+  if (requested.length > 4) throw new TypeError("too many generators");
+  if (new Set(requested).size !== requested.length) {
+    throw new TypeError("duplicate generators");
+  }
+  for (const target of requested) {
+    if (typeof target !== "string" || !supplied.has(target as Language)) {
+      throw new TypeError(`generator was not supplied: ${String(target)}`);
+    }
+  }
+  return [...requested] as Language[];
+}
+
+/** A compile request after every synchronous check, before any copy. */
+export interface CompileJob {
+  /** Validated views of `files`; string contents are still unencoded. */
+  sources: Files;
+  annotations: Files;
+  entrypoints: string[];
+  importPaths: string[];
+  sourcePrefix: string;
+  generators: Language[];
+}
+
+/**
+ * Every synchronous check for compile, in one place, so the direct compiler
+ * and the worker client reject identical inputs with identical TypeErrors
+ * before encoding, copying, posting, or starting a guest. `supplied` is the
+ * set of generator languages the factory received modules for.
+ */
+export function validateCompile(
   input: CompileRequest,
   limits: ResourceLimits,
-): [Files, Files] {
-  const importPaths = input.importPaths ?? [];
-  if (
-    !Array.isArray(importPaths) || importPaths.length > limits.workspaceEntries
-  ) {
-    throw new TypeError("importPaths exceed workspaceEntries limit");
+  supplied: ReadonlySet<Language>,
+): CompileJob {
+  if (typeof input !== "object" || input === null) {
+    throw new TypeError("compile request must be an object");
   }
-  for (const path of [input.sourcePrefix ?? "", ...importPaths]) {
+  if (typeof input.files !== "object" || input.files === null) {
+    throw new TypeError("files must be an object mapping paths to contents");
+  }
+  if (
+    input.includeFiles !== undefined &&
+    (typeof input.includeFiles !== "object" || input.includeFiles === null)
+  ) {
+    throw new TypeError(
+      "includeFiles must be an object mapping paths to contents",
+    );
+  }
+  if (!Array.isArray(input.entrypoints)) {
+    throw new TypeError("entrypoints must be an array of paths");
+  }
+  if (input.importPaths !== undefined && !Array.isArray(input.importPaths)) {
+    throw new TypeError("importPaths must be an array of directory paths");
+  }
+  const generators = validateGenerators(input.generators, supplied);
+  const importPaths = [...(input.importPaths ?? [])];
+  if (importPaths.length > limits.workspaceEntries) {
+    throw new TypeError("import root count exceeds workspaceEntries limit");
+  }
+  const sourcePrefix = input.sourcePrefix ?? "";
+  for (const path of [sourcePrefix, ...importPaths]) {
     if (path !== "") checkPath(path, limits);
   }
   if (new Set(importPaths).size !== importPaths.length) {
     throw new TypeError("duplicate importPaths");
   }
-  if (input.entrypoints.length > limits.workspaceEntries) {
-    throw new TypeError("entrypoints exceed workspaceEntries limit");
+  const entrypoints = [...input.entrypoints];
+  if (entrypoints.length === 0) {
+    throw new TypeError("at least one entrypoint is required");
   }
-  if (input.generators.length > 4) throw new TypeError("too many generators");
+  if (entrypoints.length > limits.workspaceEntries) {
+    throw new TypeError("entrypoint count exceeds workspaceEntries limit");
+  }
+  for (const path of entrypoints) checkPath(path, limits);
+  if (new Set(entrypoints).size !== entrypoints.length) {
+    throw new TypeError("duplicate entrypoints");
+  }
+
   const captured: Record<string, string | Uint8Array>[] = [];
+  const sourceNames = new Set<string>();
+  const sourceDirectories = new Set<string>();
   let bytes = 0;
   let entries = 0;
   for (const files of [input.files, input.includeFiles ?? {}]) {
@@ -119,15 +194,59 @@ export function validateWorkspace(
         }
       }
     }
+    if (files === input.files) {
+      for (const name of names) sourceNames.add(name);
+      for (const node of nodes) {
+        if (!names.has(node)) sourceDirectories.add(node);
+      }
+    }
   }
-  return captured as [Files, Files];
+  for (const path of entrypoints) {
+    if (!sourceNames.has(path)) {
+      throw new TypeError(`entrypoint is not in files: ${path}`);
+    }
+  }
+  // Import roots and the source prefix name directories the guest will open;
+  // reject them here rather than as a compiler exit or a kj exception.
+  for (const path of importPaths) {
+    if (path !== "" && !sourceDirectories.has(path)) {
+      throw new TypeError(`importPath is not a directory in files: ${path}`);
+    }
+  }
+  if (sourcePrefix !== "" && !sourceDirectories.has(sourcePrefix)) {
+    throw new TypeError(
+      `sourcePrefix is not a directory in files: ${sourcePrefix}`,
+    );
+  }
+  const [sources, annotations] = captured as [Files, Files];
+  return {
+    sources,
+    annotations,
+    entrypoints,
+    importPaths,
+    sourcePrefix,
+    generators,
+  };
 }
 
-export function validateGeneration(
+export interface GenerateJob {
+  /** A validated view of the caller's bytes; callers copy before execution. */
+  request: Uint8Array;
+  generators: Language[];
+}
+
+export function validateGenerate(
   input: GenerationRequest,
   limits: ResourceLimits,
-): Uint8Array {
-  if (input.generators.length > 4) throw new TypeError("too many generators");
+  supplied: ReadonlySet<Language>,
+): GenerateJob {
+  if (typeof input !== "object" || input === null) {
+    throw new TypeError("generation request must be an object");
+  }
+  const generators = validateGenerators(input.generators, supplied);
+  if (generators.length === 0) {
+    throw new TypeError("at least one generator is required");
+  }
   if (!(input.request instanceof Uint8Array) || input.request.length === 0) {
     throw new TypeError(
       "request must contain unpacked CodeGeneratorRequest bytes",
@@ -141,7 +260,7 @@ export function validateGeneration(
   if (request.length > limits.requestBytes) {
     throw new TypeError("request exceeds requestBytes limit");
   }
-  return request;
+  return { request, generators };
 }
 
 export function copyFiles(
