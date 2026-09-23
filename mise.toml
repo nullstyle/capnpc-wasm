@@ -85,6 +85,20 @@ run = "git submodule status"
 description = "Check tool availability, Rust WASI target, SDK layout, and reference pins"
 run = "bash scripts/doctor.sh"
 
+# Workspace hygiene. build/scratch/<name>/ is the place for probes and logs;
+# clean removes it with the rest of build/.
+[tasks."clean:test"]
+description = "Remove test work directories (build/test) and the Zig test compile scratch (build/zig/cache/tmp)"
+run = "rm -rf build/test build/zig/cache/tmp"
+
+[tasks.clean]
+description = "Remove build trees and distributable output (build/ including build/scratch, and dist/); keeps .cache/"
+run = "rm -rf build dist"
+
+[tasks."clean:all"]
+description = "Remove build/, dist/, and every project cache under .cache/ (Deno, Go, Zig, downloaded browsers)"
+run = "rm -rf build dist .cache"
+
 [tasks.lint]
 description = "Static checks without a build: shell, formatting, lint, type checks, vet, clippy"
 run = [
