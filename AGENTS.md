@@ -2,11 +2,9 @@
 
 capnpc-wasm ports the Cap'n Proto compiler and the C++, Rust, Go, Zig, and
 schema-inspection generators to WASI Preview 1 command modules, and ships
-TypeScript and Go SDKs that run them in browsers, Deno, and wazero. Status:
-three compiler prereleases are public on GitHub (tools rc.2, compiler host rc.2
-and rc.3); the full SDK archive, registry packages, and a stable SDK interface
-are unreleased. [docs/release-readiness.md](docs/release-readiness.md) is the
-single status record; update it instead of restating status here.
+TypeScript and Go SDKs that run them in browsers, Deno, and wazero.
+[docs/release-readiness.md](docs/release-readiness.md) is the single record of
+release status; update it instead of restating status here.
 
 ## Read first
 
@@ -55,11 +53,12 @@ single status record; update it instead of restating status here.
 
 ## Verification by area
 
-`mise run check` runs `lint` (static checks with no build), `doctor`, and
-`test`, which fans out to one `test:<suite>` task per suite, each building only
-what it reads. The CI clean-checkout job (setup, `check`, `test:package`, and
-the Deno 2.6.8 lane) took 9 minutes on ubuntu-24.04 and 10 minutes on macos-15
-in
+`mise run check` runs `lint` (static checks with no build), `doctor`, and `test`
+(the parity, Zig, SDK, and feature-corpus suites, one `test:<suite>` task each,
+building only what it reads). `test:browser`, `test:studio`, `test:package`,
+`test:launcher`, and the Deno 2.6.8 worker lane are separate and run only when
+named. The CI clean-checkout job (setup, `check`, `test:package`, and the Deno
+2.6.8 lane) took 9 minutes on ubuntu-24.04 and 10 minutes on macos-15 in
 [run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070);
 a local cold build is comparable. For quick iteration, run one suite task, or
 `mise run --skip-deps test:<suite>` to rerun it without rebuilding.
@@ -68,7 +67,9 @@ a local cold build is comparable. For quick iteration, run one suite task, or
 - Rust, Go, or Zig generators: `mise run test`; generated-code consumers
   exercise the pinned runtimes as well as comparing source output.
 - TypeScript runtime or bundle: `mise run test`, then `mise run test:browser`
-  (after `mise run browser:install` once).
+  (after `mise run browser:install` once), and the Deno 2.6.8 worker lane in
+  [CONTRIBUTING.md](CONTRIBUTING.md#reproducing-the-ci-lanes)
+  (`mise run test:deno-worker` once available).
 - Go SDK: `mise exec -- go -C sdk/go test -count=1 -mod=readonly ./...` and
   `mise exec -- go -C sdk/go vet -stdmethods=false ./...`.
 - Schema Studio (`examples/browser/`, `scripts/build-studio.ts`,
@@ -113,11 +114,6 @@ a local cold build is comparable. For quick iteration, run one suite task, or
 - Worker execution requires Deno 2.6.8 (`supportedDenoWorkerVersion`).
   `sdk/typescript/sdk_test.ts` ignores worker tests on every other version, so
   `mise run test` on the pinned Deno does not cover worker cancellation. Run the
-  CI lane locally after `mise run build`:
-
-```sh
-mise --cd "$(mktemp -d)" install deno@2.6.8
-mise exec deno@2.6.8 -- deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts
-mise run release:compiler-host
-mise exec -- deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts "$(mise where deno@2.6.8)/bin/deno"
-```
+  CI lane locally with the commands in
+  [CONTRIBUTING.md](CONTRIBUTING.md#reproducing-the-ci-lanes)
+  (`mise run test:deno-worker` once available).

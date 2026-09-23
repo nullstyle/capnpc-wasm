@@ -47,5 +47,7 @@ Area guides live beside their code:
 | [Release confidence narrative](history/release-confidence-2026-09.md)     | 2026-09-09 | The hosted CI, Windows, package, and nightly evidence trail through commit `b8d8e3f`                                   |
 
 Every Markdown file outside `ref/` is link-checked by `mise run check:links`
-(relative links and heading anchors), and `mise run lint` also runs
-`deno fmt --check` over the documented paths.
+(relative links and heading anchors). `mise run lint` also runs
+`deno fmt --check` over the paths in `mise.toml`'s `fmt_paths`, which cover
+`docs/` and the area READMEs but not yet the root `SECURITY.md`,
+`CONTRIBUTING.md`, and `CHANGELOG.md`; format those by hand.

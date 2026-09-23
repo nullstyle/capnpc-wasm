@@ -58,18 +58,22 @@ tag exists.
 
 ## Repository history before the first published asset
 
-Commit subjects between 2026-09-08 and 2026-09-09, in order:
+Commit subjects between 2026-09-08 and 2026-09-09, in first-parent order, oldest
+first:
 
 - `ab91569` pinned toolchains and upstream references; `ffd8aa5` WASI command
   tools; `e1a2c16` Rust and Go generators with runtime parity tests; `a180f06`
   in-memory host SDKs and offline browser verification; `f727fca` saved-request
   generation and all browser engines; `dc8a490` capnp-zig generation across
   hosts and SDKs; `1e095b4` rename to capnpc-wasm.
-- `d80fd06` Zig helper-name and double-far list encoding fixes; `a2a18ec` and
-  `81525d2` Zig reflection, generated API conformance, and hardened RPC synced
-  from native sources; `ac9b91e` SDK resource bounds and installable package
-  validation; `92d55f3` double-far copy fixes; `41037ae` browser engine upgrade
-  and cancellation stress; `dfee5de`, `894890b`, `f7c23cc`, `94ba6b2` native
-  transport and Windows test-runner syncs; `0b4bbf6` Apache-2.0 licensing;
-  `a2326f6` Schema Studio; `bee74ef`, `baaac12`, `b8d8e3f` CI, package, and
-  nightly evidence records.
+- `d80fd06` Zig helper-name and double-far list encoding fixes; `a2a18ec` Zig
+  reflection and generated API conformance; `81525d2` hardened Zig RPC and
+  reflection synced from native sources; `ac9b91e` SDK resource bounds and
+  installable package validation; `92d55f3` double-far copy fixes; `41037ae`
+  browser engine upgrade and cancellation stress; `dfee5de` native transport
+  fixes and browser compatibility notes; `0b4bbf6` Apache-2.0 licensing;
+  `894890b` Windows transport repair and release-confidence evidence; `a2326f6`
+  Schema Studio; `bee74ef` Studio CI and nightly evidence; `f7c23cc` Windows
+  test-runner workaround; `94ba6b2` Windows workflow label correction; `baaac12`
+  hosted acceptance and nightly ledger initialization; `b8d8e3f` first scheduled
+  nightly confidence cycle.

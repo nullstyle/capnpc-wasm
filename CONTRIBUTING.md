@@ -118,10 +118,10 @@ Per reference:
   (`mise exec -- cargo update --manifest-path <Cargo.toml>`), and rebuild with
   `mise run build:rust`, which uses `--locked` and fails on a stale lockfile.
 - `go-capnp`: `generators/go/go.mod` and `tests/consumers/go/go.mod` replace the
-  module with the checkout, so set their `require` line to the new
-  pseudo-version (`v3.1.0-alpha.2.0.<UTC commit time>-<12-character commit>`, or
-  whatever the new base tag implies) and run `mise exec -- go -C <dir> mod tidy`
-  in both directories; builds use `-mod=readonly`.
+  module with the checkout, so their `require` lines name only the upstream base
+  tag (`v3.1.0-alpha.2` today). Change that version only when the new commit
+  follows a newer upstream tag, then run `mise exec -- go -C <dir> mod tidy` in
+  both directories so `go.sum` matches; builds use `-mod=readonly`.
 - `capnp-zig`, in this order: (a) if `ref/capnp-zig/mise.toml` changed its `zig`
   line, bump the tool pin as above; (b) run `mise run build:zig`, which fails in
   `check-zig-sync.ts` because the exported tree no longer matches
