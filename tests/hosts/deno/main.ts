@@ -13,6 +13,12 @@ import {
   ERRNO_NOTDIR,
 } from "../../../ref/browser_wasi_shim/src/wasi_defs.ts";
 
+/** A command-line error; exits 2 instead of the host-failure status. */
+class UsageError extends Error {}
+
+/** Exit status for traps, uncaught exceptions, and host failures. */
+const HOST_FAILURE_EXIT = 70;
+
 function checkName(name: string): void {
   if (
     !name || name === "." || name === ".." || /[\\/\0]/.test(name)
@@ -102,18 +108,26 @@ async function main(): Promise<number> {
   while (args[0]?.startsWith("--")) {
     const option = args.shift();
     if (option !== "--dir" || rootPath !== undefined) {
-      throw new Error("only one --dir host::/ mount is supported");
+      throw new UsageError("only one --dir host::/ mount is supported");
     }
     const mount = args.shift();
     if (!mount?.endsWith("::/") || mount.length <= 3) {
-      throw new Error("directory mount must be host::/");
+      throw new UsageError("directory mount must be host::/");
     }
     rootPath = mount.slice(0, -3);
   }
   const modulePath = args[0];
   if (!modulePath) {
-    throw new Error("usage: main.ts [--dir host::/] module.wasm [args...]");
+    throw new UsageError(
+      "usage: main.ts [--dir host::/] module.wasm [args...]",
+    );
   }
+  // The guest sees the tool name (capnp, capnpc-c++, ...), as the SDKs and
+  // the launcher pass it, so diagnostics do not leak the host module path.
+  args[0] = modulePath.slice(modulePath.lastIndexOf("/") + 1).replace(
+    /\.wasm$/,
+    "",
+  );
 
   const root = rootPath ? await loadDirectory(rootPath) : null;
   const input = new File(await new Response(Deno.stdin.readable).arrayBuffer());
@@ -181,9 +195,12 @@ async function main(): Promise<number> {
 try {
   Deno.exit(await main());
 } catch (error) {
+  // A guest exit reaches main() as a status; anything thrown here is a trap,
+  // an uncaught guest exception, a host failure, or a usage error. None of
+  // them may look like the guest's own exit 1.
   console.error(
     "deno-wasi-run:",
     error instanceof Error ? error.message : error,
   );
-  Deno.exit(1);
+  Deno.exit(error instanceof UsageError ? 2 : HOST_FAILURE_EXIT);
 }
