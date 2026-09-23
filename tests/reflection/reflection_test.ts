@@ -1,116 +1,41 @@
-const root = Deno.cwd();
-const native = `${root}/build/native/bin`;
-const decoder = new TextDecoder();
+import { assert, assertBytesEqual } from "../lib/assert.ts";
+import { copyTree } from "../lib/fs.ts";
+import { nativeCompile, stageStandardIncludes } from "../lib/oracle.ts";
+import { root, wasmBin, zigCacheDir } from "../lib/paths.ts";
+import { decodeText, mustSucceed, run } from "../lib/process.ts";
+import { testSuite } from "../lib/workdir.ts";
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
+const suite = testSuite("reflection-");
+const runtime = `${root}/build/src/capnp-zig/src/lib_core.zig`;
 
-async function command(args: string[], cwd: string, stdin?: Uint8Array) {
-  const child = new Deno.Command(args[0], {
-    args: args.slice(1),
-    cwd,
-    stdin: stdin ? "piped" : "null",
-    stdout: "piped",
-    stderr: "piped",
-    signal: AbortSignal.timeout(60_000),
-  }).spawn();
-  const output = child.output();
-  if (stdin) {
-    const writer = child.stdin.getWriter();
-    try {
-      await writer.write(stdin);
-      await writer.close();
-    } catch (error) {
-      if (!(error instanceof Deno.errors.BrokenPipe)) throw error;
-    } finally {
-      writer.releaseLock();
-    }
-  }
-  const result = await output;
-  assert(
-    result.success,
-    `${args[0]} exited ${result.code}: ${decoder.decode(result.stderr)}`,
-  );
-  return result.stdout;
-}
-
-async function copyTree(source: string, destination: string) {
-  await Deno.mkdir(destination, { recursive: true });
-  for await (const entry of Deno.readDir(source)) {
-    if (entry.isDirectory) {
-      await copyTree(`${source}/${entry.name}`, `${destination}/${entry.name}`);
-    } else {
-      assert(entry.isFile, `unexpected fixture ${entry.name}`);
-      await Deno.copyFile(
-        `${source}/${entry.name}`,
-        `${destination}/${entry.name}`,
-      );
-    }
-  }
-}
-
-function equalBytes(actual: Uint8Array, expected: Uint8Array, name: string) {
-  assert(
-    actual.length === expected.length &&
-      actual.every((byte, index) => byte === expected[index]),
-    `${name}: bytes differ`,
-  );
-}
-
-Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic interoperability", async (t) => {
-  await Deno.mkdir(`${root}/build/test`, { recursive: true });
-  const work = await Deno.makeTempDir({
-    dir: `${root}/build/test`,
-    prefix: "reflection-",
-  });
+suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic interoperability", async (t) => {
+  const work = await suite.workDir();
   const source = `${work}/src`;
   await copyTree(`${root}/tests/fixtures/features/workspace`, source);
   await Deno.copyFile(
     `${root}/tests/reflection/reflection.capnp`,
     `${source}/reflection.capnp`,
   );
-  await Deno.mkdir(`${work}/include/capnp`, { recursive: true });
-  await Deno.copyFile(
-    `${root}/ref/capnproto/c++/src/capnp/c++.capnp`,
-    `${work}/include/capnp/c++.capnp`,
-  );
-  await Deno.copyFile(
-    `${root}/ref/go-capnp/std/go.capnp`,
-    `${work}/include/go.capnp`,
-  );
-  const request = await command([
-    `${native}/capnp`,
-    "compile",
-    "--no-standard-import",
-    `-I${work}/include`,
-    `--src-prefix=${source}`,
-    "-o-",
+  await stageStandardIncludes(`${work}/include`);
+  const request = await nativeCompile([
     `${source}/values.capnp`,
     `${source}/nested/brands.capnp`,
     `${source}/shared/common.capnp`,
     `${source}/reflection.capnp`,
-  ], work);
+  ], { include: [`${work}/include`], srcPrefix: source, cwd: work });
   await Deno.writeFile(`${work}/request.bin`, request);
   const output = `${work}/generated`;
   await Deno.mkdir(output);
-  await command(
-    [
-      "wasmtime",
-      "run",
-      "--dir",
-      `${output}::/`,
-      `${root}/build/wasm/bin/capnpc-zig.wasm`,
-    ],
-    work,
-    request,
+  await mustSucceed(
+    ["wasmtime", "run", "--dir", `${output}::/`, `${wasmBin}/capnpc-zig.wasm`],
+    { cwd: work, stdin: request, label: "Wasm Zig generator" },
   );
   await Deno.writeTextFile(
     `${output}/root.zig`,
     'pub const values = @import("values.zig");\npub const brands = @import("nested/brands.zig");\npub const scalars = @import("reflection.zig");\n',
   );
   const oracle = `${work}/oracle`;
-  await command([
+  await mustSucceed([
     "clang++",
     "-std=c++23",
     `-I${root}/ref/capnproto/c++/src`,
@@ -120,7 +45,7 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
     "-pthread",
     "-o",
     oracle,
-  ], root);
+  ], { label: "C++ reflection oracle build" });
   for (const target of ["native", "wasi"]) {
     await t.step(
       `${target}: registry ownership and schema validation`,
@@ -128,29 +53,32 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
         const executable = `${work}/registry-tests-${target}${
           target === "wasi" ? ".wasm" : ""
         }`;
-        await command([
+        await mustSucceed([
           "zig",
           "test",
           "--test-filter",
           "registry",
           "--cache-dir",
-          `${root}/.cache/zig-local`,
+          zigCacheDir,
           ...(target === "wasi"
             ? ["-target", "wasm32-wasi", "--test-no-exec"]
             : []),
           "--dep",
           "capnpc-zig",
           `-Mroot=${root}/tests/reflection/registry_test.zig`,
-          `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
+          `-Mcapnpc-zig=${runtime}`,
           `-femit-bin=${executable}`,
-        ], root);
+        ], { label: `${target} registry tests build` });
         if (target === "wasi") {
-          await command(["wasmtime", "run", executable], work);
+          await mustSucceed(["wasmtime", "run", executable], {
+            cwd: work,
+            label: "wasi registry tests",
+          });
         }
       },
     );
     for (
-      const suite of [
+      const name of [
         "generated_builder_test",
         "builder_evolution_test",
         "double_far_validation_test",
@@ -159,32 +87,35 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
         "fuzz_test",
       ]
     ) {
-      await t.step(`${target}: ${suite}`, async () => {
-        const executable = `${work}/${suite}-${target}${
+      await t.step(`${target}: ${name}`, async () => {
+        const executable = `${work}/${name}-${target}${
           target === "wasi" ? ".wasm" : ""
         }`;
-        const generatedDependency = suite === "generated_builder_test" ||
-          suite === "fuzz_test";
-        await command([
+        const generatedDependency = name === "generated_builder_test" ||
+          name === "fuzz_test";
+        await mustSucceed([
           "zig",
           "test",
           "--cache-dir",
-          `${root}/.cache/zig-local`,
+          zigCacheDir,
           ...(target === "wasi"
             ? ["-target", "wasm32-wasi", "--test-no-exec"]
             : []),
           "--dep",
           "capnpc-zig",
           ...(generatedDependency ? ["--dep", "generated"] : []),
-          `-Mroot=${root}/tests/reflection/${suite}.zig`,
+          `-Mroot=${root}/tests/reflection/${name}.zig`,
           ...(generatedDependency
             ? ["--dep", "capnpc-zig", `-Mgenerated=${output}/root.zig`]
             : []),
-          `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
+          `-Mcapnpc-zig=${runtime}`,
           `-femit-bin=${executable}`,
-        ], root);
+        ], { label: `${target} ${name} build` });
         if (target === "wasi") {
-          await command(["wasmtime", "run", executable], work);
+          await mustSucceed(["wasmtime", "run", executable], {
+            cwd: work,
+            label: `wasi ${name}`,
+          });
         }
       });
     }
@@ -196,11 +127,11 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
         const executable = `${directory}/consumer${
           target === "wasi" ? ".wasm" : ""
         }`;
-        await command([
+        await mustSucceed([
           "zig",
           "build-exe",
           "--cache-dir",
-          `${root}/.cache/zig-local`,
+          zigCacheDir,
           ...(target === "wasi" ? ["-target", "wasm32-wasi"] : []),
           "--dep",
           "capnpc-zig",
@@ -210,10 +141,10 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
           "--dep",
           "capnpc-zig",
           `-Mgenerated=${output}/root.zig`,
-          `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
+          `-Mcapnpc-zig=${runtime}`,
           `-femit-bin=${executable}`,
-        ], root);
-        await command(
+        ], { label: `${target} consumer build` });
+        await mustSucceed(
           target === "native" ? [executable, "."] : [
             "wasmtime",
             "run",
@@ -222,32 +153,27 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
             executable,
             ".",
           ],
-          directory,
+          { cwd: directory, label: `${target} consumer` },
         );
-        await command([
-          oracle,
+        const oracleArgs = [
           `${work}/request.bin`,
           `${directory}/schema.bin`,
           `${directory}/values.bin`,
           `${directory}/scalars.bin`,
           directory,
-        ], root);
-        const ablation = await new Deno.Command(oracle, {
-          args: [
-            `${work}/request.bin`,
-            `${directory}/schema.bin`,
-            `${directory}/values.bin`,
-            `${directory}/scalars.bin`,
-            directory,
-            "--inject-mismatch",
-          ],
-          stdout: "piped",
-          stderr: "piped",
-        }).output();
+        ];
+        await mustSucceed([oracle, ...oracleArgs], {
+          label: `${target} C++ oracle`,
+        });
+        const ablation = await run([
+          oracle,
+          ...oracleArgs,
+          "--inject-mismatch",
+        ]);
         assert(
           ablation.code === 2,
           `C++ mutation mismatch gate did not reject: ${
-            decoder.decode(ablation.stderr)
+            decodeText(ablation.stderr)
           }`,
         );
       },
@@ -285,7 +211,7 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
           ...evolutionCases.map((name) => `evolution-${name}.bin`),
         ]
       ) {
-        equalBytes(
+        assertBytesEqual(
           await Deno.readFile(`${work}/native/${filename}`),
           await Deno.readFile(`${work}/wasi/${filename}`),
           filename,
@@ -293,7 +219,7 @@ Deno.test("Zig reflection: binary schema fidelity and native/WASI dynamic intero
       }
       for await (const entry of Deno.readDir(`${work}/native`)) {
         if (entry.isFile && entry.name.startsWith("mutation-")) {
-          equalBytes(
+          assertBytesEqual(
             await Deno.readFile(`${work}/native/${entry.name}`),
             await Deno.readFile(`${work}/wasi/${entry.name}`),
             entry.name,
