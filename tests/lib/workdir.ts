@@ -1,10 +1,17 @@
 // Work directory retention for the Deno test suites. A suite's directories
 // under build/test are deleted when the process exits after every test passed,
 // kept and printed when any test failed, and always kept when
-// CAPNP_KEEP_TEST_DIRS=1 is set (which needs --allow-env for that name).
+// CAPNP_KEEP_TEST_DIRS=1 is set (which needs --allow-env for that name; the
+// suite tasks in mise.toml grant it).
 
 import { buildTest } from "./paths.ts";
-import { envValue } from "./process.ts";
+import { envGranted, envValue } from "./process.ts";
+
+if (!envGranted("CAPNP_KEEP_TEST_DIRS")) {
+  console.warn(
+    "tests/lib/workdir: no --allow-env for CAPNP_KEEP_TEST_DIRS; the retention override is ignored",
+  );
+}
 
 /** True when CAPNP_KEEP_TEST_DIRS=1 asks to keep every work directory. */
 export const keepTestDirs = envValue("CAPNP_KEEP_TEST_DIRS") === "1";
