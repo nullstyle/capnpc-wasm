@@ -182,11 +182,9 @@ run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/relea
 
 [tasks."test:package"]
 description = "Verify reproducible candidate packaging and clean external Deno/Go consumers"
-depends = ["release:prepare"]
-run = [
-  "deno run --allow-read --allow-write --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts",
-  "deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts",
-]
+# The package test spawns the native oracle; the compiler-host gate runs as its own task.
+depends = ["build:native", "release:prepare", "test:compiler-host-package"]
+run = "deno run --allow-read --allow-write --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts"
 
 [tasks."test:launcher"]
 description = "Check packaged Wasmtime launcher binary streams, filesystem roots, and failures"
@@ -205,5 +203,6 @@ run = "deno run --allow-read --allow-write=dist --allow-run=git scripts/release.
 
 [tasks."test:compiler-host-package"]
 description = "Verify compiler-host packaging and an offline external Deno worker consumer"
-depends = ["release:compiler-host", "build:native"]
+# The script prepares the compiler-host archive itself (twice, for reproducibility).
+depends = ["build:native", "build:sdk"]
 run = "deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts"
