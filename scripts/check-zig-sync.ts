@@ -1,17 +1,26 @@
-// Verify the prepared runtime and mirrored fixtures without a native checkout.
-// Maintainers record a new manifest explicitly after committing native sources.
+// Verify the prepared Zig sources and the mirrored conformance fixtures
+// against the capnp-zig revision this repository records: the ref/capnp-zig
+// gitlink at HEAD. generators/zig/sync.json only maps native fixture paths to
+// their mirrors; every expectation comes from the reference commit itself.
+//
+//   deno run --allow-read --allow-run=git scripts/check-zig-sync.ts
+//   deno run --allow-read --allow-write=tests --allow-run=git \
+//     scripts/check-zig-sync.ts --update-fixtures
 const manifestPath = "generators/zig/sync.json";
+const reference = "ref/capnp-zig";
+const preparedSources = "build/src/capnp-zig/src";
+const historicalSources = "build/src/capnp-zig-historical/src";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-type Fixture = { native: string; path: string; sha256: string };
-type Manifest = {
-  version: 1;
-  nativeCommit: string;
-  referenceCommit: string;
-  sourceDigest: string;
-  sources: Record<string, string>;
-  fixtures: Fixture[];
-};
+type Fixture = { native: string; path: string };
+type Manifest = { version: 2; fixtures: Fixture[] };
+type TreeEntry = { mode: string; kind: string; object: string };
+
+const updateFixtures = Deno.args.length === 1 &&
+  Deno.args[0] === "--update-fixtures";
+if (!updateFixtures && Deno.args.length !== 0) {
+  throw new Error("Usage: check-zig-sync.ts [--update-fixtures]");
+}
 
 async function sha256(bytes: Uint8Array): Promise<string> {
   return Array.from(
@@ -35,14 +44,15 @@ async function inventory(
         await inventory(`${directory}/${entry.name}`, `${path}/`),
       );
     } else if (entry.isFile) {
+      if (prefix === "" && [".source-key", ".source-digest"].includes(path)) {
+        continue;
+      }
       found[path] = await sha256(
         await Deno.readFile(`${directory}/${entry.name}`),
       );
     } else throw new Error(`Unexpected source entry: ${path}`);
   }
-  return Object.fromEntries(
-    Object.entries(found).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
-  );
+  return found;
 }
 
 async function gitBytes(cwd: string, ...args: string[]) {
@@ -60,128 +70,188 @@ async function git(cwd: string, ...args: string[]) {
   return decoder.decode(await gitBytes(cwd, ...args)).trim();
 }
 
-async function committedInventory(
+// Every blob of a committed tree, keyed by path, from one ls-tree call.
+async function committedTree(
   cwd: string,
-  revision = "HEAD",
-): Promise<Record<string, string>> {
+  revision: string,
+): Promise<Record<string, TreeEntry>> {
   const entries = decoder.decode(
-    await gitBytes(cwd, "ls-tree", "-r", "-z", `${revision}:src`),
+    await gitBytes(cwd, "ls-tree", "-r", "-z", revision),
   ).split("\0").filter(Boolean);
-  const found: Record<string, string> = {};
+  const found: Record<string, TreeEntry> = {};
   for (const entry of entries) {
     const separator = entry.indexOf("\t");
     const [mode, kind, object] = entry.slice(0, separator).split(" ");
-    const path = entry.slice(separator + 1);
-    if (kind !== "blob" || !["100644", "100755"].includes(mode)) {
-      throw new Error(`Unexpected committed source entry: ${path}`);
-    }
-    found[path] = await sha256(await gitBytes(cwd, "cat-file", "blob", object));
+    found[entry.slice(separator + 1)] = { mode, kind, object };
   }
-  return Object.fromEntries(
-    Object.entries(found).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
-  );
+  return found;
 }
 
-async function digest(sources: Record<string, string>) {
-  return await sha256(
-    encoder.encode(
-      Object.entries(sources).map(([path, hash]) => `${hash}  ${path}\n`).join(
-        "",
-      ),
-    ),
+// Blob contents in one `git cat-file --batch` process, keyed by object id.
+async function blobs(
+  cwd: string,
+  objects: string[],
+): Promise<Map<string, Uint8Array>> {
+  const unique = [...new Set(objects)];
+  const child = new Deno.Command("git", {
+    args: ["cat-file", "--batch"],
+    cwd,
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  const writer = child.stdin.getWriter();
+  await writer.write(encoder.encode(unique.map((id) => `${id}\n`).join("")));
+  await writer.close();
+  const result = await child.output();
+  if (!result.success) throw new Error(decoder.decode(result.stderr));
+  const data = result.stdout;
+  const found = new Map<string, Uint8Array>();
+  let offset = 0;
+  for (const object of unique) {
+    const newline = data.indexOf(10, offset);
+    if (newline < 0) throw new Error(`Truncated cat-file output at ${object}`);
+    const [id, kind, sizeText] = decoder.decode(data.subarray(offset, newline))
+      .split(" ");
+    if (id !== object || kind !== "blob") {
+      throw new Error(`Reference object ${object} is not a blob (${kind})`);
+    }
+    const start = newline + 1;
+    const size = Number(sizeText);
+    found.set(object, data.subarray(start, start + size));
+    offset = start + size + 1;
+  }
+  return found;
+}
+
+function sourceEntries(
+  tree: Record<string, TreeEntry>,
+  prefix: string,
+): Record<string, TreeEntry> {
+  const found: Record<string, TreeEntry> = {};
+  for (const [path, entry] of Object.entries(tree)) {
+    if (!path.startsWith(prefix)) continue;
+    if (entry.kind !== "blob" || !["100644", "100755"].includes(entry.mode)) {
+      throw new Error(`Unexpected committed source entry: ${path}`);
+    }
+    found[path.slice(prefix.length)] = entry;
+  }
+  return found;
+}
+
+// Compare a prepared export with the committed sources it claims to mirror.
+async function compareSources(
+  label: string,
+  directory: string,
+  cwd: string,
+  revision: string,
+) {
+  const expected = sourceEntries(await committedTree(cwd, revision), "src/");
+  const contents = await blobs(
+    cwd,
+    Object.values(expected).map((entry) => entry.object),
   );
+  const actual = await inventory(directory);
+  const problems: string[] = [];
+  for (const path of Object.keys(expected)) {
+    const hash = await sha256(contents.get(expected[path].object)!);
+    if (actual[path] === undefined) problems.push(`missing ${path}`);
+    else if (actual[path] !== hash) problems.push(`changed ${path}`);
+  }
+  for (const path of Object.keys(actual)) {
+    if (expected[path] === undefined) problems.push(`extra ${path}`);
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `${label} at ${directory} differs from ${cwd} ${revision}:\n  ${
+        problems.sort().join("\n  ")
+      }\nRun mise run build:zig to export the sources again.`,
+    );
+  }
+  return Object.keys(expected).length;
 }
 
 const manifest: Manifest = JSON.parse(await Deno.readTextFile(manifestPath));
-const recording = Deno.args[0] === "--record-native" && Deno.args.length === 2;
-if (recording) {
-  const native = Deno.args[1];
-  const paths = ["src", ...manifest.fixtures.map((fixture) => fixture.native)];
-  if (await git(native, "status", "--porcelain", "--", ...paths)) {
-    throw new Error(
-      "Commit native sources and mirrored fixtures before recording synchronization",
-    );
-  }
-  manifest.nativeCommit = await git(native, "rev-parse", "HEAD");
-  manifest.referenceCommit = await git("ref/capnp-zig", "rev-parse", "HEAD");
-  manifest.sources = await committedInventory(native);
-  manifest.sourceDigest = await digest(manifest.sources);
-  if (
-    await digest(await inventory(`${native}/src`)) !== manifest.sourceDigest
-  ) {
-    throw new Error("Native source files differ from the committed tree");
-  }
-  for (const fixture of manifest.fixtures) {
-    const sourceHash = await sha256(
-      await gitBytes(native, "show", `HEAD:${fixture.native}`),
-    );
-    if (
-      await sha256(await Deno.readFile(`${native}/${fixture.native}`)) !==
-        sourceHash
-    ) throw new Error(`Native fixture differs from commit: ${fixture.native}`);
-    const mirroredHash = await sha256(await Deno.readFile(fixture.path));
-    if (sourceHash !== mirroredHash) {
-      throw new Error(`Fixture differs from native: ${fixture.path}`);
-    }
-    fixture.sha256 = sourceHash;
-  }
-} else if (Deno.args.length !== 0) {
-  throw new Error("Usage: check-zig-sync.ts [--record-native CHECKOUT]");
+if (
+  manifest.version !== 2 || !Array.isArray(manifest.fixtures) ||
+  manifest.fixtures.some((fixture) =>
+    typeof fixture.native !== "string" || typeof fixture.path !== "string" ||
+    fixture.native.startsWith("/") || fixture.native.includes("..") ||
+    !fixture.path.startsWith("tests/")
+  )
+) {
+  throw new Error(`Invalid fixture manifest ${manifestPath}`);
 }
 
-if (manifest.version !== 1 || !/^[a-f0-9]{40}$/.test(manifest.nativeCommit)) {
-  throw new Error("Invalid native source manifest");
-}
-if (manifest.nativeCommit !== manifest.referenceCommit) {
+const gitlink = await git(".", "rev-parse", `HEAD:${reference}`);
+const sourceCount = await compareSources(
+  "Prepared Zig source",
+  preparedSources,
+  reference,
+  gitlink,
+);
+
+// Mirrored fixtures must be byte-identical to the native files at the gitlink.
+const tree = await committedTree(reference, gitlink);
+const missingNative = manifest.fixtures.filter((fixture) =>
+  tree[fixture.native]?.kind !== "blob"
+);
+if (missingNative.length > 0) {
   throw new Error(
-    "Pristine Zig reference must match the native source revision",
+    `Fixture sources missing from ${reference} ${gitlink}: ${
+      missingNative.map((fixture) => fixture.native).join(", ")
+    }`,
   );
 }
-if (
-  await git("ref/capnp-zig", "rev-parse", "HEAD") !== manifest.referenceCommit
-) throw new Error("Reference revision differs from sync metadata");
-const actual = await inventory("build/src/capnp-zig/src");
-const differences = new Set([
-  ...Object.keys(actual),
-  ...Object.keys(manifest.sources),
-]);
-for (const path of differences) {
-  if (actual[path] !== manifest.sources[path]) {
-    throw new Error(
-      `Prepared Zig source differs from native manifest: ${path}`,
+const nativeContents = await blobs(
+  reference,
+  manifest.fixtures.map((fixture) => tree[fixture.native].object),
+);
+const drifted: string[] = [];
+let updated = 0;
+for (const fixture of manifest.fixtures) {
+  const native = nativeContents.get(tree[fixture.native].object)!;
+  let mirrored: Uint8Array | undefined;
+  try {
+    mirrored = await Deno.readFile(fixture.path);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  const same = mirrored !== undefined &&
+    await sha256(mirrored) === await sha256(native);
+  if (same) continue;
+  if (updateFixtures) {
+    await Deno.writeFile(fixture.path, native);
+    updated += 1;
+  } else {
+    drifted.push(
+      `${fixture.path} (${mirrored === undefined ? "missing" : "differs"})`,
     );
   }
 }
-if (await digest(actual) !== manifest.sourceDigest) {
-  throw new Error("Zig source digest mismatch");
+if (drifted.length > 0) {
+  throw new Error(
+    `Mirrored fixtures differ from ${reference} ${gitlink}:\n  ${
+      drifted.join("\n  ")
+    }\nRun scripts/check-zig-sync.ts --update-fixtures to copy them from the reference.`,
+  );
 }
-for (const fixture of manifest.fixtures) {
-  if (await sha256(await Deno.readFile(fixture.path)) !== fixture.sha256) {
-    throw new Error(`Mirrored fixture changed: ${fixture.path}`);
-  }
-}
+
 const historical =
   (await Deno.readTextFile("generators/zig/historical-reference"))
     .trim();
 if (!/^[a-f0-9]{40}$/.test(historical)) {
   throw new Error("Invalid historical Zig revision");
 }
-if (
-  await digest(await inventory("build/src/capnp-zig-historical/src")) !==
-    await digest(await committedInventory("ref/capnp-zig", historical))
-) {
-  throw new Error(
-    "Historical Zig audit sources differ from their pinned commit",
-  );
-}
-if (recording) {
-  await Deno.writeTextFile(
-    manifestPath,
-    JSON.stringify(manifest, null, 2) + "\n",
-  );
-}
+await compareSources(
+  "Historical Zig audit source",
+  historicalSources,
+  reference,
+  historical,
+);
+
 console.log(
-  `Zig sync: ${
-    Object.keys(actual).length
-  } sources, ${manifest.fixtures.length} fixtures match native ${manifest.nativeCommit}`,
+  `Zig sync: ${sourceCount} sources, ${manifest.fixtures.length} fixtures match ${reference} ${gitlink}${
+    updated > 0 ? ` (${updated} fixtures updated)` : ""
+  }`,
 );

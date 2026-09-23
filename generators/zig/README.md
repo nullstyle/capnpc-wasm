@@ -189,21 +189,23 @@ sweeps cover the runtime used here.
 
 ## Native synchronization
 
-[`sync.json`](sync.json) records the native commit, SHA-256 digest of the
-complete prepared source tree, and hashes of mirrored conformance fixtures.
-After a build, `mise run check:zig-sync` verifies all of them without access to
-a developer's native checkout. Missing, extra, and changed source files fail
-verification. Maintainers record a new manifest only after committing native
-sources:
+The `ref/capnp-zig` gitlink recorded by this repository is the only source of
+truth. [`sync.json`](sync.json) maps each native conformance fixture to its
+mirror under `tests/`; it records no hashes. `mise run check:zig-sync` (also
+part of every `build:zig`) reads the committed tree at the gitlink and fails
+when the prepared `build/src/capnp-zig/src` has missing, extra, or changed
+files, when a mirrored fixture differs from its native file, or when the
+historical export differs from `historical-reference`. A hand-edited mirror
+therefore fails even if the manifest is edited too. After advancing the
+reference, refresh the mirrors from the gitlink and review the diff before
+committing:
 
 ```sh
-mise exec -- deno run --allow-read --allow-write=generators/zig/sync.json \
-  --allow-run=git scripts/check-zig-sync.ts --record-native /path/to/capnp-zig
+mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \
+  scripts/check-zig-sync.ts --update-fixtures
 ```
 
-The command checks committed native sources against the mirrored fixtures and
-prepared build tree. The reference submodule and native source revision match;
-there is no local Zig patch layer. `historical-reference` separately pins the
+There is no local Zig patch layer. `historical-reference` separately pins the
 old audit revision. `mise run refs:sync` fetches that commit even in a shallow
 checkout; `build:zig` exports it under `build/src/capnp-zig-historical`. The
 wire tests retain their original failing-writer and validation controls there.

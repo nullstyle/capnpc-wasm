@@ -1,384 +1,149 @@
 {
-  "version": 1,
-  "nativeCommit": "0fb8df40126ea166f95016963c465b03db22819e",
-  "referenceCommit": "0fb8df40126ea166f95016963c465b03db22819e",
-  "sourceDigest": "a73b6eb22e42915719091d510f78ce11bc1bbdd583539d82c16955f14df95b26",
-  "sources": {
-    "brand_fidelity_test.zig": "e4353d8f07c5690d1b9175df9d905a287235059c32f19c4f6f0a6d0dc169427a",
-    "capnpc-zig/brand_fidelity.zig": "1b34fdfd34c86264d779a5515eae93c7f529fed5ce4c8869d903dd1ec1a916e0",
-    "capnpc-zig/generator.zig": "b5b4065721306036a6f9e3a69853c5b0fc14f3f262671ef0507ef54664d7ba2b",
-    "capnpc-zig/generic_application.zig": "fd18d0988227280762d9a0a61fcbd3793352ea7089bcd8fede5b8bbc1d1931c2",
-    "capnpc-zig/generic_rpc_gen.zig": "3f9eb125fa058971c985e6ad71b62baa399ace230150c81470fa31c6f19f52ec",
-    "capnpc-zig/interface_gen.zig": "eeff1ff123884910569199fe96dcd92afd3babcc42cb3c02e2c01ef2b25648a1",
-    "capnpc-zig/name_validation.zig": "34f81b79854d8267ecc1caada3b00f9a66572923b2ba7d9bec373220aa39448f",
-    "capnpc-zig/reflection_metadata.zig": "45c1a9286da736e2e698acf680283a40476b1e3ed5f79516a06a5d2f8214a133",
-    "capnpc-zig/struct_gen.zig": "52e62b20b4f9caa6cbe970e0d7e6b5c3161a42781f9521236e0318419df01b5e",
-    "capnpc-zig/types.zig": "25ad9bf9070eb5453e4368eb5a97a5b621dacb41c4174ec949ca9e50b70d787d",
-    "io_backend.zig": "294dc9db9f008abd646e330b3da0b5d2c73bd13cc497d10e6f4eed02eed54c17",
-    "lib.zig": "8f71dd5e39fd1bca65079771d8b687467f555e424abc97a6f5cc62e7e54a63d2",
-    "lib_core.zig": "24b6104cd383833e256e0c3228b40af6838d81c1cef90b104ca1c6d2f4584c32",
-    "lib_quic.zig": "78b1b49f2171c6b55c2b4c2c5440deefbb0a284b503a41ced071a58955fe5fe0",
-    "llms.txt": "ebc05e652f688159ccc790ce343fd3fc570bc21524e6b0d87092ceb705d5cab3",
-    "main.zig": "b378276e462ce66f6212f60af88a0edaac21894cdccdea43f4fe10947c181fb5",
-    "reflection/dynamic.zig": "46022e66b3ab5cf3ad4c023cfc3be4671d58b9c6efec96ba99f19187f4f606af",
-    "reflection/registry.zig": "97bc2e560826c5865202753621a07f8443623a7df3bb24eed8ce549b1a013ce6",
-    "reflection/root.zig": "3af7d4aee709949533f9b3a712022a70cd3ab1543733a6ad8e97f64ae1a1f98e",
-    "rpc/capnp/c++.capnp": "52ead0eaa560b21e692d6f3d9966a52dfc99e19f53ae2d7c7bd2944a240d86de",
-    "rpc/capnp/persistent.capnp": "d77d4d2e2c1e9c42ded13de54ed11b535b076ac210945b53ecf76fd7648a867a",
-    "rpc/capnp/rpc.capnp": "2ecc3049d4f7f2d48a3a368dbb9ef4b97b31c1365996d615bd19c267983a1931",
-    "rpc/capnp/stream.capnp": "5b0656ca3daca9ef28740c14813d5dd474fd0f9991ce99f652838f4cccf6fb30",
-    "rpc/caps/cap_pointer.zig": "fcd385bd488a480789f96788a806f57df247e8821d6ed98bb55acedcec92f3dc",
-    "rpc/caps/descriptors.zig": "ed254413d95988812bc1669ae1f4c06a88f8de07957437d8d4310b61619f1315",
-    "rpc/caps/inbound.zig": "d12e38363d6e5593dc06f1482edc2a571fa7026456c3cd51ab04179f1232897a",
-    "rpc/caps/lifecycle.zig": "aa4970f869653f60e05b4e57a7812ac9c9e8919c72f3dbdc5c8b2ab2a56a3fa3",
-    "rpc/caps/outbound.zig": "50c27bbc525daf58e869a7c46db39d6488890a3fd527abbcc491cbae8b1c3d52",
-    "rpc/caps/payload_remap.zig": "812bec41144204561cff50039914f4ed3a3b85067aa8f6447d9a9e803c01d081",
-    "rpc/caps/table.zig": "b457ba7667796e9ad578f81957f4cd75c64133e57d019af0402e8d3cbb8ed7d4",
-    "rpc/events.zig": "c5f8c7d1f4f810bee99c17980faff7186f38ef7bc347a9ff793be7a4be0dcf69",
-    "rpc/gen/capnp/persistent.zig": "65268b5e3533fd265edfe8ba4ede2c5a0528392f93f4c6c6a7149a078c103d45",
-    "rpc/gen/capnp/rpc.zig": "68e4ca02cf117aac4bd501991a966db2811053115e8a2622a425b63cded6628c",
-    "rpc/gen/capnp/stream.zig": "3bb49125753c176bcc7c2bc9c0a39cb97b6b5520f218a5adf6e30e9bc84f6d17",
-    "rpc/integration/host_peer.zig": "c89c1f8bb6f1446ca01964026049d3961667a4f38adc4fc64c66b8c93ba14bd5",
-    "rpc/integration/worker_pool.zig": "9b3ae67c018bbb085e8ea2e3b782f586fcc69bd3061772f6df47ecd8118c6d7d",
-    "rpc/justfile": "6eea2025dea49db70ca1bd239c180ea7df52ab4299ef695e4f7c745ed020d2af",
-    "rpc/llms.txt": "80aceea6ff340fe9af8bb33dfca05dc7bb6b7bf8469c59143af20c32eecd7651",
-    "rpc/mod.zig": "e00c044549c09f7e6582c552a02664d7755d7798c4e597e54a9c070ecd4879a3",
-    "rpc/mod_base.zig": "ea21ec9e7b3b137b0d1ce32d25efc09bf0e715a97fc02f58ee9a671ac9a76802",
-    "rpc/mod_core.zig": "1dc1a5cb7a386e2fad8dd702c020953bec9a1db6b93bc1569db809e35f2ee427",
-    "rpc/mod_quic.zig": "c71c7cc98dfa59387617f2e73dbecff0c13514486bf4b6f104d0c5bf65f8ac4a",
-    "rpc/peer/bootstrap.zig": "193b3b4670c0362246fe6c774810adb1aaf0f2a3a7d7f4e2536c998b6beb86cf",
-    "rpc/peer/call/peer_call_inbound.zig": "aa1aa306e0c4fdfb14201b2ea7382e8123c0d3aaefcac10c96f9d9359288cf28",
-    "rpc/peer/call/peer_call_orchestration.zig": "a5d217b92f622e969476a635152da8171a99d643ba1c2f11de9c498a78ff287b",
-    "rpc/peer/call/peer_call_send.zig": "b4e718e527197ab02a308b628367f1f58c07e0ae8e4e46df9751fa09cac064e5",
-    "rpc/peer/call/peer_call_sender.zig": "8025d16ea3f758e24a045e8c7eb5154443a9482deb2a90141204fa3eceb9f675",
-    "rpc/peer/call/peer_call_targets.zig": "bb80232ce726e6d495404e3f58fad6e483c6983a66f3854d03c24f9f4029b236",
-    "rpc/peer/disembargo.zig": "5bf5e7b011ec831a0cc59dd4a0c173059867f9dce7f244be0a6d2c323aa8176a",
-    "rpc/peer/dispatch.zig": "2e3f5432fe541ec5719c52a7a75ec42bb9e150c6a51d535d2dae2dd2ce59255a",
-    "rpc/peer/errors.zig": "a2ca2ebf9800efb52c9887adbbfc047ca476cee6293179fe42029a9b69265181",
-    "rpc/peer/finish.zig": "6fe9dd19f1acdfc4ff1ac422c84cc4b3ac07e4d7c4b2478fe7e943ac7a235120",
-    "rpc/peer/forward/peer_forward_orchestration.zig": "cdcf21e861d99a84d0633ca4e9f7fbfc174a7fa87355a3d3ce3aefaab79c0325",
-    "rpc/peer/forward/peer_forward_return_callbacks.zig": "f401f62b0582a3be353aa67c6fdef69bc02c6effcb28cbb17ead01811a2cc9a8",
-    "rpc/peer/forward/peer_forwarded_return_logic.zig": "aeb387fdb10436467508c225229bb34d3e1d1a49e454dbd556808028047bf410",
-    "rpc/peer/join/join_coordinator.zig": "c4f694b39e95c5d330f756ef6ef148779c93af897a140542088b5195dc133a78",
-    "rpc/peer/join/peer_join_accept.zig": "4b2f4c6e1e09802a5e7150665f1c1a67a6f43c698f7ca0bc7314189e9a55df37",
-    "rpc/peer/join/peer_join_relay.zig": "378b21fa57582e4e47c4e6e5496299e65ba970a61f44a8a74bea5a8e6b262403",
-    "rpc/peer/mod.zig": "3bbbe66fb0f4a9ec514a9ac149612f580a43b82a0bc727ca4ac856f9bdbc9dc8",
-    "rpc/peer/peer_cap_lifecycle.zig": "a31d27c5c3c6e9c26ec39d4b60d54928480758c718cba40c713dc56368a06e95",
-    "rpc/peer/peer_cleanup.zig": "20f8e1d2673c8911c14507b5fc4cf41ab998430ff1e138faef96e82c03172a72",
-    "rpc/peer/peer_context_types.zig": "c9148b9868bfea45675afb639f85940ef419afc15272a6734fb0d8ac6151fe3d",
-    "rpc/peer/peer_dispatch.zig": "238d3c88ab326d467b0b8e8ef9c6be0e3f6be0fb210e7f3e881b9bed37f34517",
-    "rpc/peer/peer_embargo_accepts.zig": "f404e40aecf2b19a7c49df927af395f3bf3a7ded18e47c92a87ea05404a3480d",
-    "rpc/peer/peer_export_release.zig": "ddf8e8c7ece7e3eeebf25b8ab365f0f1aedb07c9cbcbb8d39ceb663b818d2bb6",
-    "rpc/peer/peer_inbound_release.zig": "afe1e0f9eaab3680940f77aa9d1010e2d4896f5018a088b0e234f9502e2d3a2f",
-    "rpc/peer/peer_lifecycle.zig": "d81f6e64aa184b90b1762b6f7cced2aa76b6b23f2ae03aeb20090fdaee91342e",
-    "rpc/peer/peer_outbound_control.zig": "ad7c71508f4a0d335fd7b598dc061698fcaf939609a866d922f89e1c898f812b",
-    "rpc/peer/peer_persistence_hooks.zig": "62e0d3011ba26f5a78417f6270aa0385c3b3ceeb929f185cc143bf90cf21b6f2",
-    "rpc/peer/peer_promise_exports.zig": "86c851cc3aa55b74b426fdbd6604e80614f7520abffc432b957744c532033f27",
-    "rpc/peer/peer_question_alloc.zig": "f314fe81cf7e9739907b260cb593b73423a21e8512ea1d8acbd0851317541356",
-    "rpc/peer/peer_question_state.zig": "4d88cf762f604743fdc398189ab9af38372ba7edd5f6cd9fe442e7d7a29f0aeb",
-    "rpc/peer/peer_resolve_inbound.zig": "c4fb592a9bb195083a66b069cf7749db7ea71bd99f979eddeb5c35e2a063c106",
-    "rpc/peer/peer_state_types.zig": "2143def77cc47df5eaed64773d675fd490b633f7fe43d6f96ede745fba28f283",
-    "rpc/peer/peer_transport_callbacks.zig": "6b60725fb5be6ece13e134779f04d0806bb252b321a0236b24a9ade4f76621d9",
-    "rpc/peer/peer_transport_state.zig": "c7bba4fee512cce3c4484290e4aa7bd10777cba65802afe76e36aceff801e027",
-    "rpc/peer/persistence.zig": "f1977a353813f2f0ee46a7b22ee9f24e3489f8091650655dcb8e610c998c4f84",
-    "rpc/peer/provide/forward_target.zig": "2bb8f47a11bad6e6f6beed5627f0010f95e7319085da79585164f4ff19cf2ff2",
-    "rpc/peer/provide/peer_join_state.zig": "11da5fa2c96abc15a85890087a07a74655042dedcd8fbbd45ee779fbea000696",
-    "rpc/peer/provide/peer_provide_inbound.zig": "f1ea96f75b82d5607714ec05c7f403d8f46d543d848d9f727e01d9809163f94d",
-    "rpc/peer/provide/peer_provide_join_orchestration.zig": "e144349ff178f6544f014ea6f325323b0894cc791fabcda18ba94beaf4fd1ff9",
-    "rpc/peer/provide/peer_provide_origination.zig": "66ccbbcf187d9ae700e59b564b8e2f04ceca367bc5b05156dcc1cb8060930984",
-    "rpc/peer/provide/peer_provides_state.zig": "ceb47bfd0cf9cdc98e96ca6aadc66334acadb809c888963a571f2527185c630a",
-    "rpc/peer/provide_accept_join.zig": "99c6d52d9a6f3d42ed6ae858b38bccde408bedf696f789a667b8fe07fdb2f038",
-    "rpc/peer/provision/peer_provision_drain.zig": "e533d64f44527c06eb6ca15bf973751541e056f79fd0eade8205258f2ade2edd",
-    "rpc/peer/provision/peer_provision_hosting.zig": "20cb56c7ccd2dda4815ef0def75a89868e5e6e4555937367fccd9a7692526320",
-    "rpc/peer/resolve.zig": "51b87969e5697b3221d1bac83666f3e44dadf2d56726926a6a1af27fce4f444d",
-    "rpc/peer/retained_questions.zig": "eac21a6ee05d119d2670a9eddcc5acdb1a58d3ce6b31b127a09715317bbb21c3",
-    "rpc/peer/return/peer_return_dispatch.zig": "d39f6dea26f2fe35899563ffebc4f26dc969692cd68f77823d397e8e6578f681",
-    "rpc/peer/return/peer_return_frames.zig": "a1a9532f3ba8c65cbe9bb47cf5af5430cf0faf7c4bb1d1445a125cac903c197a",
-    "rpc/peer/return/peer_return_orchestration.zig": "c186c0e4127af873894ce9fa05f13028014fd4e4f614fc87e9ca7243cf7be5a8",
-    "rpc/peer/return/peer_return_send.zig": "6fcae4b7fa2332bc906feadbdd4d54ed9ec2abd9832cd522ca1545eb09e6ec8f",
-    "rpc/peer/state.zig": "8b81e97d61759a7ed021f20262113024a9a9f07e6375f5894103a4f68534f10c",
-    "rpc/peer/stream_dispatch.zig": "2e349421ab73fd9e28e50fa878f0d4e4f170033ad45e001615e4eeba3149ffae",
-    "rpc/peer/streaming.zig": "edd2130f5be4388d08046176e5854ff5167c085aac5df5db9535255f0e7001f1",
-    "rpc/peer/third_party.zig": "5384ca91d271652995456edc1db4a6e7014f6d22689fde9d5eb963494facbcc7",
-    "rpc/peer/third_party/peer_cross_peer_proxy.zig": "f51600bacfdee8531d41f72f8a27c54aaef922ab68664f9ce68d3a7d0215f69b",
-    "rpc/peer/third_party/peer_third_party_adoption.zig": "2b0a660c695178d153ebbf94cba1a37f6fdca5710f6139d3d40390b011973b85",
-    "rpc/peer/third_party/peer_third_party_pending.zig": "94e4023b24a520c348d21d471fd39f547959938adaafaa8fdab0e90ba644b538",
-    "rpc/peer/third_party/peer_third_party_returns.zig": "bcae2866f6fb9978840fb6b02fe1ae6c0fce8bd12a18ac395646ce9a63baa915",
-    "rpc/peer/third_party/peer_third_party_routes.zig": "0f2447390be2b7bbdc8fa3dd6b51f1867bc11ff572fac97df355dc311d438eb1",
-    "rpc/peer/transport.zig": "d7afe9e5bf60cf9d1dd8a754c822fe8f221759bbf77f6c6af31183d12f0ae42e",
-    "rpc/promises/README.md": "715dce1f4e89488ec17ce620e17f4ceb133c04b5e7f0af3b239e2ddb808946dd",
-    "rpc/promises/peer_promises.zig": "41ea004911ce67a0091a6c3f18e8b33c33ac2ac90001cb5838dd86e8226ce844",
-    "rpc/promises/pending_calls.zig": "e4d59d55aa62840e47835e7927e560e9c43aa021398e80bbc60c57633f7fc23a",
-    "rpc/promises/pipeline.zig": "35076a16ea9d2f7347d2768836e95eb49020743499f7dca3a2e49ce8da8a8e99",
-    "rpc/promises/promised_answer.zig": "59bea03690b64e39761537c30b6822082005668e36a937fd11c2819a754c069d",
-    "rpc/promises/promised_answer_copy.zig": "7bee79cceb31bedc474fcd7dd0aafa29c2f94d6c52a884061cf8e71f3b8227ce",
-    "rpc/promises/return_routing.zig": "e6ca8ccd116b1def8c166f0fb371747247fdcc71930b0ad7146f01166c5286d1",
-    "rpc/promises/return_send.zig": "323b05a479ae96d0b75c53597adbe23b390973a9d75816e829f1d9d7a813b414",
-    "rpc/promises/return_send_helpers.zig": "111d0d9eccdb81881d34996204314bb3561aaac5de503a841fba00ea58ce5927",
-    "rpc/testing.zig": "d6ca9b4191449d76986edf3265a053d9feba7e86f3e98c47f6638d4ba609d2e6",
-    "rpc/time.zig": "aa457734214c1e68514e4f9bb30b0f662b51adc0afcb18bf3b14ae4e4ee41a8d",
-    "rpc/transport/binding.zig": "2c4b9ed374b9d844d7255809caad313d1088e6cdc7d2386c0d446630d0629453",
-    "rpc/transport/quic/baseline_engine.zig": "70b25be5aaaa3b2f3a27c8bfb28c4bbac18c3d74528bc7fff08e6958a361edbc",
-    "rpc/transport/quic/callback_lifecycle.zig": "bab56a0b1203344338e33297295a28c11bfd1cbbba5f92319c650202b2592bc8",
-    "rpc/transport/quic/client_endpoint.zig": "c826d2c21294017490dd3a62d9aa64982d6214ffdcecdd7ecb840e736d3e06d1",
-    "rpc/transport/quic/close.zig": "73610a0be35c19773a46501ca30b7d8238316e1f62ed23066ebb9202f89b35db",
-    "rpc/transport/quic/close_controller.zig": "5f7ed9b674f47932c82e88de69280df6748c501853218e648230fae622dd5829",
-    "rpc/transport/quic/connection.zig": "d5a630b47827c5b329f602f27886bb9aeab8dd1d63efe3765c75033c8ffb4f5b",
-    "rpc/transport/quic/connection_adapters.zig": "ef815f03e083b55996a12f5c8ea63836ec204e8b112b6ed09b0a0ff611c82226",
-    "rpc/transport/quic/connection_dispatch.zig": "d92a2b26a97cc5cbe131b226b7c7fbc244ac81e944d2e9d2454d006a158e0fca",
-    "rpc/transport/quic/connection_init.zig": "7ff1e7fdf7dcbf21e3c0aee522e28f29d34837ca1cf8819a27f3307ab42f8c3f",
-    "rpc/transport/quic/connection_loop.zig": "a4ec84f397be7a96a34e514063285a64674d0347533fff61fcf180d40e5c4279",
-    "rpc/transport/quic/connection_termination.zig": "0309adf36c2088721653750570433705f32506933a38378abc0834e5fdb0d2a9",
-    "rpc/transport/quic/connection_testing.zig": "564cf563fc6c6956f5061411fdc5cabf720e09dd4c2407a021b62665dcbdf03f",
-    "rpc/transport/quic/datagram_drop.zig": "fd6e65953b6dc93e7f798655df367e8d99ceb2e0e783d8031fbc60351075d13a",
-    "rpc/transport/quic/datagram_io.zig": "748750bbdf556e592cb1d836422cde472551a209a995d8d1553d0915ddcb8df2",
-    "rpc/transport/quic/early_dispatch.zig": "72a37db79e72a345985eacb73f3ab56aa1e0f0b8a61e48eb14b3cfa50745cecd",
-    "rpc/transport/quic/embedded.zig": "a14f265feeefb270f71f27d04b7312a753f503e0b9564ace1765dd8675c47829",
-    "rpc/transport/quic/endpoint.zig": "f757878e03de420503d7ac8d544a984f260ff473dbc93bab3945b20997fa939b",
-    "rpc/transport/quic/endpoint_factory.zig": "619df35553e8ff6bda1e3c3305584bbb140f4f01fc157617dc32099000c05183",
-    "rpc/transport/quic/engine_owner.zig": "9e139f6e02ccfde18e28ba34b8991124e6c12016a0d00e571c3448ea5d6913a2",
-    "rpc/transport/quic/length_framer.zig": "c79649c91e5abf4ca14edf73071a1b15e7f5f3e189739e05a8cedcf87d443403",
-    "rpc/transport/quic/listener.zig": "3b6115b382c801db71815143866e3a3c56bf25c1591d0d2efc89a73588055d87",
-    "rpc/transport/quic/mod.zig": "b193dc2df2bf72dad510b27f2e9c9b057d3cf1ed610faaf9a2fda060a01d723d",
-    "rpc/transport/quic/mode_router.zig": "c68db1e818cf44ebd553d565034a617ab3dea956ddcb8a460b3377f637d7fe0b",
-    "rpc/transport/quic/native_engine.zig": "410d2cdf6ee644a21a4611a035a7d4e8853993b715a55ab4dc9af3c189bcc5c6",
-    "rpc/transport/quic/native_framer.zig": "3e2aced8597838099adb3299d7b7bbffee358e651fd5fc351314d8c2dcfa091a",
-    "rpc/transport/quic/native_outbound_queue.zig": "090aca44ac51e03de8d9c76eee383386d7e8873e62aa6e6f9572a513de3d0f12",
-    "rpc/transport/quic/native_pending_data.zig": "6f33c7e3a8b5142dd4b224dd88d132de4e081336639e3a6f5a1ff3f176503511",
-    "rpc/transport/quic/non_windows_receive.zig": "88443ef7b4ba7329e4fda9b12ad504f4899dc30377dddd77dba8dd7691fd1950",
-    "rpc/transport/quic/options.zig": "f861c9d3658a31381c045ce1ada60104339abbb358189ca19d9365f4070d20d9",
-    "rpc/transport/quic/outbound_queue.zig": "044ffee2b34e48fac3aa5646cd64ea60c4cc5b4b98cab5113a4b855a2e9721e8",
-    "rpc/transport/quic/prehandshake.zig": "89b52e1ece654f246b866a1b3bcde863f0c72eebfebb8e36fbfc6048ba5cd1e6",
-    "rpc/transport/quic/quic_zig_adapter.zig": "a57b6ec3d0a53dd3b4a196d4e74a936eb989f873be48ca047763c662161b610f",
-    "rpc/transport/quic/scheduler.zig": "0ebaf336aaff82eaaec1f4c9bca927ff4dc4f0b453e761526b0738608a69136b",
-    "rpc/transport/quic/server.zig": "568e1f097e130baa61788aa0bbc99a42304b77d5897760f854333ef063eeff6e",
-    "rpc/transport/quic/server_endpoint.zig": "76a41cc594d5c1807d31d1c8ca86bf4966e71483b64bf2255f59533603eafa31",
-    "rpc/transport/quic/session.zig": "80de15e12fe1f449443d7c1e6c810eccfd2ea827422654f7d807b2714f85edae",
-    "rpc/transport/quic/termination.zig": "5099e514a0b3af5857849e4e4dc3e28311f7d33b59d8d40dd7419f7610c291de",
-    "rpc/transport/quic/udp_receive_bridge.zig": "573b0b17eebe2c2adefbbeabb379a975a40fa572f46a0e4fa2c20727ce3a1f2f",
-    "rpc/transport/quic/wake.zig": "85667bb7a1d379f86290d57acc1dbce67ca63d639e0a9fd4dc204be777a708c9",
-    "rpc/transport/quic/warm_redial.zig": "15741bd534a913dd4bcca726e975bb1bd9c30926e4c5823f5d0de878278307b6",
-    "rpc/transport/quic/warm_state.zig": "7ff477015c42a8864909ff3590c2c0a6b70a6934da99d5a6daf7d6507b230350",
-    "rpc/transport/quic_disabled.zig": "65b078459d495ba814646ccb3205bd265adc050212a6148d81243d06c6928390",
-    "rpc/transport/stream_state.zig": "4af1c4844b0534658ffe1332944d3d3a7b188c59c0e833f927c09edc38d3897d",
-    "rpc/transport/tcp/client.zig": "6b400cea7594c3020bb2f4b96b84767c0c10fbfb2c5c56ccfce787366ea0a8d7",
-    "rpc/transport/tcp/connection.zig": "0283186cc131730ac90cf4801f013fe1c612e9e15d287524b14f1906126a81fc",
-    "rpc/transport/tcp/runtime.zig": "13eec83de999b99ef3cfc4cf80ce2bb82029f2a4b1be6d5c602cd9fb3c39ed13",
-    "rpc/transport/tcp/server.zig": "8e6e7dfa210e5f2c527d2525cfc6108bac6f64144cf21fd8882561518e207eea",
-    "rpc/transport/tcp/stream_transport.zig": "a9d67624fd4e5b3ac160db23929ccaec1677e06bec1941f3af3fbab40b1cb740",
-    "rpc/transport/wake_lock.zig": "774f3ba7b103fbfd272a39af57ba0445aad5734849e6bbc687afd971e8740dc0",
-    "rpc/vat/host.zig": "0ca270d59e8e16e0ce9ca6c814820ba0875a5c85b532bcbc9861e3b84997326b",
-    "rpc/vat/join.zig": "d55821ac6004f17cf9aae790e46a4c0bdcc41dac78b79a4dc615c6139b95892c",
-    "rpc/vat/network.zig": "cc354bd1f85df49d521d393fef605628d9b7b0fcadf59eedd30487c2b3fcd2fd",
-    "rpc/vat/provisions.zig": "4be33daadeb7c76fc700793add8cdc3e74c7940312497f7138e09cbb1497e3ee",
-    "rpc/vat/quic_network.zig": "e4436b4a0050ca1965998fb9cb2de687357b9b054b3a70f14aa5dcd1f190a421",
-    "rpc/wire/framing.zig": "0dbff5191fd67a8572be5ae546b09e41a7155c00649fd4c5d72aae77c86fb97d",
-    "rpc/wire/protocol.zig": "4b1a8458fd47e7d9e1e3f4583d8140736cf1ae9e43c89f5a42ece07e60652a0d",
-    "serialization/allocation_budget.zig": "ab91d4ea753661a4ce7aeb79a6a22e3b266f644666797c5ac909f65bd38eb0b1",
-    "serialization/canonical.zig": "e78584931cd3cda4bceb6d7215013f8d70039b44256e02ad59f9f6577ad700f8",
-    "serialization/copy_budget.zig": "8b614c58b20602f517019826ee19529443294401854618bbc8cd6d72d63042fa",
-    "serialization/generated_helpers.zig": "82b26c76fc459bc15515b7e5226c77c2bece7538d10b6ae6617d75b022570d90",
-    "serialization/generic.zig": "650b44ad787e8742d82902b109a56a985063e6ee7ecf0301c9b3509aee16ecd3",
-    "serialization/llms.txt": "3862a0e1ee95c3e9e1ddfc26fbb8e39a68ecfdd3910031861d2dd241ccca8964",
-    "serialization/message.zig": "1933190e15eb6c70cb509b0350d1edf339dd448433837e8002ad0cab883994e8",
-    "serialization/message/any_pointer_builder.zig": "d3bd64ce763461bb34c934bf328b407e857c46d485752f8723e932d4b373e937",
-    "serialization/message/any_pointer_reader.zig": "bce1c5e817bb95dbcf6fd14f60baf774d2eab3e3957007fe1e11c9276787822d",
-    "serialization/message/bounds.zig": "b4c2d3908fe95dbd525f366fda39db80a9968697e2ac8268dfae1e9bfd7228dd",
-    "serialization/message/capability_remap.zig": "75098f7685e5aedc2ce3a1374686e301457288530fc80be64f7b773097420acb",
-    "serialization/message/clone_any_pointer.zig": "b6b949b53aedddbcba149d8da19664cf323a5b4d59908b80796dd01e70611b22",
-    "serialization/message/element_list.zig": "828ea6e2ba4b304134c30f513abaaf8f115f9b288e025867f7bf21a21e7dc905",
-    "serialization/message/list_builders.zig": "b82c0aa71a94913ba33e6d64e729b3e7975eef0ce1d72d8d6582952d990db9bd",
-    "serialization/message/list_readers.zig": "60d00a139274c225bbedde1484f7c95af50bc717dd1ded4342aebb9adadf0872",
-    "serialization/message/struct_builder.zig": "301af3b1a2ee837e79850ef07cf1a1687529d3d23ca7488a96a8bf2c40772692",
-    "serialization/message/typed_list_helpers.zig": "33f70e2102557db7f88fa894dfbcc29209af9e93065537ff98913180b09a2360",
-    "serialization/reader.zig": "73035459c336f3b9968a0c9150195b0e3f4f359c079b2bf3085703e115da2d13",
-    "serialization/request_reader.zig": "2c86b97df1e8d065926bae8748fdd58dab3a5c898674e3e2b34de7a1ace62ad5",
-    "serialization/schema.zig": "773dd61bcce0a2a751e700780b0d5a30347ee630abf90ec4d1e7b918ccd37401",
-    "serialization/schema_validation.zig": "fd45e1b78582ba1071e34ca65656e8a846c66557be667df0e779a7f77806d813",
-    "serialization/type_resolver.zig": "aa0e0159c36053d7f4fb2b240b75804ead8e25e76cf0562cea8bdb28fbf5946f",
-    "wasm/capnp_host_abi.zig": "e929a6fd0eb0c3c5dbdde17668d15716a70151b0ec218f64e70110a24e67630a",
-    "wasm/generated/example.zig": "81767a49f694c9fcef7b26f6de25e0b3a4ec0809c61af27fc693c78bdfa24a92"
-  },
+  "version": 2,
   "fixtures": [
     {
       "native": "tests/serialization/builder_evolution_test.zig",
-      "path": "tests/reflection/builder_evolution_test.zig",
-      "sha256": "53453026da30f2e63dd711798329e06abc4be48507ca1ed497b0b75f7ee3c751"
+      "path": "tests/reflection/builder_evolution_test.zig"
     },
     {
       "native": "tests/serialization/double_far_validation_test.zig",
-      "path": "tests/reflection/double_far_validation_test.zig",
-      "sha256": "6ed9c9fd5d5bcf925cc444cac9e997dda0f215f923ce2df90a86c57a9d287edf"
+      "path": "tests/reflection/double_far_validation_test.zig"
     },
     {
       "native": "tests/reflection/consumer.zig",
-      "path": "tests/reflection/consumer.zig",
-      "sha256": "bc155eceeb9aec889402f8f84d54da2d37a1249c8352429ba148c67ebc9acc03"
+      "path": "tests/reflection/consumer.zig"
     },
     {
       "native": "tests/reflection/output.zig",
-      "path": "tests/reflection/output.zig",
-      "sha256": "d671303a4cc12490808f0b0a5aa4cc74f198114f059297b596fdad9086ee8cd8"
+      "path": "tests/reflection/output.zig"
     },
     {
       "native": "tests/reflection/mutation_corpus.zig",
-      "path": "tests/reflection/mutation_corpus.zig",
-      "sha256": "a01a1287e77b4c027c1f68d5fb222c9b692c6bb22c75551c51b5e0ab7bfd4f07"
+      "path": "tests/reflection/mutation_corpus.zig"
     },
     {
       "native": "tests/reflection/oracle.c++",
-      "path": "tests/reflection/oracle.c++",
-      "sha256": "0fc65215642f72b1fb0a8e265a903552ee35dc60d052990aaa2fe9e2ef7c74ea"
+      "path": "tests/reflection/oracle.c++"
     },
     {
       "native": "tests/reflection/list_evolution_test.zig",
-      "path": "tests/reflection/list_evolution_test.zig",
-      "sha256": "e2feda68b7939fbfb404838238f7cddd442b2f581af733e95f2ba996cf84f363"
+      "path": "tests/reflection/list_evolution_test.zig"
     },
     {
       "native": "tests/reflection/list_failure_test.zig",
-      "path": "tests/reflection/list_failure_test.zig",
-      "sha256": "607b951f5e4f16ebff482237416cecde71ab6527ccfab50281e33b25be746481"
+      "path": "tests/reflection/list_failure_test.zig"
     },
     {
       "native": "tests/reflection/generic_list_test.zig",
-      "path": "tests/reflection/generic_list_test.zig",
-      "sha256": "361160540a297e34c66309801333ff708b7f9f4e67edce06d1d649f563cf8643"
+      "path": "tests/reflection/generic_list_test.zig"
     },
     {
       "native": "tests/reflection/registry_test.zig",
-      "path": "tests/reflection/registry_test.zig",
-      "sha256": "a9ac1170016cbc0347829ad900fb068755b5ad4ab9e8fc934f56930eb7bdfa29"
+      "path": "tests/reflection/registry_test.zig"
     },
     {
       "native": "tests/reflection/dynamic_failure_test.zig",
-      "path": "tests/reflection/dynamic_failure_test.zig",
-      "sha256": "96243ecea480334093594e2923d61d06700d74e2c207ae3872445958876c92a0"
+      "path": "tests/reflection/dynamic_failure_test.zig"
     },
     {
       "native": "tests/reflection/copy_limits_test.zig",
-      "path": "tests/reflection/copy_limits_test.zig",
-      "sha256": "30d1ac1b6da6cd731a91be73b60e5f1b0562cadb73f5e021df94192bd7982afe"
+      "path": "tests/reflection/copy_limits_test.zig"
     },
     {
       "native": "tests/reflection/fuzz_test.zig",
-      "path": "tests/reflection/fuzz_test.zig",
-      "sha256": "00267819882a5f25bc9c04b4520b04eb3d7149f90523903957ac1bd4b650888f"
+      "path": "tests/reflection/fuzz_test.zig"
     },
     {
       "native": "tests/reflection/request.bin",
-      "path": "tests/reflection/request.bin",
-      "sha256": "24ca7732b17af83a2ae38cc20e25bf01d641e4cf5ca87e6c5143b6efd8037993"
+      "path": "tests/reflection/request.bin"
     },
     {
       "native": "tests/reflection/generated_builder_test.zig",
-      "path": "tests/reflection/generated_builder_test.zig",
-      "sha256": "c1cf8bdc5cd62549cf23d2ccca77cd9a1afcb32881726cfdb3f52741f5d9b7a7"
+      "path": "tests/reflection/generated_builder_test.zig"
     },
     {
       "native": "tests/reflection/schemas/reflection.capnp",
-      "path": "tests/reflection/reflection.capnp",
-      "sha256": "1bf79e52677063f58463048ddf6e1b01ad94594d8d7d7ab9b62f0744cf94193e"
+      "path": "tests/reflection/reflection.capnp"
     },
     {
       "native": "tests/test_schemas/generic_rpc_external.capnp",
-      "path": "tests/rpc_codegen/schemas/generic_rpc_external.capnp",
-      "sha256": "2a194c4c860256d0ddbbf1d7be7550aaa35e2beea92dfa5b11db1f0a15dbc6dd"
+      "path": "tests/rpc_codegen/schemas/generic_rpc_external.capnp"
     },
     {
       "native": "tests/test_schemas/generic_rpc.capnp",
-      "path": "tests/rpc_codegen/schemas/generic_rpc.capnp",
-      "sha256": "b1324ea7f50880290cba6d2ce482d563b903ef9fff3a3a0b7a843da3a053a490"
+      "path": "tests/rpc_codegen/schemas/generic_rpc.capnp"
     },
     {
       "native": "tests/test_schemas/rpc_inherited_paths.capnp",
-      "path": "tests/rpc_codegen/schemas/rpc_inherited_paths.capnp",
-      "sha256": "c36fbd04d64d8607047cee66163895006633eb37156e78b4b43eb351cddf012e"
+      "path": "tests/rpc_codegen/schemas/rpc_inherited_paths.capnp"
     },
     {
       "native": "tests/test_schemas/rpc_inherited_external.capnp",
-      "path": "tests/rpc_codegen/schemas/rpc_inherited_external.capnp",
-      "sha256": "9d93effe6983d9e560d861022a2f15cefd8c57a26cddd12a52ebfc69765f47f8"
+      "path": "tests/rpc_codegen/schemas/rpc_inherited_external.capnp"
     },
     {
       "native": "tests/test_schemas/rpc_pipeline_paths.capnp",
-      "path": "tests/rpc_codegen/schemas/rpc_pipeline_paths.capnp",
-      "sha256": "af761aa952c3d481ee27f42cf8feda9bb578d5ac29a50c1b278df4efa086c2d3"
+      "path": "tests/rpc_codegen/schemas/rpc_pipeline_paths.capnp"
     },
     {
       "native": "tests/test_schemas/streaming.capnp",
-      "path": "tests/rpc_codegen/schemas/streaming.capnp",
-      "sha256": "aceefefd9062dfa73a0db924f5db1f63a85fffb44a89580229b5b19757e2e834"
+      "path": "tests/rpc_codegen/schemas/streaming.capnp"
     },
     {
       "native": "tests/serialization/support/generic_rpc_consumer.zig",
-      "path": "tests/rpc_codegen/consumers/generic_rpc_consumer.zig",
-      "sha256": "df7c67466f0199eaabe7e8ca67b61ce9acdcc1f1178673f7580752951be12245"
+      "path": "tests/rpc_codegen/consumers/generic_rpc_consumer.zig"
     },
     {
       "native": "tests/serialization/support/rpc_stream_consumer.zig",
-      "path": "tests/rpc_codegen/consumers/rpc_stream_consumer.zig",
-      "sha256": "289db7a59089540371c2134c7f739d44803e5483b72cb5842c5d81f590a0a6db"
+      "path": "tests/rpc_codegen/consumers/rpc_stream_consumer.zig"
     },
     {
       "native": "tests/serialization/support/rpc_inherited_consumer.zig",
-      "path": "tests/rpc_codegen/consumers/rpc_inherited_consumer.zig",
-      "sha256": "f8607f2a3899d8c98b7a82d447584200569e4ef3612c0a64193c1f48ba213af4"
+      "path": "tests/rpc_codegen/consumers/rpc_inherited_consumer.zig"
     },
     {
       "native": "tests/serialization/support/rpc_pipeline_consumer.zig",
-      "path": "tests/rpc_codegen/consumers/rpc_pipeline_consumer.zig",
-      "sha256": "20f9e972150b5cd596fdaaa6f3ec230e8e0866510feb37bd7b4a97953413706a"
+      "path": "tests/rpc_codegen/consumers/rpc_pipeline_consumer.zig"
     },
     {
       "native": "tests/test_schemas/generic_recursive.capnp",
-      "path": "tests/generator_api/schemas/generic_recursive.capnp",
-      "sha256": "409995dc49748472a814d9cbd451e9c194feb86fc29c0cdeef451219af99553c"
+      "path": "tests/generator_api/schemas/generic_recursive.capnp"
     },
     {
       "native": "tests/test_schemas/generic_list_defaults.capnp",
-      "path": "tests/generator_api/schemas/generic_list_defaults.capnp",
-      "sha256": "16b80cc4730d0e482c372b9a85d8201a6f19866952c122ed36796a8d92592f3c"
+      "path": "tests/generator_api/schemas/generic_list_defaults.capnp"
     },
     {
       "native": "tests/test_schemas/generic_alternating.capnp",
-      "path": "tests/generator_api/schemas/generic_alternating.capnp",
-      "sha256": "2f638a1c20d0ed26da699a3e7161e77209b99622fca694960871735d29477030"
+      "path": "tests/generator_api/schemas/generic_alternating.capnp"
     },
     {
       "native": "tests/test_schemas/generic_collections.capnp",
-      "path": "tests/generator_api/schemas/generic_collections.capnp",
-      "sha256": "64655188b1fe1060e916feae509293bfe4a42226099279e82c0a9788827ea026"
+      "path": "tests/generator_api/schemas/generic_collections.capnp"
     },
     {
       "native": "tests/serialization/support/generic_list_defaults_consumer.zig",
-      "path": "tests/generator_api/consumers/generic_list_defaults_consumer.zig",
-      "sha256": "bac13c50a6ea1d2b3c187606a20c065e6d6e95a55212dd77fb33e4d03fac21f7"
+      "path": "tests/generator_api/consumers/generic_list_defaults_consumer.zig"
     },
     {
       "native": "tests/serialization/support/generic_alternating_consumer.zig",
-      "path": "tests/generator_api/consumers/generic_alternating_consumer.zig",
-      "sha256": "f86ab1661f6c3bc5b7240f018c0b4b305c117587db5354be0c5fba24e571f5e1"
+      "path": "tests/generator_api/consumers/generic_alternating_consumer.zig"
     },
     {
       "native": "tests/serialization/support/generic_evolution_consumer.zig",
-      "path": "tests/generator_api/consumers/generic_evolution_consumer.zig",
-      "sha256": "9b4d7c75f7a30060a7a96c16934b66ab4e910d72383e699939767cab16b28aa0"
+      "path": "tests/generator_api/consumers/generic_evolution_consumer.zig"
     },
     {
       "native": "tests/serialization/support/generic_recursive_consumer.zig",
-      "path": "tests/generator_api/consumers/generic_recursive_consumer.zig",
-      "sha256": "95c7f5d8d8e1dbced23a15902c2b0dd4a7882c15c6243e4037f948cea3f21af3"
+      "path": "tests/generator_api/consumers/generic_recursive_consumer.zig"
     },
     {
       "native": "tests/serialization/support/generic_collections_consumer.zig",
-      "path": "tests/generator_api/consumers/generic_collections_consumer.zig",
-      "sha256": "91953de419f977bf2ade5740146c3d66d928ebd183e0d0ebc5556dd5ee9e068c"
+      "path": "tests/generator_api/consumers/generic_collections_consumer.zig"
     },
     {
       "native": "tests/reflection/double_far_fixture.zig",
-      "path": "tests/reflection/double_far_fixture.zig",
-      "sha256": "d9807f820ae89e5f2135cc36fda90b28a27bb9636b0b82f2985a137b6f43f5c1"
+      "path": "tests/reflection/double_far_fixture.zig"
     }
   ]
 }
