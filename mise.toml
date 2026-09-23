@@ -292,3 +292,8 @@ run = [
   "deno test tests/lib/harness_test.ts",
   "deno test --allow-run=sh --allow-env --allow-read=tests/lib tests/lib/process_test.ts",
 ]
+
+[tasks."test:sdk-go-race"]
+description = "Run the Go SDK concurrency, cancellation, and Close tests under the race detector"
+depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig"]
+run = "go -C sdk/go test -race -count=1 -mod=readonly -run 'TestCompiler|TestGenerate|TestCancellation|TestClose|TestSleeping|TestFilesystem|TestNew|TestEngine|TestStdio|TestMemory|TestCompilationCache' ./..."
