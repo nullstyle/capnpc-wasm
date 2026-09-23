@@ -19,16 +19,37 @@ the project license at `LICENSE` and `sdk/go/LICENSE`.
 
 The earlier
 [compiler host rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.2)
-is also available. These three archives and their `SHA256SUMS` files were copied
-byte-for-byte from the former SLCP release host. Existing versions, archive
-hashes, manifests, and embedded provenance are unchanged. Historical SLCP
-download URLs remain available for already-pinned consumers.
+is also available. All three archives and their `SHA256SUMS` files were first
+published on 2026-09-15 on the maintainer's former release host, the
+`nullstyle/slcp-zig` repository (SLCP is a consuming application project), and
+copied byte for byte to this repository the same day. Versions, archive hashes,
+manifests, and embedded provenance are unchanged; the original download URLs on
+that host remain available for consumers that already pin them.
 
 Publish future compiler assets to `nullstyle/capnpc-wasm`. Release tags point to
 the producer commit recorded in the archive manifest. Upload the verified
 archive and its `SHA256SUMS`; keep published assets immutable and use a new
 version for changed bytes. GitHub's generated source archives are separate from
 the compiler `.tgz` assets.
+
+## Published releases
+
+The digests below were read on 2026-09-22 from the GitHub release assets
+(`gh release view <tag> --json assets`) so that consumers can pin them
+independently of the download host. `SHA256SUMS` lists two lines: the archive
+and `package/manifest.json`. The compiler-host manifest digests come from local
+archives whose bytes match the published archive digests. No byte-identical
+local copy of the tools rc.2 archive exists, so its manifest digest is not
+recorded; the digest of its `SHA256SUMS` asset, which lists it, is recorded
+instead. Every future publication adds a row here before the tag is pushed.
+
+| Release                        | Archive                                                  | Archive SHA-256                                                    | `package/manifest.json` SHA-256                                                                     | Producer commit                            | CI on the producer commit                                                                                                                                                                      |
+| ------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tools rc.2, 2026-09-15         | `capnp-wasm-tools-0.1.0-rc.2.tgz`, 908,300 bytes         | `84f6dd426dd0e94dd5d7fd3dd0e9390e84905ac4b5e6957af57788967e5065f4` | Not recorded; `SHA256SUMS` asset `510fd723d1ddc48a26e966ae20e3f8790c8f92f61473b5f975a2b381abc25c1d` | `0c45c08aa7a836a09e2d715f790823288769b04c` | Passed ([run 34922318054](https://github.com/nullstyle/capnpc-wasm/actions/runs/34922318054))                                                                                                  |
+| Compiler host rc.2, 2026-09-15 | `capnp-wasm-compiler-host-0.1.0-rc.2.tgz`, 944,201 bytes | `5f99f8756070c9eb267160b1af41efe227175ace3e5f751b3a35bb5bb2470b24` | `e84125596f6d26818529f1315ca10875ae99910e35c47f97a27e97a0a2db7bc6`                                  | `97508128435afcc502aab63f1f08a3aa8090a1b7` | Not green: the macos-15 `mise run check` step failed and the other jobs were cancelled by the next push ([run 34933604007](https://github.com/nullstyle/capnpc-wasm/actions/runs/34933604007)) |
+| Compiler host rc.3, 2026-09-15 | `capnp-wasm-compiler-host-0.1.0-rc.3.tgz`, 945,229 bytes | `ca8dfa0033e417e1db0522f2d1c28ccfeda4d42c18ae160de3a26d8a763521ec` | `322fa3148ec3cb7e31454b910a5e8d831a3bf1ec2635b5a8c5794c10a66077ce`                                  | `a5ccaae128665914d3878d83908bd5ddbece58ea` | Failed only at `git diff --exit-code` after every check passed on both hosts ([run 34934841115](https://github.com/nullstyle/capnpc-wasm/actions/runs/34934841115)); fixed by `672679a`        |
+
+The full SDK archive (`capnpc-wasm-<version>.tgz`) has never been published.
 
 ## Prepare a full SDK candidate
 
