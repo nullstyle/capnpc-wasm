@@ -79,6 +79,14 @@ printf '#include <stdio.h>\nint main(void) { puts("hello"); return 0; }\n' > "$p
 printf '#include <cstdio>\nint main() { std::puts("hello"); }\n' > "$probe_dir/hello.cpp"
 printf 'fn main() { println!("hello"); }\n' > "$probe_dir/hello.rs"
 
+# The builds link through LDFLAGS (clang) and Cargo's host rustflags (rustc);
+# neither compiler reads those variables itself, so splice them in here.
+read -ra ldflags <<< "${LDFLAGS:-}"
+rustc_link_args=()
+for flag in ${ldflags[@]+"${ldflags[@]}"}; do
+  rustc_link_args+=(-C "link-arg=$flag")
+done
+
 run_native() { "$1"; }
 run_wasi() { wasmtime run "$1"; }
 link_probe() {
@@ -93,12 +101,15 @@ link_probe() {
   else
     fail "$name cannot compile, link, or run a hello program:" \
       "$(head -n 6 "$probe_dir/$name.log" 2> /dev/null || true)" \
-      "hint: set SDKROOT to an SDK the pinned linker accepts (see scripts/lib/toolchain-env.sh)"
+      "hint: set SDKROOT to an SDK the pinned linker accepts, or LDFLAGS=-fuse-ld=<linker> (see scripts/lib/toolchain-env.sh)"
   fi
 }
-link_probe cc run_native cc -o "$probe_dir/cc" "$probe_dir/hello.c"
-link_probe clang++ run_native clang++ -std=c++23 -o "$probe_dir/clang++" "$probe_dir/hello.cpp"
-link_probe rustc run_native rustc -o "$probe_dir/rustc" "$probe_dir/hello.rs"
+link_probe cc run_native cc ${ldflags[@]+"${ldflags[@]}"} \
+  -o "$probe_dir/cc" "$probe_dir/hello.c"
+link_probe clang++ run_native clang++ -std=c++23 ${ldflags[@]+"${ldflags[@]}"} \
+  -o "$probe_dir/clang++" "$probe_dir/hello.cpp"
+link_probe rustc run_native rustc ${rustc_link_args[@]+"${rustc_link_args[@]}"} \
+  -o "$probe_dir/rustc" "$probe_dir/hello.rs"
 link_probe wasi-clang run_wasi "$sdk_path/bin/clang" --target=wasm32-wasip1 \
   -o "$probe_dir/wasi-clang" "$probe_dir/hello.c"
 
