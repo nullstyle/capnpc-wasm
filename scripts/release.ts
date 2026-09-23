@@ -125,6 +125,7 @@ try {
           main: "./typescript/mod.js",
           types: "./typescript/mod.d.ts",
         }),
+        ...(!compilerHost ? { bin: { "capnp-wasm": "./bin/capnp-wasm" } } : {}),
         exports: toolsOnly
           ? {
             "./wasm/*": "./wasm/*",
@@ -296,7 +297,7 @@ try {
         ),
         offset,
       );
-    field(100, 8, 0o644);
+    field(100, 8, path.startsWith("bin/") ? 0o755 : 0o644);
     field(108, 8, 0);
     field(116, 8, 0);
     field(124, 12, bytes.length);
