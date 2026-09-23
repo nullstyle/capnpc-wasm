@@ -105,7 +105,8 @@ run = [
   "shellcheck bin/capnp-wasm $(find scripts -name '*.sh')",
   "deno fmt --check {{vars.fmt_paths}}",
   "deno lint tests sdk/typescript examples scripts/*.ts",
-  # examples/deno.ts imports the built dist/ bundle; example:deno type-checks it.
+  # examples/deno.ts imports the built dist/ bundle; example:deno, which test
+  # depends on, type-checks it with --check after build:sdk.
   "deno check scripts/*.ts",
   "deno check --config tests/hosts/deno/deno.json --unstable-sloppy-imports tests/hosts/deno/main.ts",
   "deno check --config sdk/typescript/deno.json --unstable-sloppy-imports sdk/typescript/mod.ts sdk/typescript/worker.ts",
@@ -182,6 +183,8 @@ depends = [
   "test:sdk-ts",
   "test:features",
   "test:sdk-go",
+  # The Deno example imports dist/, so the type check of examples/deno.ts lives here.
+  "example:deno",
 ]
 
 [tasks."test:zig-unit"]
@@ -271,7 +274,9 @@ run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/relea
 
 [tasks."test:package"]
 description = "Verify reproducible candidate packaging and clean external Deno/Go consumers"
-# The package test spawns the native oracle; the compiler-host gate runs as its own task.
+# Only the compiler-host gate reads build/native, but it is listed here directly
+# so the documented release flow (release:prepare, then test:package) also
+# works on a fresh checkout.
 depends = ["build:native", "release:prepare", "test:compiler-host-package"]
 run = "deno run --allow-read --allow-write --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts"
 
