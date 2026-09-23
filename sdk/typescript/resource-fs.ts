@@ -8,17 +8,38 @@ import type WASI from "../../ref/browser_wasi_shim/src/wasi.ts";
 import {
   ERRNO_BADF,
   ERRNO_INVAL,
+  ERRNO_NFILE,
 } from "../../ref/browser_wasi_shim/src/wasi_defs.ts";
 import type { ResourceLimits } from "./types.ts";
 
+/**
+ * A guest exceeded one of the host budgets in ResourceLimits. Thrown from
+ * inside a WASI import, it unwinds the guest like a trap and mod.ts reports it
+ * as a CompileError whose message names the limit.
+ */
+export class LimitError extends Error {
+  override readonly name = "LimitError";
+  constructor(public readonly limit: keyof ResourceLimits) {
+    super(`${limit} resource limit exceeded`);
+  }
+}
+
+/**
+ * Live descriptors a command may hold at once. The pinned shim keeps every
+ * opened descriptor in a host array, so without a ceiling a guest that never
+ * closes grows host memory with its CPU time, outside every byte budget. The
+ * compiler and generators hold a handful at a time; this is not a public knob.
+ */
+export const maximumDescriptors = 1024;
+
 class ByteBudget {
   used = 0;
-  constructor(readonly maximum: number, readonly name: string) {}
+  constructor(readonly maximum: number, readonly name: keyof ResourceLimits) {}
   check(file: File, size: bigint): void {
     if (
       size < 0n || size > BigInt(this.maximum - this.used + file.data.length)
     ) {
-      throw new Error(`${this.name} resource limit exceeded`);
+      throw new LimitError(this.name);
     }
   }
   attach(file: File): void {
@@ -89,7 +110,7 @@ export function boundFilesystem(root: Directory, limits: ResourceLimits): void {
         // A lifetime creation budget also bounds unlink/recreate churn and
         // retained descriptors. Existing-name replacements do not add an entry.
         if (!contents.has(name) && ++entries > limits.outputEntries) {
-          throw new Error("outputEntries resource limit exceeded");
+          throw new LimitError("outputEntries");
         }
         attach(child);
         return set(name, child);
@@ -102,15 +123,22 @@ export function boundFilesystem(root: Directory, limits: ResourceLimits): void {
 
 export function boundedStream(
   maximum: number,
-  name: string,
+  name: keyof ResourceLimits,
 ): { file: File; descriptor: OpenFile } {
   const file = new File([]);
   new ByteBudget(maximum, name).attach(file);
   return { file, descriptor: file.path_open(0, 0n, 0).fd_obj as OpenFile };
 }
 
-/** Avoid the upstream shim's unbounded iovec array and pre-budget byte copies. */
+/**
+ * Replace the upstream shim's imports whose host work is sized by guest
+ * arguments. Pointers and counts are checked against guest memory before any
+ * allocation, so a one-page guest cannot make the host allocate more than a
+ * page: no iovec arrays, no temporary random buffers, no pre-budget copies.
+ * Out-of-range arguments return EINVAL to the guest instead of trapping.
+ */
 export function boundWasiIO(wasi: WASI, limits: ResourceLimits): void {
+  const memory = () => new Uint8Array(wasi.inst.exports.memory.buffer);
   const write = (
     fd: number,
     pointer: number,
@@ -120,7 +148,7 @@ export function boundWasiIO(wasi: WASI, limits: ResourceLimits): void {
   ): number => {
     const descriptor = wasi.fds[fd];
     if (!descriptor) return ERRNO_BADF;
-    const bytes = new Uint8Array(wasi.inst.exports.memory.buffer);
+    const bytes = memory();
     const view = new DataView(bytes.buffer);
     pointer >>>= 0;
     count >>>= 0;
@@ -158,6 +186,120 @@ export function boundWasiIO(wasi: WASI, limits: ResourceLimits): void {
     offset: bigint,
     result: number,
   ) => write(fd, pointer, count, result, offset);
+
+  // Reads stream each iovec straight into guest memory. The shim's descriptor
+  // reads copy at most the remaining file bytes, which the input budgets
+  // already bound.
+  const read = (
+    fd: number,
+    pointer: number,
+    count: number,
+    result: number,
+    offset?: bigint,
+  ): number => {
+    const descriptor = wasi.fds[fd];
+    if (!descriptor) return ERRNO_BADF;
+    const bytes = memory();
+    const view = new DataView(bytes.buffer);
+    pointer >>>= 0;
+    count >>>= 0;
+    result >>>= 0;
+    if (pointer + count * 8 > bytes.length || result + 4 > bytes.length) {
+      return ERRNO_INVAL;
+    }
+    let total = 0;
+    for (let index = 0; index < count; index++) {
+      const address = view.getUint32(pointer + index * 8, true);
+      const length = view.getUint32(pointer + index * 8 + 4, true);
+      if (address + length > bytes.length) return ERRNO_INVAL;
+      const part = offset === undefined
+        ? descriptor.fd_read(length)
+        : descriptor.fd_pread(length, offset);
+      if (part.ret) {
+        view.setUint32(result, total, true);
+        return part.ret;
+      }
+      bytes.set(part.data, address);
+      total += part.data.length;
+      if (offset !== undefined) offset += BigInt(part.data.length);
+      if (part.data.length !== length) break;
+    }
+    view.setUint32(result, total, true);
+    return 0;
+  };
+  wasi.wasiImport.fd_read = (
+    fd: number,
+    pointer: number,
+    count: number,
+    result: number,
+  ) => read(fd, pointer, count, result);
+  wasi.wasiImport.fd_pread = (
+    fd: number,
+    pointer: number,
+    count: number,
+    offset: bigint,
+    result: number,
+  ) => read(fd, pointer, count, result, offset);
+
+  // Fill guest memory in place; getRandomValues accepts at most 64 KiB per call.
+  wasi.wasiImport.random_get = (buffer: number, length: number) => {
+    const bytes = memory();
+    buffer >>>= 0;
+    length >>>= 0;
+    if (buffer + length > bytes.length) return ERRNO_INVAL;
+    for (let filled = 0; filled < length; filled += 65536) {
+      crypto.getRandomValues(
+        bytes.subarray(
+          buffer + filled,
+          buffer + Math.min(length, filled + 65536),
+        ),
+      );
+    }
+    return 0;
+  };
+
+  // The remaining guest-sized imports only copy existing host data, but they
+  // write at guest pointers: reject ranges outside memory before the shim can.
+  const readdir = wasi.wasiImport.fd_readdir;
+  wasi.wasiImport.fd_readdir = (
+    fd: number,
+    buffer: number,
+    length: number,
+    cookie: bigint,
+    used: number,
+  ) => {
+    const size = memory().length;
+    if ((buffer >>> 0) + (length >>> 0) > size || (used >>> 0) + 4 > size) {
+      return ERRNO_INVAL;
+    }
+    return readdir(fd, buffer, length, cookie, used);
+  };
+  const prestatName = wasi.wasiImport.fd_prestat_dir_name;
+  wasi.wasiImport.fd_prestat_dir_name = (
+    fd: number,
+    pointer: number,
+    length: number,
+  ) => {
+    if ((pointer >>> 0) + (length >>> 0) > memory().length) return ERRNO_INVAL;
+    return prestatName(fd, pointer, length);
+  };
+  const poll = wasi.wasiImport.poll_oneoff;
+  wasi.wasiImport.poll_oneoff = (
+    input: number,
+    output: number,
+    count: number,
+    ...rest: unknown[]
+  ) => {
+    const size = memory().length;
+    // The shim accepts exactly one subscription (48 bytes) and one event
+    // (32 bytes); it rejects other counts itself.
+    if (
+      (count >>> 0) === 1 &&
+      ((input >>> 0) + 48 > size || (output >>> 0) + 32 > size)
+    ) return ERRNO_INVAL;
+    return poll(input, output, count, ...rest);
+  };
+
   // Bound guest path copies while allowing /include mount prefixes and the
   // reference runtime's /dev/.. root probe. User workspace/output paths still
   // pass exact pathBytes checks before input copies and output publication.
@@ -179,10 +321,30 @@ export function boundWasiIO(wasi: WASI, limits: ResourceLimits): void {
     wasi.wasiImport[name] = (...args: unknown[]) => {
       for (const position of positions) {
         if (((args[position] as number) >>> 0) > guestPathBytes) {
-          throw new Error("pathBytes resource limit exceeded");
+          throw new LimitError("pathBytes");
         }
       }
       return original(...args);
+    };
+  }
+
+  // Cap live descriptors. path_open is the only import that adds one; close
+  // and renumber are the only ones that release slots.
+  let live = wasi.fds.filter((descriptor) => descriptor !== undefined).length;
+  const open = wasi.wasiImport.path_open;
+  wasi.wasiImport.path_open = (...args: unknown[]) => {
+    if (live >= maximumDescriptors) return ERRNO_NFILE;
+    const ret = open(...args);
+    if (ret === 0) live++;
+    return ret;
+  };
+  for (const name of ["fd_close", "fd_renumber"]) {
+    const original = wasi.wasiImport[name];
+    wasi.wasiImport[name] = (fd: number, ...args: unknown[]) => {
+      const held = wasi.fds[fd] !== undefined;
+      const ret = original(fd, ...args);
+      if (held && wasi.fds[fd] === undefined) live--;
+      return ret;
     };
   }
 }

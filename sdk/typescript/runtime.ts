@@ -1,4 +1,9 @@
-import { boundedStream, boundFilesystem, boundWasiIO } from "./resource-fs.ts";
+import {
+  boundedStream,
+  boundFilesystem,
+  boundWasiIO,
+  LimitError,
+} from "./resource-fs.ts";
 import { checkPath } from "./limits.ts";
 import { defaultLimits, type ResourceLimits } from "./types.ts";
 import WASI from "../../ref/browser_wasi_shim/src/wasi.ts";
@@ -99,23 +104,28 @@ function collectFiles(
       const path = current.prefix + name;
       checkPath(path, limits);
       if (++entries > limits.outputEntries) {
-        throw new Error("outputEntries resource limit exceeded");
+        throw new LimitError("outputEntries");
       }
       if (inode instanceof Directory) {
         pending.push({ directory: inode, prefix: path + "/" });
       } else if (inode instanceof File) {
         bytes += inode.data.length;
-        if (bytes > limits.outputBytes) {
-          throw new Error("outputBytes resource limit exceeded");
-        }
+        if (bytes > limits.outputBytes) throw new LimitError("outputBytes");
         selected.push([path, inode]);
       } else throw new Error(`unsupported generated filesystem entry: ${path}`);
     }
   }
   // Validate the complete output before copying it, including hard-link aliases.
-  const files: Record<string, Uint8Array> = Object.create(null);
+  // The result is a plain object so both execution modes return one shape;
+  // guest-chosen names such as "__proto__" are defined as own data properties.
+  const files: Record<string, Uint8Array> = {};
   for (const [path, inode] of selected) {
-    files[path] = new Uint8Array(inode.data);
+    Object.defineProperty(files, path, {
+      value: new Uint8Array(inode.data),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
   }
   return files;
 }
@@ -228,7 +238,7 @@ export async function runCommand(
   boundWasiIO(wasi, limits);
 
   let code: number;
-  let generated: Record<string, Uint8Array> = Object.create(null);
+  let generated: Record<string, Uint8Array> = {};
   try {
     const instance = await WebAssembly.instantiate(module, {
       wasi_snapshot_preview1: wasi.wasiImport,
