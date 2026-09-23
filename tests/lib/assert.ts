@@ -68,6 +68,20 @@ export function assertBytesEqual(
   throw new Error(lines.join("\n"));
 }
 
+/** Fails with a unified diff when two texts differ. */
+export function assertTextEqual(
+  actual: string,
+  expected: string,
+  label: string,
+): void {
+  if (actual === expected) return;
+  throw new Error(
+    `${label}: text differs\n${
+      unifiedDiff(actual, expected, "actual", "expected")
+    }`,
+  );
+}
+
 /**
  * Compares two trees (directories or in-memory file maps). The failure lists
  * paths missing from `actual`, paths only in `actual`, and changed paths, then
