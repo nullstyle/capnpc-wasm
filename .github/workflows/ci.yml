@@ -13,16 +13,18 @@ on:
 permissions:
   contents: read
 
+# Pull-request runs share one group per ref and cancel superseded runs. Every
+# other run (a push to main, a manual dispatch) gets its own group, so a new
+# commit on main neither cancels nor replaces the run of the one before it.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 defaults:
   run:
     shell: bash
 
 env:
-  MISE_GITHUB_TOKEN: ${{ github.token }}
   CMAKE_BUILD_PARALLEL_LEVEL: "4"
   CARGO_BUILD_JOBS: "4"
 
@@ -30,19 +32,28 @@ jobs:
   check:
     name: Clean checkout (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Install Linux host development libraries
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-14 pkg-config
+      # Confine the token to this step, where the WASI SDK resolves through the
+      # GitHub releases API. mise-action exports MISE_GITHUB_TOKEN to every later
+      # step unless the variable is already set, so it is set here as step env.
+      # Later steps run repository code without it: the tools are installed by
+      # then, and the Deno worker runtime downloads from dl.deno.land.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
           version: 2026.9.1
       - name: Initialize only pinned top-level references
@@ -58,10 +69,16 @@ jobs:
       # reads its version from sdk/typescript/worker-client.ts.
       - name: Verify supported Deno worker execution and termination
         run: mise run test:deno-worker
-      - name: Verify checks leave tracked sources unchanged
-        run: git diff --exit-code
+      - name: Verify checks leave the tree unchanged
+        run: |
+          changes="$(git status --porcelain)"
+          if [ -n "$changes" ]; then
+            echo "checks left tracked or untracked changes:"
+            echo "$changes"
+            exit 1
+          fi
       - name: Preserve failing test fixtures
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: check-${{ matrix.os }}-fixtures
@@ -72,14 +89,23 @@ jobs:
   browsers:
     name: Chromium, Firefox, and WebKit
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
       - name: Install Linux host development libraries
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-14 pkg-config
+      # Confine the token to this step, where the WASI SDK resolves through the
+      # GitHub releases API. mise-action exports MISE_GITHUB_TOKEN to every later
+      # step unless the variable is already set, so it is set here as step env.
+      # Later steps run repository code without it: the tools are installed by
+      # then, and the Deno worker runtime downloads from dl.deno.land.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
           version: 2026.9.1
       - name: Initialize only pinned top-level references
@@ -99,8 +125,16 @@ jobs:
         run: mise run test:browser chromium firefox webkit
       - name: Verify Schema Studio workflows and native output parity
         run: mise run test:studio chromium firefox webkit
+      - name: Verify checks leave the tree unchanged
+        run: |
+          changes="$(git status --porcelain)"
+          if [ -n "$changes" ]; then
+            echo "checks left tracked or untracked changes:"
+            echo "$changes"
+            exit 1
+          fi
       - name: Preserve failing browser fixtures
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: browser-fixtures
