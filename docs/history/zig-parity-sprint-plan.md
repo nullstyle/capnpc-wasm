@@ -1,5 +1,11 @@
 # Zig parity sprint: RPC typing and release-candidate hardening
 
+> Historical document. This plan was written before the sprint and marked
+> implemented on 2026-09-08. It was moved here and renamed from
+> `zig-parity-next-sprint.md` on 2026-09-22. The "likely native files" it names
+> are files in the capnp-zig repository. Current Zig behavior is documented in
+> the [Zig generator guide](../../generators/zig/README.md).
+
 Status: implemented with local acceptance completed, 2026-09-08. This document
 retains the acceptance plan;
 [implementation results](zig-parity-sprint-results.md) record the delivered

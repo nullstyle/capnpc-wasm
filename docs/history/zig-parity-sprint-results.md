@@ -1,9 +1,15 @@
 # Zig parity sprint implementation
 
+> Historical document. This is the local acceptance receipt for native capnp-zig
+> revision `86106c2`, frozen on 2026-09-08 and moved here on 2026-09-22. The
+> pinned reference has since advanced to `0fb8df4`; current gate status lives in
+> [release readiness](../release-readiness.md).
+
 This is the historical receipt for native revision `86106c2` and its original
 downstream synchronization manifest. Later fixes, reference updates, hosted CI,
-and package work are tracked in [release readiness](release-readiness.md).
-References to the final candidate below mean the end of that earlier sprint.
+and package work were tracked in the
+[release confidence narrative](release-confidence-2026-09.md). References to the
+final candidate below mean the end of that earlier sprint.
 
 This sprint implements the approved RPC typing and release-candidate hardening
 plan in `capnp-zig` and mirrors the matching runtime/generator into
