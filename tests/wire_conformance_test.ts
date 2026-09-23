@@ -1,41 +1,9 @@
-const root = Deno.cwd();
-const decoder = new TextDecoder();
+import { assert, assertBytesEqual } from "./lib/assert.ts";
+import { nativeBin, root, zigCacheDir } from "./lib/paths.ts";
+import { decodeText, mustSucceed, run } from "./lib/process.ts";
+import { testSuite } from "./lib/workdir.ts";
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
-}
-
-async function command(args: string[], cwd: string, stdin?: Uint8Array) {
-  const child = new Deno.Command(args[0], {
-    args: args.slice(1),
-    cwd,
-    stdin: stdin ? "piped" : "null",
-    stdout: "piped",
-    stderr: "piped",
-    signal: AbortSignal.timeout(60_000),
-  }).spawn();
-  const output = child.output();
-  if (stdin) {
-    const writer = child.stdin.getWriter();
-    try {
-      await writer.write(stdin);
-      await writer.close();
-    } catch (error) {
-      if (!(error instanceof Deno.errors.BrokenPipe)) throw error;
-    } finally {
-      writer.releaseLock();
-    }
-  }
-  return await output;
-}
-
-async function mustSucceed(args: string[], cwd: string) {
-  const result = await command(args, cwd);
-  assert(
-    result.success,
-    `${args[0]} exited ${result.code}: ${decoder.decode(result.stderr)}`,
-  );
-}
+const suite = testSuite("wire-conformance-");
 
 type ListCase = {
   name: string;
@@ -132,14 +100,6 @@ const listCases: ListCase[] = [
     prefill: true,
   },
 ];
-
-function equalBytes(actual: Uint8Array, expected: Uint8Array, name: string) {
-  assert(actual.length === expected.length, `${name}: byte length differs`);
-  assert(
-    actual.every((byte, index) => byte === expected[index]),
-    `${name}: bytes differ`,
-  );
-}
 
 function checkWireWords(
   bytes: Uint8Array,
@@ -250,12 +210,8 @@ function listExpectation(fixture: ListCase) {
   return { type, expected: `(items = [${values.join(", ")}])` };
 }
 
-Deno.test("Zig wire conformance against reference C++", async (t) => {
-  await Deno.mkdir(`${root}/build/test`, { recursive: true });
-  const work = await Deno.makeTempDir({
-    dir: `${root}/build/test`,
-    prefix: "wire-conformance-",
-  });
+suite.test("Zig wire conformance against reference C++", async (t) => {
+  const work = await suite.workDir();
   const variants = [
     {
       name: "upstream",
@@ -278,17 +234,13 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
   ];
 
   async function decode(directory: string, name: string, type: string) {
-    const result = await command(
-      [
-        `${root}/build/native/bin/capnp`,
-        "decode",
-        "--short",
-        `${root}/tests/wire/probe.capnp`,
-        type,
-      ],
-      root,
-      await Deno.readFile(`${directory}/${name}.bin`),
-    );
+    const result = await run([
+      `${nativeBin}/capnp`,
+      "decode",
+      "--short",
+      `${root}/tests/wire/probe.capnp`,
+      type,
+    ], { stdin: await Deno.readFile(`${directory}/${name}.bin`) });
     await Deno.writeFile(`${directory}/${name}.stdout.txt`, result.stdout);
     await Deno.writeFile(`${directory}/${name}.stderr.txt`, result.stderr);
     return result;
@@ -326,11 +278,9 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
     const result = await decode(directory, name, type);
     assert(
       result.success,
-      `${name}: C++ decode exited ${result.code}: ${
-        decoder.decode(result.stderr)
-      }`,
+      `${name}: C++ decode exited ${result.code}: ${decodeText(result.stderr)}`,
     );
-    const actual = decoder.decode(result.stdout).replace(/\s+/g, " ").trim();
+    const actual = decodeText(result.stdout).replace(/\s+/g, " ").trim();
     assert(
       actual === expected,
       `${name}: expected ${expected}, got ${actual}`,
@@ -350,8 +300,8 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
       `${name}: expected C++ validation rejection (exit 1), got exit ${result.code}, signal ${result.signal}; review known-failure expectations if the runtime changes`,
     );
     assert(
-      decoder.decode(result.stderr).includes(diagnostic),
-      `${name}: expected ${diagnostic}, got ${decoder.decode(result.stderr)}`,
+      decodeText(result.stderr).includes(diagnostic),
+      `${name}: expected ${diagnostic}, got ${decodeText(result.stderr)}`,
     );
   }
 
@@ -373,7 +323,7 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
           "build-exe",
           ...(variant.wasm ? ["-target", "wasm32-wasi"] : []),
           "--cache-dir",
-          `${root}/build/zig/cache`,
+          zigCacheDir,
           "--dep",
           "capnpc-zig",
           "--dep",
@@ -382,12 +332,12 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
           `-Mcapnpc-zig=${root}/${variant.source}/src/lib_core.zig`,
           `-Mprobe-options=${options}`,
           `-femit-bin=${executable}`,
-        ], root);
+        ], { label: `${variant.name} probe build` });
         await mustSucceed(
           variant.wasm
             ? ["wasmtime", "run", `--dir=${directory}::.`, executable]
             : [executable],
-          directory,
+          { cwd: directory, label: `${variant.name} probe` },
         );
       },
     );
@@ -449,7 +399,7 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
     await t.step(
       `${variant.name}: writer equals independent encoding fixture`,
       async () => {
-        equalBytes(
+        assertBytesEqual(
           await Deno.readFile(`${directory}/distinct-data-list.bin`),
           await Deno.readFile(
             `${directory}/${
@@ -468,7 +418,7 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
     "same/single-far encodings remain identical to pristine",
     async () => {
       for (const name of ["same-segment-list", "single-far-list"]) {
-        equalBytes(
+        assertBytesEqual(
           await Deno.readFile(`${work}/patched/${name}.bin`),
           await Deno.readFile(`${work}/upstream/${name}.bin`),
           name,
@@ -479,7 +429,7 @@ Deno.test("Zig wire conformance against reference C++", async (t) => {
   await t.step("native and WASI probes emit identical bytes", async () => {
     for await (const entry of Deno.readDir(`${work}/patched`)) {
       if (!entry.name.endsWith(".bin")) continue;
-      equalBytes(
+      assertBytesEqual(
         await Deno.readFile(`${work}/patched-wasi/${entry.name}`),
         await Deno.readFile(`${work}/patched/${entry.name}`),
         entry.name,
