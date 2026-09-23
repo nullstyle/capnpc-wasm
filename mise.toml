@@ -52,6 +52,11 @@ GOCACHE = "{{config_root}}/.cache/go-build"
 GOTOOLCHAIN = "local"
 ZIG_GLOBAL_CACHE_DIR = "{{config_root}}/.cache/zig"
 PLAYWRIGHT_BROWSERS_PATH = "{{config_root}}/.cache/playwright"
+# mise starts the native builds together (two Ninja builds and Cargo), so cap
+# each at about half the cores. A value already set in the environment or in
+# mise.local.toml wins; MISE_JOBS or [settings] jobs bounds the tasks themselves.
+CMAKE_BUILD_PARALLEL_LEVEL = "{% set half = (num_cpus() | int) / 2 %}{% if get_env(name='CMAKE_BUILD_PARALLEL_LEVEL', default='') == '' %}{{ half | round(method='ceil') | int }}{% else %}{{ get_env(name='CMAKE_BUILD_PARALLEL_LEVEL') }}{% endif %}"
+CARGO_BUILD_JOBS = "{% set half = (num_cpus() | int) / 2 %}{% if get_env(name='CARGO_BUILD_JOBS', default='') == '' %}{{ half | round(method='ceil') | int }}{% else %}{{ get_env(name='CARGO_BUILD_JOBS') }}{% endif %}"
 # Probe the pinned native linker on macOS and export a working SDKROOT (or
 # Xcode's linker) only when the default SDK cannot link. Runs after tools so it
 # sees the pinned compilers; exports nothing where the default link works.
@@ -77,7 +82,13 @@ run = [{ task = "refs:sync" }, { task = "doctor" }]
 
 [tasks."refs:sync"]
 description = "Initialize top-level reference submodules at their recorded commits"
-run = ["git submodule sync", "git -c submodule.recurse=false submodule update --init", "git -C ref/capnp-zig fetch --no-tags origin $(cat generators/zig/historical-reference)"]
+run = [
+  "git submodule sync",
+  "git -c submodule.recurse=false submodule update --init",
+  # The historical generator commit is not on the pinned branch. Fetch it only
+  # when it is missing, so a later setup works offline.
+  'historical="$(cat generators/zig/historical-reference)"; git -C ref/capnp-zig cat-file -e "$historical^{commit}" 2>/dev/null || git -C ref/capnp-zig fetch --no-tags origin "$historical"',
+]
 
 [tasks."refs:status"]
 description = "Show the exact reference checkouts"
@@ -246,8 +257,8 @@ depends = ["build:wasm", "build:rust", "build:go", "build:zig"]
 run = "bash scripts/build-sdk.sh"
 
 [tasks."browser:install"]
-description = "Install pinned Chromium, Firefox, and WebKit into the project cache"
-run = "deno run --config tests/browser/deno.json --frozen --allow-read --allow-write=.cache/playwright --allow-env --allow-sys --allow-net --allow-run=deno,cmake tests/browser/install.ts"
+description = "Install pinned Chromium, Firefox, and WebKit into PLAYWRIGHT_BROWSERS_PATH (the project cache by default)"
+run = 'deno run --config tests/browser/deno.json --frozen --allow-read --allow-write="$PLAYWRIGHT_BROWSERS_PATH" --allow-env --allow-sys --allow-net --allow-run=deno,cmake tests/browser/install.ts'
 
 [tasks."test:browser"]
 description = "Run offline SDK parity and cancellation in Chromium, Firefox, and WebKit"
@@ -288,9 +299,9 @@ depends = ["build:sdk"]
 run = "deno run --check --no-prompt --allow-read=dist examples/deno.ts"
 
 [tasks."example:browser"]
-description = "Serve Schema Studio with its local compiler and generator assets"
+description = "Serve Schema Studio with its local compiler and generator assets (port 8080, or `-- <port>`)"
 depends = ["build:studio"]
-run = "deno run --allow-read=dist/studio --allow-net=127.0.0.1:8080 scripts/serve-example.ts"
+run = "deno run --allow-read=dist/studio --allow-net=127.0.0.1 scripts/serve-example.ts"
 
 [tasks."build:studio"]
 description = "Build the complete static Schema Studio website"
