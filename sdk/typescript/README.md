@@ -17,15 +17,18 @@ a CDN.
 ```ts
 import { createWorkerCompiler } from "./dist/typescript/mod.js";
 
-const bytes = async (url) => {
+const bytes = async (url: string) => {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`HTTP ${response.status}: ${url}`);
   return new Uint8Array(await response.arrayBuffer());
 };
-const compiler = await createWorkerCompiler("./dist/typescript/worker.js", {
-  compiler: await bytes("./dist/wasm/capnp.wasm"),
-  generators: { rust: await bytes("./dist/wasm/capnpc-rust.wasm") },
-});
+const compiler = await createWorkerCompiler(
+  new URL("./dist/typescript/worker.js", location.href),
+  {
+    compiler: await bytes("./dist/wasm/capnp.wasm"),
+    generators: { rust: await bytes("./dist/wasm/capnpc-rust.wasm") },
+  },
+);
 try {
   const result = await compiler.compile({
     files: {
@@ -34,11 +37,20 @@ try {
     entrypoints: ["person.capnp"],
     generators: ["rust"],
   });
-  console.log(new TextDecoder().decode(result.outputs.rust["person_capnp.rs"]));
+  // `outputs` is keyed by the generators you requested, so index it with `!`
+  // (or a guard) under strict TypeScript.
+  console.log(
+    new TextDecoder().decode(result.outputs.rust!["person_capnp.rs"]),
+  );
 } finally {
   compiler.dispose();
 }
 ```
+
+The worker URL is resolved once, when the client is created: a relative string
+resolves against `location.href` in browsers, and Deno needs an absolute URL (or
+a `URL` object). Engines that expose `Symbol.dispose` can also manage the client
+with `using`.
 
 See [Schema Studio](../../examples/browser/README.md) for a complete browser
 workbench with multi-file editing, language selection, and ZIP downloads, and
@@ -90,13 +102,16 @@ resolve normally within this snapshot. Absolute imports resolve through
 `$Go.package`/`$Go.import` annotations. Dependencies must be present before the
 job starts.
 
-`importPaths` optionally supplies ordered directories within `files`, searched
-before `/include` for absolute imports. `sourcePrefix` optionally chooses a
-directory within `files` to strip from requested filenames. Both use canonical
-relative POSIX directory names; `""` means the `/src` root. Absolute paths,
-backslashes, parent traversal and duplicate import roots are rejected. These
-options change compiler arguments only: schema text, read-only input isolation,
-and the binary request format remain unchanged. For example:
+`importPaths` optionally lists directories within `files`, searched in order
+before `/include` for absolute imports. An omitted or empty list adds no roots;
+the element `""` names the `/src` root itself. `sourcePrefix` optionally chooses
+a directory within `files` to strip from requested filenames; `""` (the default)
+keeps names relative to `/src`. Both use canonical relative POSIX directory
+names. Absolute paths, backslashes, parent traversal, duplicate import roots,
+and entries that are not directories implied by a path in `files` (missing
+directories, or files) are rejected with `TypeError` before the compiler runs.
+These options change compiler arguments only: schema text, read-only input
+isolation, and the binary request format remain unchanged. For example:
 
 ```ts
 const result = await compiler.compile({
@@ -125,12 +140,37 @@ unpacked `CodeGeneratorRequest` on stdin. Results contain `request` bytes,
 `outputs[language][relativePath]` bytes, and `diagnostics` with stage and raw
 stderr. Inputs are copied before execution; returned bytes belong to the caller.
 Nothing is written to the application's workspace. Results are returned only
-when every requested generator succeeds.
+when every requested generator succeeds. `outputs` and each language's file map
+are plain objects in both execution modes. Output names are chosen by the
+generator and defined as own properties, so a file called `__proto__` is an
+ordinary entry; enumerate with `Object.keys` or `Object.entries`.
 
-Invalid SDK inputs reject with `TypeError`. Guest failures reject with
-`CompileError`, whose `stage`, `diagnostics`, and optional `exitCode` preserve
-the upstream failure. Traps also retain captured stderr. Source locations are
-not inferred from human-readable diagnostics.
+## Errors
+
+Both factories and both execution modes throw the same classes with the same
+messages; the worker path rebuilds them from a typed protocol rather than
+matching on `name`, and `cause` carries a name/message summary of the original
+cause chain.
+
+| Failure                                                                                                                                                   | Rejection                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Invalid caller input: paths, entrypoints, generators, import roots, request bytes, limits, module shape                                                   | `TypeError`, before any copy, post, or guest start                                                                                      |
+| Module bytes the SDK cannot bound, or that the engine rejects (corrupt bytes, unsupported instructions)                                                   | `TypeError`; when the engine rejected it, `cause` is the engine's `WebAssembly.CompileError`                                            |
+| Engine without standardized Wasm exception handling                                                                                                       | `TypeError` from the factory, before any module is compiled; see below                                                                  |
+| A guest stage exits nonzero                                                                                                                               | `CompileError` with `stage`, `exitCode`, and every stage's `diagnostics`                                                                |
+| A guest stage traps, or exceeds a host budget while running (stdout, stderr, output bytes or entries, path length, or `requestBytes` for compiler output) | `CompileError` with `stage`, no `exitCode`, `diagnostics` captured so far, and `cause`; a budget failure names the limit in its message |
+| A caller input exceeds a budget before any guest starts (`workspaceBytes`, `workspaceEntries`, `pathBytes`, or `requestBytes` for a supplied request)     | `TypeError` reading `<subject> exceeds <limit> limit`                                                                                   |
+| Worker job cancelled                                                                                                                                      | `DOMException` named `TimeoutError`, or the abort `signal.reason` (an `AbortError` by default)                                          |
+| Worker client disposed, or a second concurrent job                                                                                                        | `Error` (`worker compiler is disposed`, `worker compiler already has an active job`)                                                    |
+| Worker script failed to load, or the worker crashed                                                                                                       | `Error` with the engine's message                                                                                                       |
+| Unsupported worker runtime                                                                                                                                | `Error` naming the runtime and pointing to `createCompiler`                                                                             |
+
+One budget can therefore surface either way, depending on when it is detected:
+`generate` rejects an oversized supplied request with `TypeError` before
+starting, while `compile` bounds the compiler's request output with the same
+`requestBytes` limit while the guest runs and reports an overrun as
+`CompileError`. Traps also retain captured stderr. Source locations are not
+inferred from human-readable diagnostics.
 
 ## Execution and cancellation
 
@@ -141,29 +181,57 @@ hard timeout.
 
 `createWorkerCompiler(workerURL, modules, options?)` executes off the main
 thread. Its `compile(request, { signal, timeoutMs })` accepts an `AbortSignal`
-and defaults to a 30-second deadline, including restart time. Aborting or timing
-out requests worker termination and rejects the job. The next job creates a
-fresh worker using private copies of the original modules. `dispose()` rejects
-pending work and terminates the client permanently. One job may be active per
-worker client; use separate clients for parallel jobs.
+and defaults to a 30-second deadline, including restart time. `dispose()`
+rejects pending work and terminates the client permanently. One job may be
+active per worker client; use separate clients for parallel jobs.
 
-Deno worker execution currently requires **Deno 2.6.8**, exported as
-`supportedDenoWorkerVersion`. Other Deno versions fail before a worker is
-created, with guidance to use that version or `createCompiler` without a hard
-deadline. Deno 2.6.8 deliberately allows a two-second engine termination grace
-after `terminate()`; rejection does not mean guest CPU stopped immediately. The
-client waits 2.1 seconds before restarting a terminated Deno worker, and
-includes that wait in the next job's deadline. Browser workers do not use this
-Deno delay. The [runtime evidence](../../docs/deno-worker-termination.md)
-records a real shared counter that stops within the grace on 2.6.8 and continues
-on newer tested engines. Direct compilation remains tested on the producer's
-pinned Deno 2.9.6.
+Restart policy: the worker is terminated and replaced only when a job times out
+or is aborted, when the client is disposed, or when the worker itself fails (a
+script load error, an uncaught worker error, an undeliverable message). The next
+job then creates a fresh worker from private copies of the original modules.
+Ordinary rejections, `TypeError` for invalid input and `CompileError` for schema
+errors, traps and budget overruns, keep the worker: every job already runs fresh
+guest instances and filesystems, so the next job starts immediately with no
+restart and no recompilation.
 
-Worker initialization also has a 30-second timeout. Worker script loading is a
-host action: to restart completely offline, fetch `worker.js` in advance and use
-a blob URL, as the browser test does. Keep that URL alive until the client is
+Runtime policy: worker execution is admitted only where `terminate()` is
+verified to stop a running Wasm guest, which today means browsers and exactly
+**Deno 2.6.8** (exported as `supportedDenoWorkerVersion`). Other Deno versions,
+Bun, Node.js, and unrecognized hosts are rejected before any worker is created,
+with an `Error` that points to `createCompiler` for direct execution without a
+hard deadline. Deno 2.6.8 deliberately allows a two-second engine termination
+grace after `terminate()`; rejection does not mean guest CPU stopped
+immediately. The client waits 2.1 seconds before restarting a terminated Deno
+worker, and includes that wait in the next job's deadline; disposing the client
+during that wait rejects the waiting job at once. The
+[runtime evidence](../../docs/deno-worker-termination.md) records a real shared
+counter that stops within the grace on 2.6.8 and continues on newer tested
+engines. Direct compilation remains tested on the producer's pinned Deno 2.9.6.
+
+Browser workers use no restart delay, but termination is not immediate there
+either. WebKit never stops a running Wasm guest on `terminate()`. Chromium stops
+it after about 2 s. Firefox is untested. A later change addresses this; until
+then, treat a rejected cancellation as a request, not as proof that the guest
+stopped.
+
+Worker initialization accepts `{ signal, initTimeoutMs }` alongside `limits`:
+the default deadline is 30 seconds, and aborting terminates the starting worker
+and rejects the factory with `signal.reason`. Worker script loading is a host
+action: to restart completely offline, fetch `worker.js` in advance and use a
+blob URL, as the browser test does. Keep that URL alive until the client is
 disposed. The SDK does not inject CSP exceptions; the application controls where
 workers can be loaded.
+
+## Engine requirements
+
+The compiler modules use standardized WebAssembly exception handling
+(`try_table` and `exnref`). Both factories probe for it with
+`WebAssembly.validate` before compiling anything and reject with a `TypeError`
+that names the requirement when it is missing; `supportsWasmExceptions()` is
+exported so applications can gate their UI ahead of time. Approximate first
+releases with that support are Chrome 137, Firefox 131, Safari 18.4, and Deno
+2.3; the SDK is tested in the pinned Deno, Chromium, Firefox, and WebKit
+versions.
 
 ## Resource limits
 
@@ -193,11 +261,20 @@ const compiler = await createWorkerCompiler(workerURL, modules, {
 | `stdoutBytes`      | 64 MiB          | Captured stdout per command                                   |
 | `stderrBytes`      | 1 MiB           | Captured stderr per command                                   |
 
-Limits must be nonnegative safe integers. Zero disallows the corresponding
-resource; `memoryPages` instead accepts 1 through 65,536. Compiler stdout is
-also bounded by `requestBytes`. Workspace size is checked before encoding
-strings, copying byte contents, or posting a worker message. String contents are
-measured as UTF-8; returned and retained bytes remain private snapshots.
+Limits must be nonnegative safe integers; an `undefined` entry means the
+default. Zero disallows the corresponding resource; `memoryPages` instead
+accepts 1 through 65,536. Compiler stdout is also bounded by `requestBytes`.
+Workspace size is checked before encoding strings, copying byte contents, or
+posting a worker message. String contents are measured as UTF-8; returned and
+retained bytes remain private snapshots.
+
+Host work that a guest sizes through WASI arguments is bounded by guest memory
+rather than by these limits. Read, write, and random-fill requests are checked
+against the guest's own memory before any host allocation, so a one-page guest
+cannot make the host allocate more than a page; out-of-range pointers and counts
+return `EINVAL` to the guest. A command may hold at most 1,024 live descriptors
+(`ENFILE` beyond that), which keeps host memory independent of how long a guest
+that never closes files runs. These are fixed internal bounds, not options.
 
 Before compilation, the SDK inserts or lowers the maximum in the module's memory
 section. The engine then validates the resulting module and enforces its maximum
@@ -220,9 +297,7 @@ reported through the guest's usual exit/trap behavior.
 These are per-workspace/per-command bounds, not a total JavaScript heap or
 process memory limit: snapshots, generated results, module compilation, and
 concurrent clients need additional host storage. Use the worker API to bound
-execution time as well as resources. The SDK is tested in the pinned Deno,
-Chromium, Firefox, and WebKit versions; the C++ modules require standardized
-Wasm exception handling.
+execution time as well as resources.
 
 Repeated active-worker cancellation stalled in the older tested WebKit revisions
 2248 and 2311. The current WebKit 26.6 / revision 2359 passed the same stress
@@ -233,15 +308,25 @@ installed browsers. Validate the browser versions your application supports.
 
 ## Verification
 
-`mise run test` runs the pinned-Deno SDK tests using only read permission,
-including direct execution, explicit rejection of unsupported worker runtimes,
-exact resource boundaries, oversized sparse output writes, descriptor
-renumbering, and guest memory growth. CI additionally runs the same suite on
-Deno 2.6.8 with worker tests enabled and a bounded subprocess probe of actual
-worker termination, plus the external compiler-host package consumer. Worker
-tests are explicitly ignored on unsupported Deno versions; that does not replace
-the required supported-runtime lane. `mise run browser:install` installs the
-pinned browsers, then `mise run test:browser` compares every generated byte with
-native output in all three engines, blocks network and revokes process
-permissions after loading assets, and tests worker cancellation and reuse. See
-`tests/browser/README.md` for test-host requirements.
+`mise run test:sdk` runs every test file under `sdk/typescript/` on the pinned
+Deno using only read permission: direct execution, explicit rejection of
+unsupported worker runtimes, exact resource boundaries, oversized sparse output
+writes, descriptor renumbering, guest memory growth, input-shape and import-root
+validation, engine capability detection (`environment_test.ts`), and hostile
+one-page guests that ask the host for oversized reads, random fills, descriptor
+floods, out-of-range pointers, and read-only mutations (`host_bounds_test.ts`,
+using guests embedded from `tests/browser/guests/`). `mise run test` runs
+`sdk_test.ts` as part of the full suite. Running the same command with Deno
+2.6.8 enables the worker tests, including `worker_test.ts`: no restart after
+ordinary errors, identical error classes and messages in both modes, result
+shapes, script load and initialization failures, aborted initialization, and
+disposal during the restart wait. CI runs that lane together with a bounded
+subprocess probe of actual worker termination and the external compiler-host
+package consumer. Worker tests are explicitly ignored on unsupported Deno
+versions; that does not replace the required supported-runtime lane.
+`mise run browser:install` installs the pinned browsers, then
+`mise run test:browser` compares every generated byte with native output in all
+three engines, blocks network and revokes process permissions after loading
+assets, runs the same hostile guests in both modes, and tests worker
+cancellation and reuse. See `tests/browser/README.md` for test-host
+requirements.

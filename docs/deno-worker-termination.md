@@ -41,10 +41,16 @@ identify a Deno source regression, establish termination bounds for untested
 versions/platforms, or justify claiming that promise rejection immediately stops
 guest CPU. Browser-worker cancellation has independent browser acceptance tests.
 
-The SDK now admits Deno worker execution only on the verified 2.6.8 version.
-Direct compilation remains available on other runtimes. It waits 2.1 seconds
-before restarting a terminated Deno worker, counting the wait toward the next
-job's deadline. CI retains supported-Deno worker tests and the real termination
-probe; the producer-pinned Deno checks direct execution and early rejection of
-unsupported worker use. This is a host compatibility policy, not a Deno engine
-fix.
+The SDK now admits Deno worker execution only on the verified 2.6.8 version, and
+browsers; Bun, Node.js and unrecognized hosts are rejected before a worker is
+created. Direct compilation remains available on other runtimes. It waits 2.1
+seconds before restarting a terminated Deno worker, counting the wait toward the
+next job's deadline, and it terminates a worker only for timeouts, aborts,
+disposal, and worker failures, never for ordinary job errors. CI retains
+supported-Deno worker tests and the real termination probe; the producer-pinned
+Deno checks direct execution and early rejection of unsupported worker use. This
+is a host compatibility policy, not a Deno engine fix.
+
+Browser engines have their own termination behavior, which the SDK does not yet
+compensate for: WebKit never stops a running Wasm guest on `terminate()`.
+Chromium stops it after about 2 s. Firefox is untested.
