@@ -116,11 +116,13 @@ Firefox is untested. The recovery cycles below show that replacement workers
 keep producing correct output; they do not show that the terminated guest
 stopped consuming CPU.
 
-Hosted CI runs `mise run check` from clean Linux and macOS checkouts. A separate
-Linux job installs the browser system libraries with the pinned Playwright CLI
-and executes this complete three-engine suite. Build trees are not restored from
-caches, and failed test fixtures plus the exact tested Wasm modules and SDK
-bundles are retained as workflow artifacts.
+Hosted CI runs this complete three-engine suite and the Schema Studio suite in a
+separate Linux job after installing the browser system libraries with the pinned
+Playwright CLI; the clean-checkout job on Linux and macOS runs `mise run check`,
+`mise run test:package`, and the Deno 2.6.8 worker lane. The lanes are listed in
+[CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes). Build trees
+are not restored from caches, and failed test fixtures plus the exact tested
+Wasm modules and SDK bundles are retained as workflow artifacts.
 
 Published package installation and application-specific Content Security
 Policies are outside this suite's current coverage. Browser versions follow the
