@@ -14,6 +14,7 @@ import {
 } from "./lib/hosts.ts";
 import {
   canonicalRequest,
+  clangxx,
   type DiagnosticNormalization,
   nativeCompile,
   normalizeDiagnostic,
@@ -441,15 +442,17 @@ for (const host of wasmHosts) {
             label: `${host.name} C++ generator`,
           });
           await assertTreesEqual(output, data.expected, "generated C++");
-          await mustSucceed([
-            "clang++",
-            "-std=c++23",
-            "-fsyntax-only",
-            `-I${root}/ref/capnproto/c++/src`,
-            `-I${output}`,
-            `${output}/person.capnp.c++`,
-            `${output}/types/common.capnp.c++`,
-          ], { label: "generated C++ compilation" });
+          await mustSucceed(
+            clangxx([
+              "-std=c++23",
+              "-fsyntax-only",
+              `-I${root}/ref/capnproto/c++/src`,
+              `-I${output}`,
+              `${output}/person.capnp.c++`,
+              `${output}/types/common.capnp.c++`,
+            ]),
+            { label: "generated C++ compilation" },
+          );
         },
       );
     }

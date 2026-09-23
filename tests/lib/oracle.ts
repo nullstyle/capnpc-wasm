@@ -3,7 +3,15 @@
 // normalizing diagnostics so Wasm stderr can be compared with native stderr.
 
 import { nativeBin, root } from "./paths.ts";
-import { mustSucceed } from "./process.ts";
+import { ldflags, mustSucceed } from "./process.ts";
+
+/**
+ * A native clang++ command line with the host's LDFLAGS appended, so a link
+ * works in the toolchain env script's `-fuse-ld` fallback mode as well.
+ */
+export function clangxx(args: readonly string[]): string[] {
+  return ["clang++", ...args, ...ldflags()];
+}
 
 /** Stages the pinned standard annotation schemas beneath `directory`. */
 export async function stageStandardIncludes(directory: string): Promise<void> {

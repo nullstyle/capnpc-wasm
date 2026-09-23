@@ -7,15 +7,17 @@ import { root } from "./paths.ts";
 /**
  * Host environment variables that child processes receive. Everything else is
  * dropped, so a developer's RUSTFLAGS, CARGO_* or GOFLAGS settings cannot
- * change what the consumer steps compile. Keep this list equal to the
- * `--allow-env` list of the six suite tasks in mise.toml.
+ * change what the consumer steps compile. Keep this list equal to
+ * `[vars].suite_env` in mise.toml, which the six suite tasks pass as their
+ * `--allow-env` list.
  *
- * PATH, HOME and TMPDIR are what the pinned tools need to run at all. CC, CXX
- * and SDKROOT select the native compiler and, on macOS, the platform SDK for
- * the native `clang++` and `cargo test` steps. The remaining names are the
- * mise `[env]` cache locations plus the Rust toolchain selection: the rustup
- * proxy in CARGO_HOME resolves the pinned toolchain only through
- * RUSTUP_TOOLCHAIN.
+ * PATH, HOME and TMPDIR are what the pinned tools need to run at all. CC and
+ * CXX select the native compiler; SDKROOT, LDFLAGS and the host triple's
+ * CARGO_TARGET_*_RUSTFLAGS are what scripts/lib/toolchain-env.sh exports when
+ * the default macOS SDK cannot link (see ldflags() for the LDFLAGS caveat).
+ * The remaining names are the mise `[env]` cache locations plus the Rust
+ * toolchain selection: the rustup proxy in CARGO_HOME resolves the pinned
+ * toolchain only through RUSTUP_TOOLCHAIN.
  */
 export const ENV_PASSTHROUGH: readonly string[] = [
   "CAPNP_KEEP_TEST_DIRS",
@@ -25,10 +27,13 @@ export const ENV_PASSTHROUGH: readonly string[] = [
   "CC",
   "CXX",
   "SDKROOT",
+  "LDFLAGS",
   "CARGO_TARGET_DIR",
   "CARGO_HOME",
   "RUSTUP_HOME",
   "RUSTUP_TOOLCHAIN",
+  "CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS",
+  "CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS",
   "DENO_DIR",
   "GOPATH",
   "GOCACHE",
@@ -47,6 +52,19 @@ export function envGranted(name: string): boolean {
 /** Reads a variable when permitted, without triggering a permission prompt. */
 export function envValue(name: string): string | undefined {
   return envGranted(name) ? Deno.env.get(name) : undefined;
+}
+
+/**
+ * Linker flags from LDFLAGS, whitespace-split and empty when unset. clang
+ * never reads the variable itself, and scripts/lib/toolchain-env.sh exports
+ * `-fuse-ld=<path>` through it in its fallback mode, so every direct clang++
+ * link the suites run must splice these flags into its argv (see clangxx in
+ * oracle.ts). Cargo and CMake read their own variables.
+ */
+export function ldflags(): string[] {
+  return (envValue("LDFLAGS") ?? "").split(/\s+/).filter((flag) =>
+    flag.length > 0
+  );
 }
 
 let passthrough: Record<string, string> | null | undefined;

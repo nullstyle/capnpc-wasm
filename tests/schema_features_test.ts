@@ -6,7 +6,7 @@ import {
 import { assert, assertBytesEqual, assertTreesEqual } from "./lib/assert.ts";
 import { readTree, writeTree } from "./lib/fs.ts";
 import { guestCommand, wasmHosts } from "./lib/hosts.ts";
-import { canonicalRequest, nativeCompile } from "./lib/oracle.ts";
+import { canonicalRequest, clangxx, nativeCompile } from "./lib/oracle.ts";
 import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
 import { mustSucceed } from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
@@ -134,21 +134,23 @@ for (const scenario of manifest.scenarios) {
       const output = `${work}/sdk-cpp`;
       await writeTree(output, result.outputs.cpp!);
       const executable = `${work}/consumer`;
-      await mustSucceed([
-        "clang++",
-        "-std=c++23",
-        `-I${root}/ref/capnproto/c++/src`,
-        `-I${output}`,
-        `${fixtures}/consumers/${scenario.name}.c++`,
-        ...Object.keys(result.outputs.cpp!).filter((path) =>
-          path.endsWith(".c++")
-        ).map((path) => `${output}/${path}`),
-        `${root}/build/native/lib/libcapnp.a`,
-        `${root}/build/native/lib/libkj.a`,
-        "-pthread",
-        "-o",
-        executable,
-      ], { cwd: work, label: "C++ consumer build" });
+      await mustSucceed(
+        clangxx([
+          "-std=c++23",
+          `-I${root}/ref/capnproto/c++/src`,
+          `-I${output}`,
+          `${fixtures}/consumers/${scenario.name}.c++`,
+          ...Object.keys(result.outputs.cpp!).filter((path) =>
+            path.endsWith(".c++")
+          ).map((path) => `${output}/${path}`),
+          `${root}/build/native/lib/libcapnp.a`,
+          `${root}/build/native/lib/libkj.a`,
+          "-pthread",
+          "-o",
+          executable,
+        ]),
+        { cwd: work, label: "C++ consumer build" },
+      );
       await mustSucceed([executable], { cwd: work, label: "C++ consumer" });
     });
 

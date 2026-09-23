@@ -1,6 +1,10 @@
 import { assert, assertBytesEqual } from "../lib/assert.ts";
 import { copyTree } from "../lib/fs.ts";
-import { nativeCompile, stageStandardIncludes } from "../lib/oracle.ts";
+import {
+  clangxx,
+  nativeCompile,
+  stageStandardIncludes,
+} from "../lib/oracle.ts";
 import { root, wasmBin, zigCacheDir } from "../lib/paths.ts";
 import { decodeText, mustSucceed, run } from "../lib/process.ts";
 import { testSuite } from "../lib/workdir.ts";
@@ -35,17 +39,19 @@ suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic inter
     'pub const values = @import("values.zig");\npub const brands = @import("nested/brands.zig");\npub const scalars = @import("reflection.zig");\n',
   );
   const oracle = `${work}/oracle`;
-  await mustSucceed([
-    "clang++",
-    "-std=c++23",
-    `-I${root}/ref/capnproto/c++/src`,
-    `${root}/tests/reflection/oracle.c++`,
-    `${root}/build/native/lib/libcapnp.a`,
-    `${root}/build/native/lib/libkj.a`,
-    "-pthread",
-    "-o",
-    oracle,
-  ], { label: "C++ reflection oracle build" });
+  await mustSucceed(
+    clangxx([
+      "-std=c++23",
+      `-I${root}/ref/capnproto/c++/src`,
+      `${root}/tests/reflection/oracle.c++`,
+      `${root}/build/native/lib/libcapnp.a`,
+      `${root}/build/native/lib/libkj.a`,
+      "-pthread",
+      "-o",
+      oracle,
+    ]),
+    { label: "C++ reflection oracle build" },
+  );
   for (const target of ["native", "wasi"]) {
     await t.step(
       `${target}: registry ownership and schema validation`,

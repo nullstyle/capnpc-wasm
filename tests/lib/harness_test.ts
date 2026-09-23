@@ -11,7 +11,8 @@ import {
 } from "./assert.ts";
 import { asTree } from "./fs.ts";
 import { TRAP_TEXT } from "./hosts.ts";
-import { normalizeDiagnostic } from "./oracle.ts";
+import { clangxx, normalizeDiagnostic } from "./oracle.ts";
+import { ldflags } from "./process.ts";
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
@@ -126,6 +127,17 @@ Deno.test("normalizeDiagnostic strips prefixes, masks ids and drops stack lines"
       "capnp compile: --bogus: unrecognized option",
     ].join("\n"),
     "normalized diagnostic",
+  );
+});
+
+Deno.test("clangxx keeps the arguments and appends the split LDFLAGS", () => {
+  // Without --allow-env there are no LDFLAGS to splice; the shape still holds.
+  assert(ldflags().length === 0, "LDFLAGS unreadable here must give no flags");
+  const command = clangxx(["-std=c++23", "a.cpp"]);
+  assert(
+    command[0] === "clang++" && command[1] === "-std=c++23" &&
+      command[2] === "a.cpp" && command.length === 3,
+    command.join(" "),
   );
 });
 
