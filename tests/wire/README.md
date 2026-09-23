@@ -18,9 +18,12 @@ mise exec -- deno test --allow-read --allow-write=build --allow-run tests/wire_c
 
 The suite also runs through `mise run test`. Each run leaves its binary
 fixtures, probe executables, and C++ decoder output in
-`build/test/wire-conformance-*/{upstream,patched,patched-wasi}/`. No generated
-schema code or audit scratch files are required. The public SDKs and pristine
-reference sources are unchanged.
+`build/test/wire-conformance-*/{upstream,patched,patched-wasi}/`. The variant
+names date from the patch era: `upstream` is the historical audit revision
+recorded in `generators/zig/historical-reference`, and `patched` is the current
+pinned runtime, which now builds from the pristine reference with no local
+patches. No generated schema code or audit scratch files are required. The
+public SDKs and pristine reference sources are unchanged.
 
 ## Writer matrix and independent controls
 

@@ -4,6 +4,11 @@
 generator, then compiles the generated modules and `consumer.zig` against the
 project's pinned runtime. The same consumer runs natively and as a WASI command
 in Wasmtime. Embedded descriptors and emitted messages must match byte for byte.
+The test also compiles and runs seven further `zig test` suites, described
+below, natively and under WASI: `registry_test`, `generated_builder_test`,
+`builder_evolution_test`, `double_far_validation_test`, `dynamic_failure_test`,
+`copy_limits_test`, and `fuzz_test`. `consumer.zig` additionally runs
+`list_evolution_test`, `list_failure_test`, and `generic_list_test`.
 
 Run from the repository root after `mise run build`:
 
@@ -76,6 +81,21 @@ nesting limits, invalid children, counted validation failures, ambiguous legacy
 tags, and zero-width struct-list traversal limits. Both suites run natively and
 under WASI.
 
+`dynamic_failure_test.zig` sweeps allocation failures through the dynamic
+Builder API: struct replacement, growth, group copies, list element and pointer
+replacement, and bounded copies must preserve the original reachable values,
+union selection, and unknown physical fields at every failure point, and copy
+options must reject expanded work before publishing storage.
+`copy_limits_test.zig` checks the bounded copy options (output words, work
+units, nesting, temporary allocation accounting, per-edge charging of shared
+targets, and cyclic rejection) and canonical double-far struct copies.
+`fuzz_test.zig` runs structured fuzzing over bounded registry loading, dynamic
+mutation compared with generated readers, and double-far struct copies.
+`mutation_corpus.zig` is the deterministic operation corpus that both generated
+and dynamic builders emit and the C++ oracle replays; `double_far_fixture.zig`
+holds hand-encoded canonical double-far frames that are independent of
+`MessageBuilder`.
+
 `oracle.c++` provides an independent reference check. It compares the complete
 canonical binary representation of every embedded `schema::Node` with its node
 in the original compiler request, including pointer defaults and annotations. It
@@ -84,7 +104,9 @@ generic bindings, groups and interface methods, then decodes the emitted values
 with the C++ dynamic API. This includes `builder-values.bin`, edited only
 through the generated Builder API: default materialization, list edits, typed
 self-copy, union-group reopening, and clear operations. It does not compile
-generated fixture classes.
+generated fixture classes. The test then reruns the oracle with
+`--inject-mismatch` and requires exit code 2, proving the mutation-replay gate
+fails when its evidence is contradicted.
 
 The ordinary toolchain and feature tests compare complete Zig output across
 matching pinned native and Wasm generators, including metadata-free output with

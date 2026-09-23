@@ -11,8 +11,17 @@ Consumers use generated public APIs and `std.testing`. They cover direct
 concrete Text/Data bindings, list layout growth with unknown data, pointer
 defaults, and union guards. No fixture uses the compiler-unsupported `List(T)`.
 
-The host gate should compile actual compiler requests, compare native and WASI
-generator output in full and compact profiles, place the selected generated
-module beside each consumer as `generated.zig`, and compile/run that same
-consumer natively and as a WASI test executable. The runtime must match the
-patched generator and export its normal `capnpc-zig` self-import binding.
+`tests/generator_api_test.ts` runs the gate for both the full and compact API
+profiles. For each schema it compiles a request with the native compiler, runs
+the native and WASI generators, requires byte-identical output, and places the
+generated module beside each consumer as `generated.zig`. It then compiles every
+consumer with `zig test` against the exported pinned runtime
+(`build/src/capnp-zig/src/lib_core.zig`), natively and as a `wasm32-wasi` test
+executable that runs in Wasmtime. Outputs stay under
+`build/test/generator-api-*/`.
+
+Run through `mise run test`, or after `mise run build`:
+
+```sh
+mise exec -- deno test --allow-read --allow-write=build --allow-run tests/generator_api_test.ts
+```
