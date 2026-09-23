@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/tetratelabs/wazero"
@@ -24,6 +25,10 @@ import (
 
 const maxBytes = 64 << 20
 const maxFiles = 4096
+
+// ErrClosed reports a call on a closed Compiler, or a job that Close
+// terminated. It is wrapped in *Error; test for it with errors.Is.
+var ErrClosed = errors.New("compiler is closed")
 
 // Modules contains the built compiler and the desired generators. Generator
 // keys are "cpp", "rust", "go", or "zig". No modules are downloaded by the SDK.
@@ -100,18 +105,44 @@ func (e *Error) Unwrap() error { return e.Err }
 // Compiler owns reusable compiled Wasm modules. Compile and Generate support
 // concurrent calls; each call and generator receives fresh memory, stdio and
 // filesystems.
-// Close waits for active calls, which callers can cancel with contexts.
+//
+// Close rejects new calls immediately and waits for active calls until its
+// context ends; then it terminates them.
 type Compiler struct {
-	mu         sync.RWMutex
-	runtime    wazero.Runtime
-	compiler   wazero.CompiledModule
-	generators map[string]wazero.CompiledModule
-	closed     bool
+	runtimes   []wazero.Runtime
+	compiler   command
+	generators map[string]command
+
+	// mu guards the fields below. It is held only for bookkeeping, never while
+	// a guest runs, so a pending Close cannot block new callers.
+	mu     sync.Mutex
+	closed bool
+	jobs   map[*job]struct{}
+	idle   chan struct{} // closed once the Compiler is closed and no job remains
+
+	release    sync.Once
+	releaseErr error
+}
+
+// command pairs a compiled module with the runtime that compiled it, because
+// modules run on the engine that compiled them.
+type command struct {
+	runtime wazero.Runtime
+	module  wazero.CompiledModule
+}
+
+// job is one active Compile or Generate call. Close cancels its context with
+// ErrClosed as the cause when the job outlives Close's own context.
+type job struct {
+	cancel context.CancelCauseFunc
 }
 
 // New compiles modules once. Compilation and execution require standardized
 // Wasm exception handling, enabled on the repository's pinned wazero runtime.
-func New(ctx context.Context, modules Modules) (*Compiler, error) {
+// Modules compile concurrently; ctx is checked before each compilation starts
+// and after all of them finish, but one module's compilation cannot be
+// interrupted.
+func New(ctx context.Context, modules Modules, opts ...Option) (*Compiler, error) {
 	if len(modules.Compiler) == 0 {
 		return nil, &Error{Stage: "modules", Err: errors.New("compiler module is empty")}
 	}
@@ -120,39 +151,103 @@ func New(ctx context.Context, modules Modules) (*Compiler, error) {
 			return nil, &Error{Stage: "modules", Language: language, Err: errors.New("unknown generator or empty module")}
 		}
 	}
-	config := wazero.NewRuntimeConfigCompiler().
-		WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling).
-		WithMemoryLimitPages(4096).
-		WithCloseOnContextDone(true)
-	c := &Compiler{runtime: wazero.NewRuntimeWithConfig(ctx, config), generators: map[string]wazero.CompiledModule{}}
+	settings, err := resolve(opts)
+	if err != nil {
+		return nil, &Error{Stage: "validate", Err: err}
+	}
+	if _, err := mount(wazero.NewFSConfig(), nil, "/"); err != nil {
+		return nil, &Error{Stage: "modules", Err: err}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, &Error{Stage: "modules", Err: err}
+	}
+	c := &Compiler{generators: map[string]command{}, jobs: map[*job]struct{}{}, idle: make(chan struct{})}
 	ok := false
 	defer func() {
 		if !ok {
-			_ = c.runtime.Close(context.Background())
+			_ = c.closeRuntimes()
 		}
 	}()
-	if _, err := wasi_snapshot_preview1.Instantiate(ctx, c.runtime); err != nil {
-		return nil, &Error{Stage: "modules", Err: err}
+
+	type unit struct {
+		language string
+		wasm     []byte
+		runtime  wazero.Runtime
+		module   wazero.CompiledModule
+		err      error
 	}
-	var err error
-	if c.compiler, err = c.runtime.CompileModule(ctx, modules.Compiler); err != nil {
-		return nil, &Error{Stage: "modules", Err: err}
-	}
-	if err := validateCommand(c.compiler); err != nil {
-		return nil, &Error{Stage: "modules", Err: err}
-	}
+	units := []*unit{{wasm: modules.Compiler}}
 	for _, language := range sortedKeys(modules.Generators) {
-		compiled, err := c.runtime.CompileModule(ctx, modules.Generators[language])
-		if err != nil {
-			return nil, &Error{Stage: "modules", Language: language, Err: err}
+		units = append(units, &unit{language: language, wasm: modules.Generators[language]})
+	}
+	runtimes := map[Engine]wazero.Runtime{}
+	for _, u := range units {
+		engine := settings.engineFor(u.language)
+		if runtimes[engine] == nil {
+			r := wazero.NewRuntimeWithConfig(ctx, runtimeConfig(engine, settings.cache))
+			c.runtimes = append(c.runtimes, r)
+			runtimes[engine] = r
+			if _, err := wasi_snapshot_preview1.Instantiate(ctx, r); err != nil {
+				return nil, &Error{Stage: "modules", Err: err}
+			}
 		}
-		if err := validateCommand(compiled); err != nil {
-			return nil, &Error{Stage: "modules", Language: language, Err: err}
+		u.runtime = runtimes[engine]
+	}
+	var compilations sync.WaitGroup
+	for _, u := range units {
+		if ctx.Err() != nil {
+			break
 		}
-		c.generators[language] = compiled
+		compilations.Go(func() { u.module, u.err = compileCommand(ctx, u.runtime, u.wasm) })
+	}
+	compilations.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, &Error{Stage: "modules", Err: err}
+	}
+	for _, u := range units {
+		if u.err != nil {
+			return nil, &Error{Stage: "modules", Language: u.language, Err: u.err}
+		}
+		if u.language == "" {
+			c.compiler = command{runtime: u.runtime, module: u.module}
+		} else {
+			c.generators[u.language] = command{runtime: u.runtime, module: u.module}
+		}
 	}
 	ok = true
 	return c, nil
+}
+
+func runtimeConfig(engine Engine, cache wazero.CompilationCache) wazero.RuntimeConfig {
+	// NewRuntimeConfig selects the compiler where the platform supports it and
+	// the interpreter elsewhere; unlike NewRuntimeConfigCompiler it never panics.
+	config := wazero.NewRuntimeConfig()
+	if engine == EngineInterpreter {
+		config = wazero.NewRuntimeConfigInterpreter()
+	}
+	config = config.
+		WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling).
+		WithMemoryLimitPages(4096).
+		WithCloseOnContextDone(true).
+		// The C++ modules carry about 1 MB of sysroot DWARF that wazero would
+		// otherwise walk on every guest exit to decorate the exit error.
+		WithDebugInfoEnabled(false)
+	if cache != nil {
+		config = config.WithCompilationCache(cache)
+	}
+	return config
+}
+
+func compileCommand(ctx context.Context, runtime wazero.Runtime, wasm []byte) (wazero.CompiledModule, error) {
+	module, err := runtime.CompileModule(ctx, wasm)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateCommand(module); err != nil {
+		_ = module.Close(ctx)
+		return nil, err
+	}
+	return module, nil
 }
 
 func validateCommand(module wazero.CompiledModule) error {
@@ -166,25 +261,83 @@ func validateCommand(module wazero.CompiledModule) error {
 	return nil
 }
 
-// Close releases the runtime and its compiled modules. Repeated calls are safe.
+// Close marks the Compiler closed, so new calls fail with ErrClosed, and waits
+// for active calls to finish. If ctx ends first, Close terminates the active
+// calls (they fail with ErrClosed) and returns ctx's error; the runtime is
+// released as soon as the last of them stops. Repeated calls are safe.
 func (c *Compiler) Close(ctx context.Context) error {
+	c.mu.Lock()
+	if !c.closed {
+		c.closed = true
+		if len(c.jobs) == 0 {
+			close(c.idle)
+		}
+	}
+	c.mu.Unlock()
+	select {
+	case <-c.idle:
+		return c.closeRuntimes()
+	default:
+	}
+	select {
+	case <-c.idle:
+		return c.closeRuntimes()
+	case <-ctx.Done():
+		c.mu.Lock()
+		for j := range c.jobs {
+			j.cancel(ErrClosed)
+		}
+		c.mu.Unlock()
+		return ctx.Err()
+	}
+}
+
+// closeRuntimes releases every runtime once. Callers guarantee that no job is
+// active, because closing the compiler engine unmaps its executable code.
+func (c *Compiler) closeRuntimes() error {
+	c.release.Do(func() {
+		for _, r := range c.runtimes {
+			if err := r.Close(context.Background()); err != nil && c.releaseErr == nil {
+				c.releaseErr = err
+			}
+		}
+	})
+	return c.releaseErr
+}
+
+// begin registers a job. The returned context ends with the caller's context
+// or when Close terminates the job.
+func (c *Compiler) begin(ctx context.Context) (context.Context, func(), error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
-		return nil
+		return nil, nil, ErrClosed
 	}
-	c.closed = true
-	return c.runtime.Close(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
+	j := &job{cancel: cancel}
+	c.jobs[j] = struct{}{}
+	return ctx, func() {
+		cancel(nil)
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		delete(c.jobs, j)
+		if c.closed && len(c.jobs) == 0 {
+			close(c.idle)
+			// A Close that already returned on its own deadline is not
+			// waiting, so the last job releases the runtimes.
+			go func() { _ = c.closeRuntimes() }()
+		}
+	}, nil
 }
 
 // Compile compiles a workspace and runs the selected generators in order.
 // It performs no network operations and grants no host filesystem access.
 func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.closed {
-		return Result{}, &Error{Stage: "validate", Err: errors.New("compiler is closed")}
+	ctx, done, err := c.begin(ctx)
+	if err != nil {
+		return Result{}, &Error{Stage: "validate", Err: err}
 	}
+	defer done()
 	if err := ctx.Err(); err != nil {
 		return Result{}, &Error{Stage: "validate", Err: err}
 	}
@@ -209,9 +362,16 @@ func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error)
 		}
 	}
 	root.readOnly = true
-	fs := mount(wazero.NewFSConfig(), root, "/")
-	fs = mount(fs, source, "/src")
-	fs = mount(fs, include, "/include")
+	fs, err := mount(wazero.NewFSConfig(), root, "/")
+	if err == nil {
+		fs, err = mount(fs, source, "/src")
+	}
+	if err == nil {
+		fs, err = mount(fs, include, "/include")
+	}
+	if err != nil {
+		return Result{}, &Error{Stage: "compile", Err: err}
+	}
 	args := []string{"capnp", "compile", "--no-standard-import", "-I/include", "--src-prefix=/src", "-o-"}
 	for _, entry := range request.Entrypoints {
 		args = append(args, "/src/"+entry)
@@ -240,11 +400,11 @@ func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error)
 // a fresh instance and an empty writable memory filesystem. Malformed requests
 // are diagnosed by the generators, not parsed by the host SDK.
 func (c *Compiler) Generate(ctx context.Context, request GenerationRequest) (GenerationResult, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.closed {
-		return GenerationResult{}, &Error{Stage: "validate", Err: errors.New("compiler is closed")}
+	ctx, done, err := c.begin(ctx)
+	if err != nil {
+		return GenerationResult{}, &Error{Stage: "validate", Err: err}
 	}
+	defer done()
 	if err := ctx.Err(); err != nil {
 		return GenerationResult{}, &Error{Stage: "validate", Err: err}
 	}
@@ -264,7 +424,11 @@ func (c *Compiler) runGenerators(ctx context.Context, binary []byte, languages [
 	result := GenerationResult{Outputs: map[string]map[string][]byte{}}
 	for _, language := range languages {
 		output := newMemoryFS(nil, false)
-		stdout, stderr, err := c.run(ctx, c.generators[language], mount(wazero.NewFSConfig(), output, "/"), []string{"capnpc-" + language}, binary)
+		fs, err := mount(wazero.NewFSConfig(), output, "/")
+		if err != nil {
+			return GenerationResult{}, &Error{Stage: "generate", Language: language, Err: err}
+		}
+		stdout, stderr, err := c.run(ctx, c.generators[language], fs, []string{"capnpc-" + language}, binary)
 		if err == nil && len(stdout) != 0 {
 			err = errors.New("generator unexpectedly wrote to stdout")
 		}
@@ -279,18 +443,28 @@ func (c *Compiler) runGenerators(ctx context.Context, binary []byte, languages [
 	return result, nil
 }
 
-func mount(config wazero.FSConfig, fs *memoryFS, guest string) wazero.FSConfig {
-	return config.(sysfs.FSConfig).WithSysFSMount(fs, guest)
+// mount adds a guest mount through wazero's experimental filesystem
+// configuration. A nil fs only checks that the configuration supports it.
+func mount(config wazero.FSConfig, fs *memoryFS, guest string) (wazero.FSConfig, error) {
+	mounts, ok := config.(sysfs.FSConfig)
+	if !ok {
+		return nil, errors.New("wazero filesystem configuration does not support experimental mounts")
+	}
+	if fs == nil {
+		return config, nil
+	}
+	return mounts.WithSysFSMount(fs, guest), nil
 }
 
-func (c *Compiler) run(ctx context.Context, module wazero.CompiledModule, filesystem wazero.FSConfig, args []string, input []byte) ([]byte, string, error) {
+func (c *Compiler) run(ctx context.Context, cmd command, filesystem wazero.FSConfig, args []string, input []byte) ([]byte, string, error) {
 	stdout := limitedBuffer{limit: maxBytes}
 	stderr := limitedBuffer{limit: 1 << 20}
 	config := wazero.NewModuleConfig().WithName("").WithArgs(args...).
 		WithStdin(bytes.NewReader(input)).WithStdout(&stdout).WithStderr(&stderr).
 		WithFSConfig(filesystem).WithRandSource(rand.Reader).
-		WithSysWalltime().WithSysNanotime().WithSysNanosleep()
-	instance, err := c.runtime.InstantiateModule(ctx, module, config)
+		WithSysWalltime().WithSysNanotime().
+		WithNanosleep(func(ns int64) { sleep(ctx, ns) })
+	instance, err := cmd.runtime.InstantiateModule(ctx, cmd.module, config)
 	if instance != nil {
 		defer instance.Close(context.Background())
 	}
@@ -300,10 +474,28 @@ func (c *Compiler) run(ctx context.Context, module wazero.CompiledModule, filesy
 	}
 	if ctx.Err() != nil {
 		err = ctx.Err()
+		if errors.Is(context.Cause(ctx), ErrClosed) {
+			err = ErrClosed
+		}
 	} else if stdout.exceeded || stderr.exceeded {
 		err = errors.New("command stdio exceeded its size limit")
 	}
 	return stdout.Bytes(), stderr.String(), err
+}
+
+// sleep implements the guest's nanosleep (poll_oneoff clock subscriptions) so
+// that a sleeping guest wakes when its job's context ends and then observes
+// the termination at its next loop or function entry.
+func sleep(ctx context.Context, ns int64) {
+	if ns <= 0 {
+		return
+	}
+	timer := time.NewTimer(time.Duration(ns))
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
 }
 
 func (c *Compiler) validate(request Request) error {
@@ -357,7 +549,7 @@ func (c *Compiler) validate(request Request) error {
 func (c *Compiler) validateGenerators(languages []string) error {
 	seen := map[string]bool{}
 	for _, language := range languages {
-		if !supported(language) || c.generators[language] == nil || seen[language] {
+		if !supported(language) || c.generators[language].module == nil || seen[language] {
 			return fmt.Errorf("unavailable or duplicate generator %q", language)
 		}
 		seen[language] = true

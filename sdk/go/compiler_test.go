@@ -17,25 +17,7 @@ import (
 	capnpcwasm "github.com/nullstyle/capnpc-wasm/sdk/go"
 )
 
-func root(t *testing.T) string {
-	t.Helper()
-	root, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return root
-}
-
-func read(t *testing.T, path string) []byte {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("%s: %v (run mise run build before SDK tests)", path, err)
-	}
-	return data
-}
-
-func fixture(t *testing.T) capnpcwasm.Request {
+func fixture(t testing.TB) capnpcwasm.Request {
 	r := root(t)
 	return capnpcwasm.Request{
 		Files: map[string][]byte{
@@ -48,20 +30,6 @@ func fixture(t *testing.T) capnpcwasm.Request {
 		},
 		Entrypoints: []string{"person.capnp", "types/common.capnp"},
 		Generators:  []string{"cpp", "rust", "go", "zig"},
-	}
-}
-
-func loadModules(t *testing.T) capnpcwasm.Modules {
-	t.Helper()
-	dir := root(t) + "/build/wasm/bin/"
-	return capnpcwasm.Modules{
-		Compiler: read(t, dir+"capnp.wasm"),
-		Generators: map[string][]byte{
-			"cpp":  read(t, dir+"capnpc-c++.wasm"),
-			"rust": read(t, dir+"capnpc-rust.wasm"),
-			"go":   read(t, dir+"capnpc-go.wasm"),
-			"zig":  read(t, dir+"capnpc-zig.wasm"),
-		},
 	}
 }
 
@@ -102,15 +70,7 @@ func outputFiles(t *testing.T, dir string) map[string][]byte {
 
 func TestCompiler(t *testing.T) {
 	r := root(t)
-	c, err := capnpcwasm.New(t.Context(), loadModules(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := c.Close(context.Background()); err != nil {
-			t.Error(err)
-		}
-	})
+	c := sharedCompiler(t)
 	request := fixture(t)
 	actual, err := c.Compile(t.Context(), request)
 	if err != nil {
@@ -128,18 +88,7 @@ func TestCompiler(t *testing.T) {
 		if !bytes.Equal(gotRequest, wantRequest) {
 			t.Fatal("canonical compiler request differs from native")
 		}
-		if err := os.MkdirAll(r+"/build/test", 0755); err != nil {
-			t.Fatal(err)
-		}
-		work, err := os.MkdirTemp(r+"/build/test", "go-sdk-")
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			if err := os.RemoveAll(work); err != nil {
-				t.Error(err)
-			}
-		})
+		work := workDir(t, "go-sdk-")
 		for _, language := range request.Generators {
 			dir := work + "/" + language
 			if err := os.Mkdir(dir, 0755); err != nil {
@@ -256,10 +205,6 @@ func TestCompiler(t *testing.T) {
 			t.Fatalf("cancellation: %+v, %v", got, err)
 		}
 	})
-	if err := c.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	assertValidation(t, c, request)
 }
 
 func assertValidation(t *testing.T, c *capnpcwasm.Compiler, request capnpcwasm.Request) {
@@ -277,7 +222,7 @@ func assertValidation(t *testing.T, c *capnpcwasm.Compiler, request capnpcwasm.R
 func TestCancellationDuringGuestExecution(t *testing.T) {
 	// (module (memory (export "memory") 1) (func (export "_start") (loop br 0)))
 	loop := wasmBytes(t, "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a0901070003400c000b0b")
-	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: loop})
+	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: loop}, testOptions()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +260,7 @@ func TestCommandContractValidation(t *testing.T) {
 				if language != "" {
 					modules = capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand), Generators: map[string][]byte{language: wasmBytes(t, guest.encoded)}}
 				}
-				c, err := capnpcwasm.New(t.Context(), modules)
+				c, err := capnpcwasm.New(t.Context(), modules, testOptions()...)
 				if c != nil {
 					_ = c.Close(context.Background())
 				}
@@ -329,7 +274,7 @@ func TestCommandContractValidation(t *testing.T) {
 }
 
 func TestEmptyCompilerOutputFails(t *testing.T) {
-	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand)})
+	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand)}, testOptions()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +293,7 @@ func TestModuleValidation(t *testing.T) {
 		{Compiler: []byte("not wasm"), Generators: map[string][]byte{"python": {1}}},
 		{Compiler: []byte("not wasm"), Generators: map[string][]byte{"rust": nil}},
 	} {
-		c, err := capnpcwasm.New(t.Context(), modules)
+		c, err := capnpcwasm.New(t.Context(), modules, testOptions()...)
 		var failure *capnpcwasm.Error
 		if c != nil || !errors.As(err, &failure) || failure.Stage != "modules" {
 			t.Fatalf("invalid modules accepted: %v, %v", c, err)

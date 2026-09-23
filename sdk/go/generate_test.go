@@ -13,12 +13,7 @@ import (
 )
 
 func TestGenerate(t *testing.T) {
-	modules := loadModules(t)
-	compiler, err := capnpcwasm.New(t.Context(), modules)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer compiler.Close(context.Background())
+	compiler := sharedCompiler(t)
 	workspace := fixture(t)
 	combined, err := compiler.Compile(t.Context(), workspace)
 	if err != nil {
@@ -32,15 +27,27 @@ func TestGenerate(t *testing.T) {
 	if len(compiled.Outputs) != 0 {
 		t.Fatal("compiler-only job generated files")
 	}
+	generator := compiler
 
-	// A compiler that emits no request would fail Compile. Successful Generate
-	// calls on this instance prove that it does not invoke the frontend.
-	modules.Compiler = wasmBytes(t, noopCommand)
-	generator, err := capnpcwasm.New(t.Context(), modules)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer generator.Close(context.Background())
+	t.Run("does not invoke the compiler", func(t *testing.T) {
+		// A compiler that emits no request would fail Compile. A successful
+		// Generate call on this instance proves that it does not run the frontend.
+		modules := loadModules(t)
+		modules.Compiler = wasmBytes(t, noopCommand)
+		modules.Generators = map[string][]byte{"rust": modules.Generators["rust"]}
+		c, err := capnpcwasm.New(t.Context(), modules, testOptions()...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close(context.Background())
+		got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []string{"rust"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got.Outputs["rust"], combined.Outputs["rust"]) {
+			t.Fatal("rust output differs from Compile")
+		}
+	})
 
 	t.Run("compile once and generate target sets", func(t *testing.T) {
 		for _, languages := range [][]string{{"cpp"}, {"rust", "go"}, {"zig"}, {"cpp", "rust", "go", "zig"}} {
@@ -146,10 +153,6 @@ func TestGenerate(t *testing.T) {
 			t.Fatalf("cancellation: %+v, %v", got, err)
 		}
 	})
-	if err := generator.Close(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	assertGenerateValidation(t, generator, capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []string{"rust"}})
 }
 
 func assertGenerateValidation(t *testing.T, c *capnpcwasm.Compiler, request capnpcwasm.GenerationRequest) {
@@ -165,7 +168,7 @@ func assertGenerateValidation(t *testing.T, c *capnpcwasm.Compiler, request capn
 }
 
 func TestGenerateUnavailableModule(t *testing.T) {
-	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand)})
+	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand)}, testOptions()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +181,7 @@ func TestGeneratePreservesSuccessfulDiagnostics(t *testing.T) {
 	stderrCommand := wasmBytes(t, "0061736d01000000010c0260047f7f7f7f017f60000002230116776173695f736e617073686f745f70726576696577310866645f77726974650000030201010503010001071302066d656d6f72790200065f737461727400010a0f010d00410241004101410c10001a0b0b0f010041000b09080000000100000078")
 	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{
 		Compiler: wasmBytes(t, noopCommand), Generators: map[string][]byte{"rust": stderrCommand},
-	})
+	}, testOptions()...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +200,7 @@ func TestGenerateCancellationDuringGuestExecution(t *testing.T) {
 	loop := wasmBytes(t, "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a0901070003400c000b0b")
 	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{
 		Compiler: wasmBytes(t, noopCommand), Generators: map[string][]byte{"rust": loop},
-	})
+	}, testOptions()...)
 	if err != nil {
 		t.Fatal(err)
 	}
