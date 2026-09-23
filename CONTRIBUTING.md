@@ -13,10 +13,11 @@ conventions in their shortest form.
 ## Commit style
 
 Conventional commits: `type(scope): imperative summary`, with the summary under
-72 characters and a body that says why and what was verified. Types in use are
-`feat`, `fix`, `docs`, `test`, `ci`, `build`, and `chore`; the scope names the
-area, for example `compiler`, `build`, `ci`, `release`, `sdk`, `sdk-go`, or
-`studio`, and is omitted for repository-wide changes. Examples from history:
+72 characters and a body that says why and what was verified. History uses the
+types `feat`, `fix`, and `docs` with the scopes `compiler`, `build`, `ci`, and
+`release`; use `test`, `ci`, `build`, or `chore` as types and `sdk`, `sdk-go`,
+or `studio` as scopes for those areas, and omit the scope for repository-wide
+changes. Examples from history:
 `feat(compiler): preserve ordered import roots and source prefixes`,
 `fix(ci): isolate the compatibility runtime installation from the lockfile`,
 `docs: establish public compiler release hosting`.

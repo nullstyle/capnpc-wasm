@@ -30,8 +30,8 @@ single status record; update it instead of restating status here.
 
 ## Rules
 
-- Run tools from the repository root through `mise run` or `mise exec --`; mise
-  run inside `ref/` activates that upstream's own configuration.
+- Run tools from the repository root through `mise run` or `mise exec --`;
+  running mise inside `ref/` activates that upstream's own configuration.
 - Keep `ref/` pristine at the recorded gitlinks. Project patches and wrappers
   live outside the submodules and apply to disposable copies under `build/`.
 - Tool pins live in `mise.toml`, resolved metadata in `mise.lock`, upstream

@@ -19,8 +19,8 @@ under `tests/hosts/`.
 ## Generated code runtime requirements
 
 Generated source compiles only against the runtime revision that matches the
-pinned generator. The pins are the Git submodule entries under `ref/`; only
-capnproto-rust sits on an upstream release tag.
+pinned generator. The pins are the Git submodule entries under `ref/`; of the
+four runtimes below, only capnproto-rust sits on an upstream release tag.
 
 | Generator     | Runtime the output needs                                                                                                                                                                                                | How to consume it                                                                                                                                                                                                                                                  |
 | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
