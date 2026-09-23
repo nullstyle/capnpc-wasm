@@ -1,3 +1,6 @@
+# Every verification step calls a mise task, so the same commands run locally:
+# `mise run ci` reproduces the check job, and the browsers job is
+# test:browser-bootstrap, browser:install, test:browser and test:studio.
 name: CI
 
 on:
@@ -50,13 +53,11 @@ jobs:
         run: mise run check
       - name: Verify release archive and external package consumers
         run: mise run test:package
+      # The task installs the supported runtime outside the project lockfile
+      # (an in-project install would prune the non-host WASI SDK variants) and
+      # reads its version from sdk/typescript/worker-client.ts.
       - name: Verify supported Deno worker execution and termination
-        run: |
-          # Keep this additional runtime outside the project's lockfile update.
-          # mise 2026.9.1 otherwise prunes non-host WASI SDK option variants.
-          mise --cd "$RUNNER_TEMP" install deno@2.6.8
-          mise exec deno@2.6.8 -- deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts
-          mise exec -- deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts "$(mise where deno@2.6.8)/bin/deno"
+        run: mise run test:deno-worker
       - name: Verify checks leave tracked sources unchanged
         run: git diff --exit-code
       - name: Preserve failing test fixtures
@@ -89,10 +90,7 @@ jobs:
           --allow-read --allow-env --allow-sys --allow-run --allow-net
           tests/browser/playwright.ts install-deps chromium firefox webkit
       - name: Verify the browser bootstrap permission boundary
-        run: >-
-          mise exec -- deno test --config tests/browser/deno.json --frozen
-          --no-prompt --allow-read --allow-env --allow-sys
-          tests/browser/playwright_test.ts
+        run: mise run test:browser-bootstrap
       - name: Install all pinned browser engines
         run: mise run browser:install chromium firefox webkit
       # One build feeds all engines. Each browser still runs in a separate
