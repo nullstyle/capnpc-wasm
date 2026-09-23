@@ -1,56 +1,121 @@
 # Working in capnpc-wasm
 
-This repository ports the reference Cap'n Proto tools and language generators to
-Wasm commands for browsers, Deno, and wazero. The compiler and C++, Rust, Go,
-Zig, and schema-inspection generators run across the development hosts and match
-native output. Initial TypeScript and Go SDKs run in Deno, Chromium, Firefox,
-WebKit workers, and wazero. Zig output targets the pinned capnp-zig runtime. A
-published release is pending.
+capnpc-wasm ports the Cap'n Proto compiler and the C++, Rust, Go, Zig, and
+schema-inspection generators to WASI Preview 1 command modules, and ships
+TypeScript and Go SDKs that run them in browsers, Deno, and wazero. Status:
+three compiler prereleases are public on GitHub (tools rc.2, compiler host rc.2
+and rc.3); the full SDK archive, registry packages, and a stable SDK interface
+are unreleased. [docs/release-readiness.md](docs/release-readiness.md) is the
+single status record; update it instead of restating status here.
 
-- Read [README.md](README.md) for bootstrap commands and workspace conventions.
-  When working on a compiler, generator, or WASI boundary, use the relevant
-  source entry points in [ref/README.md](ref/README.md).
-- Run tools from the repository root through `mise run` or `mise exec --` so the
-  root pins and environment apply. Running mise inside a reference can activate
-  that upstream's unrelated configuration.
-- Keep `ref/` as pristine, commit-pinned upstream material. Put project-owned
-  wrappers and porting patches outside the submodules, and apply patches to
-  disposable source copies under `build/`. Update gitlinks deliberately; normal
-  setup restores their recorded commits.
-- Keep tool versions in `mise.toml`, resolved tool metadata in `mise.lock`, and
-  upstream revisions in Git submodule entries. When changing tools, regenerate
-  the lockfile and run `mise run check`. Match Zig to the pinned generator's
-  toolchain. Preserve the distinction between native Clang and WASI SDK Clang.
-- When changing the C++ port or Wasm feature profile, read
-  [patches/capnproto/README.md](patches/capnproto/README.md) and run
-  `mise run test`. Tests compare canonical requests and generated files across
-  actual host engines, including invalid-input failures. Keep test harnesses
-  under `tests/hosts/` separate from future public SDK code.
-- For Rust, Go, and Zig generators, read
-  [generators/README.md](generators/README.md). Keep language dependencies
-  locked and resolved to the pinned references. Run `mise run test` after
-  generator changes; generated-code consumers exercise the pinned runtimes as
-  well as comparing source output. Zig uses the upstream command entry point and
-  emission code; keep its toolchain aligned with the reference and preserve
-  output-path confinement when changing import handling. See
-  [generators/zig/README.md](generators/zig/README.md).
+## Read first
+
+- [README.md](README.md): bootstrap, build, consumer quick start, support
+  matrix, generated-code runtime requirements, repository layout.
+- [CONTRIBUTING.md](CONTRIBUTING.md): commit style, which task verifies which
+  area, reproducing the CI lanes, and the reference bump checklist.
+- [docs/README.md](docs/README.md): index of current docs and history.
+  [docs/architecture.md](docs/architecture.md) shows the data flow;
+  [docs/threat-model.md](docs/threat-model.md) states the trust boundaries.
+- Area guides, read before touching the area:
+  [patches/capnproto/README.md](patches/capnproto/README.md) for the C++ port
+  and Wasm feature profile; [generators/README.md](generators/README.md) and
+  [generators/zig/README.md](generators/zig/README.md) for generators;
+  [sdk/typescript/README.md](sdk/typescript/README.md) and
+  [sdk/go/README.md](sdk/go/README.md) for host integration;
+  [tests/browser/README.md](tests/browser/README.md) for browser setup;
+  [examples/browser/README.md](examples/browser/README.md) for Schema Studio;
+  [docs/releases.md](docs/releases.md) for packaging;
+  [ref/README.md](ref/README.md) for upstream entry points.
+
+## Rules
+
+- Run tools from the repository root through `mise run` or `mise exec --`; mise
+  run inside `ref/` activates that upstream's own configuration.
+- Keep `ref/` pristine at the recorded gitlinks. Project patches and wrappers
+  live outside the submodules and apply to disposable copies under `build/`.
+- Tool pins live in `mise.toml`, resolved metadata in `mise.lock`, upstream
+  revisions in gitlinks. After changing a pin, regenerate the lockfile and run
+  `mise run check`. Keep the Zig pin equal to `ref/capnp-zig/mise.toml`. Native
+  Clang builds native tools; the WASI SDK Clang stays off `PATH`.
+- Preserve the standard binary `CodeGeneratorRequest` boundary with host
+  orchestration of generators, WASI Preview 1 command modules (`wasm32-wasip1`),
+  standardized Wasm exception handling, and error propagation. Hosts keep
+  byte-oriented workspaces, fresh guest instances, read-only inputs, and
+  transactional outputs. Cancellation terminates guest execution; a rejected
+  promise alone is insufficient.
 - The [schema feature corpus](tests/fixtures/features/README.md) is shared by
-  the SDK and browser tests. Read embeds as bytes; compare the complete
-  canonical request and generated sources with native output when adding schema
-  coverage.
-- For host integration, read
-  [sdk/typescript/README.md](sdk/typescript/README.md) or
-  [sdk/go/README.md](sdk/go/README.md). Preserve byte-oriented workspaces, fresh
-  guest instances, read-only inputs, and transactional outputs. Worker
-  cancellation must terminate execution; a rejected promise alone is
-  insufficient. Run `mise run test:browser` after TypeScript runtime or bundle
-  changes. Browser setup and its pinned dependencies live in
-  [tests/browser/README.md](tests/browser/README.md).
-- The target is WASI Preview 1 command modules (`wasm32-wasip1`). Cap'n Proto v2
-  requires C++ exceptions: use standardized Wasm EH and retain error
-  propagation. Preserve the standard binary `CodeGeneratorRequest` boundary and
-  host orchestration of generators as implementation develops.
-- Keep generated files and build trees under `build/`, distributable output
-  under `dist/`, and project caches under `.cache/`. Add source directories when
-  they acquire an implementation; maintain these instructions as conventions
-  settle.
+  the TypeScript, Go, and browser tests. Read embeds as bytes; compare the
+  complete canonical request and every generated source byte with native output
+  when adding schema coverage.
+- Test harnesses under `tests/hosts/` stay separate from the SDKs.
+- Generated files and build trees go under `build/`, distributable output under
+  `dist/`, caches under `.cache/`, ad-hoc probes under `build/scratch/`.
+- Maintain these instructions when a convention changes.
+
+## Verification by area
+
+`mise run check` runs formatting, lint, vet, clippy, `zig fmt`, doctor, the full
+native and Wasm build, and the complete test suite. The CI clean-checkout job
+(setup, `check`, `test:package`, and the Deno 2.6.8 lane) took 9 minutes on
+ubuntu-24.04 and 10 minutes on macos-15 in
+[run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070);
+a local cold build is comparable. For quick iteration, run one `run` line of
+`[tasks.test]` in `mise.toml` after `mise run build`.
+
+- C++ port or Wasm feature profile: `mise run test`.
+- Rust, Go, or Zig generators: `mise run test`; generated-code consumers
+  exercise the pinned runtimes as well as comparing source output.
+- TypeScript runtime or bundle: `mise run test`, then `mise run test:browser`
+  (after `mise run browser:install` once).
+- Go SDK: `mise exec -- go -C sdk/go test -count=1 -mod=readonly ./...` and
+  `mise exec -- go -C sdk/go vet -stdmethods=false ./...`.
+- Schema Studio (`examples/browser/`, `scripts/build-studio.ts`,
+  `scripts/serve-example.ts`): `mise run test:studio`.
+- Release scripts, `bin/capnp-wasm`, or packaged docs: `mise run test:package`
+  and `mise run test:launcher`; `mise run test:compiler-host-package` for the
+  compiler-host flavor.
+- Markdown only: `mise exec -- deno fmt --check <files>` and
+  `mise exec -- deno run --allow-read scripts/check-links.ts`.
+
+## Release and packaging
+
+- `release.json` holds one version for the three archive flavors: `capnpc-wasm`
+  (full SDK), `capnp-wasm-tools` (compiler and Wasmtime launcher), and
+  `capnp-wasm-compiler-host` (compiler and TypeScript host).
+  `scripts/release.ts` accepts only `X.Y.Z-rc.N` with `private: true`.
+- Packaged docs are copied verbatim: `docs/releases.md` becomes each archive's
+  `README.md` and `docs/releases.md`; `sdk/typescript/README.md` becomes
+  `docs/typescript.md` in the SDK flavors. Editing them changes packaged bytes.
+- Published assets are immutable; changed bytes need a new version. Tags are
+  `capnp-wasm-tools-v<version>`, `capnp-wasm-compiler-host-v<version>`, and
+  `sdk/go/v<version>` for the Go module. Before tagging, add the archive and
+  manifest digests to the published releases table in `docs/releases.md` and the
+  entry to `CHANGELOG.md`.
+
+## Zig synchronization
+
+- `generators/zig/sync.json` records the native capnp-zig commit, the digest of
+  the exported source tree, and the hashes of 36 mirrored fixtures.
+  `scripts/build-zig.sh` runs `check:zig-sync` on every build; drift fails it.
+- Bump `ref/capnp-zig` with the checklist in `CONTRIBUTING.md`: gitlink,
+  `check-zig-sync.ts --record-native`, re-copied fixtures, and the Zig pin in
+  `mise.toml` and `mise.lock`.
+- `generators/zig/historical-reference` pins the audited revision `08a3e3d` that
+  the wire tests use as an oracle; `refs:sync` fetches it. It stays fixed across
+  bumps.
+
+## Deno versions
+
+- `mise.toml` pins Deno 2.9.6 for tooling and direct execution.
+- Worker execution requires Deno 2.6.8 (`supportedDenoWorkerVersion`).
+  `sdk/typescript/sdk_test.ts` ignores worker tests on every other version, so
+  `mise run test` on the pinned Deno does not cover worker cancellation. Run the
+  CI lane locally after `mise run build`:
+
+```sh
+mise --cd "$(mktemp -d)" install deno@2.6.8
+mise exec deno@2.6.8 -- deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts
+mise run release:compiler-host
+mise exec -- deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts "$(mise where deno@2.6.8)/bin/deno"
+```
