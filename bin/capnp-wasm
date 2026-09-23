@@ -1,18 +1,108 @@
 #!/usr/bin/env bash
-# Execute packaged WASI commands with one explicit filesystem capability.
+# capnp-wasm: run the packaged Cap'n Proto compiler and WASI code generators
+# under Wasmtime with one explicit filesystem capability, bounded resources,
+# read-only inputs, and transactional generator output. Bash 3.2 compatible.
 set -euo pipefail
+
+usage='usage: capnp-wasm compiler [--workspace ABS_DIR] -- CAPNP_ARGS...
+       capnp-wasm generator --module ABS_WASM --output ABS_DIR -- GENERATOR_ARGS...
+       capnp-wasm --help | --version'
+
+help="$usage
+
+compiler   runs the packaged capnp.wasm with a read-only copy of ABS_DIR as guest /.
+           Without --workspace the guest sees an empty root, which is enough for
+           convert, id, and --version.
+generator  runs ABS_WASM with an empty staging directory as guest / and moves the
+           generated files into ABS_DIR only after the generator exits 0.
+
+Arguments after -- and the standard streams pass through unchanged. The guest
+environment is empty. Relative symlinks that stay inside the root are followed;
+absolute symlinks and symlinks that leave the root are not.
+
+environment:
+  CAPNP_WASM_WASMTIME                 Wasmtime executable (default: wasmtime on PATH)
+  CAPNP_WASM_WASMTIME_ACCEPT_VERSION  accept exactly this installed Wasmtime version
+                                      instead of the packaged major.minor series
+  CAPNP_WASM_TIMEOUT                  guest execution limit in seconds; 0 disables
+                                      (default 300)
+  CAPNP_WASM_MAX_MEMORY               guest linear memory limit in bytes
+                                      (default 268435456; 16 MiB to 4 GiB)
+  CAPNP_WASM_MAX_WORKSPACE            largest workspace copied for the compiler, in
+                                      bytes of disk usage (default 268435456)
+
+exit status:
+  0        success; other guest exit codes pass through unchanged
+  64       launcher usage error
+  65       --module is not a WebAssembly binary
+  66       missing or unreadable workspace, output directory, or module
+  69       Wasmtime executable not found or its version cannot be read
+  73       cannot stage the workspace, or cannot publish generator output
+           (destination is a directory, symlink, read-only, or below a symlink)
+  78       Wasmtime version rejected, packaged runtime version missing, or an
+           environment override is invalid
+  134      Wasmtime trap: timeout, stack exhaustion, or a guest fault
+  1        Wasmtime could not load or instantiate the module
+  128+N    the launcher was stopped by signal N"
 
 fail() {
   printf 'capnp-wasm: %s\n' "$2" >&2
   exit "$1"
 }
 
-usage='usage: capnp-wasm compiler --workspace ABS_DIR -- ARGS...
-       capnp-wasm generator --module ABS_WASM --output ABS_DIR -- ARGS...'
+warn() {
+  printf 'capnp-wasm: warning: %s\n' "$1" >&2
+}
+
+# ---------------------------------------------------------------------------
+# Self-location: resolve symlinks (bash 3.2 and BSD readlink have no -f), treat
+# a bare name as ./name, and never let CDPATH influence the relative cd.
+self=${BASH_SOURCE[0]}
+hops=0
+while :; do
+  case $self in */*) ;; *) self=./$self ;; esac
+  [[ -L "$self" ]] || break
+  target=$(readlink -- "$self") || fail 70 "cannot resolve launcher symlink: $self"
+  case $target in
+    /*) self=$target ;;
+    *) self=${self%/*}/$target ;;
+  esac
+  hops=$((hops + 1))
+  [[ $hops -lt 64 ]] || fail 70 'launcher symlink chain is too long'
+done
+package_root=$(unset CDPATH; cd -P -- "${self%/*}/.." && pwd -P) ||
+  fail 70 "cannot locate the package root above: $self"
+
+package_version() {
+  local file
+  for file in "$package_root/package.json" "$package_root/release.json"; do
+    [[ -r "$file" ]] || continue
+    sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -n 1
+    return
+  done
+  printf 'unknown\n'
+}
+
+# ---------------------------------------------------------------------------
+# Command line.
 [[ $# -ge 1 ]] || fail 64 "$usage"
 mode=$1
 shift
-case "$mode" in compiler|generator) ;; *) fail 64 "$usage" ;; esac
+case "$mode" in
+  compiler|generator) ;;
+  --help|-h|help)
+    printf '%s\n' "$help"
+    exit 0
+    ;;
+  --version|version)
+    printf 'capnp-wasm %s\n' "$(package_version)"
+    if [[ -r "$package_root/runtime/wasmtime-version" ]]; then
+      printf 'wasmtime %s\n' "$(< "$package_root/runtime/wasmtime-version")"
+    fi
+    exit 0
+    ;;
+  *) fail 64 "$usage" ;;
+esac
 
 workspace=''
 module=''
@@ -43,34 +133,261 @@ while [[ $# -gt 0 ]]; do
     *) fail 64 "$usage" ;;
   esac
 done
-[[ "$separator" == true ]] || fail 64 "missing -- before command arguments"
+[[ "$separator" == true ]] || fail 64 'missing -- before command arguments'
+if [[ "$mode" == compiler ]]; then
+  [[ $# -gt 0 ]] || fail 64 'missing compiler arguments'
+else
+  [[ -n "$module" && -n "$output" ]] || fail 64 "$usage"
+fi
 
-package_root=$(cd -- "${BASH_SOURCE[0]%/*}/.." && pwd -P)
+# ---------------------------------------------------------------------------
+# Packaged runtime requirement and environment overrides.
 [[ -r "$package_root/runtime/wasmtime-version" ]] || fail 78 'missing packaged runtime version'
 expected_version=$(< "$package_root/runtime/wasmtime-version")
 [[ "$expected_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 78 'invalid packaged runtime version'
 
-if [[ "$mode" == compiler ]]; then
-  [[ $# -gt 0 ]] || fail 64 'missing compiler arguments'
-  directory=$workspace
-  module="$package_root/wasm/capnp.wasm"
-else
-  directory=$output
-fi
-[[ "$directory" == /* && "$directory" != *::* ]] || fail 64 'filesystem root must be an absolute path without ::'
-[[ -d "$directory" && -r "$directory" && -x "$directory" ]] || fail 66 "filesystem root is not an accessible directory: $directory"
-directory=$(cd -- "$directory" && pwd -P)
-[[ "$directory" != *::* ]] || fail 64 'resolved filesystem root contains ::'
-if [[ "$mode" == generator ]]; then
-  [[ -w "$directory" ]] || fail 73 "output directory is not writable: $directory"
-fi
-[[ "$module" == /* && -f "$module" && -r "$module" ]] || fail 66 "module must be an absolute readable file: $module"
+timeout_seconds=${CAPNP_WASM_TIMEOUT:-300}
+[[ "$timeout_seconds" =~ ^(0|[1-9][0-9]{0,5})$ ]] ||
+  fail 78 "CAPNP_WASM_TIMEOUT must be a whole number of seconds (0 disables): $timeout_seconds"
+max_memory=${CAPNP_WASM_MAX_MEMORY:-268435456}
+[[ "$max_memory" =~ ^[1-9][0-9]{0,9}$ && $max_memory -ge 16777216 && $max_memory -le 4294967296 ]] ||
+  fail 78 "CAPNP_WASM_MAX_MEMORY must be a byte count from 16777216 to 4294967296: $max_memory"
+max_workspace=${CAPNP_WASM_MAX_WORKSPACE:-268435456}
+[[ "$max_workspace" =~ ^[1-9][0-9]{0,11}$ ]] ||
+  fail 78 "CAPNP_WASM_MAX_WORKSPACE must be a positive byte count: $max_workspace"
+accept_version=${CAPNP_WASM_WASMTIME_ACCEPT_VERSION:-}
+[[ -z "$accept_version" || "$accept_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  fail 78 "CAPNP_WASM_WASMTIME_ACCEPT_VERSION must be an exact X.Y.Z version: $accept_version"
+# Cap'n Proto's 8 MiB linear stack; Wasmtime's native stack is checked at run
+# time and stack exhaustion is reported as a trap.
+max_wasm_stack=8388608
+max_backtrace=16
 
+# ---------------------------------------------------------------------------
+# Wasmtime: same major.minor series as packaged, any patch level at or above
+# the pin (with a warning), or one explicitly accepted version.
 runtime=${CAPNP_WASM_WASMTIME:-wasmtime}
-command -v "$runtime" >/dev/null 2>&1 || fail 69 "Wasmtime $expected_version is required; executable not found: $runtime"
-actual_version=$("$runtime" --version) || fail 69 'failed to read Wasmtime version'
-[[ "$actual_version" == "wasmtime $expected_version" || "$actual_version" == "wasmtime $expected_version "* ]] || fail 78 "expected Wasmtime $expected_version, got: $actual_version"
+command -v "$runtime" >/dev/null 2>&1 ||
+  fail 69 "Wasmtime $expected_version is required; executable not found: $runtime"
+actual_banner=$("$runtime" --version) || fail 69 'failed to read Wasmtime version'
+actual_version=${actual_banner#wasmtime }
+actual_version=${actual_version%% *}
+[[ "$actual_banner" == "wasmtime "* && "$actual_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+  fail 78 "expected Wasmtime $expected_version, got: $actual_banner"
+if [[ "$actual_version" != "$expected_version" ]]; then
+  if [[ -n "$accept_version" && "$actual_version" == "$accept_version" ]]; then
+    warn "using Wasmtime $actual_version instead of the packaged $expected_version (CAPNP_WASM_WASMTIME_ACCEPT_VERSION)"
+  elif [[ "${actual_version%.*}" == "${expected_version%.*}" &&
+    ${actual_version##*.} -gt ${expected_version##*.} ]]; then
+    warn "using Wasmtime $actual_version, a newer patch release than the packaged $expected_version"
+  else
+    fail 78 "expected Wasmtime $expected_version (or a newer ${expected_version%.*} patch release), got: $actual_banner"
+  fi
+fi
 
-# Arguments and binary streams pass through unchanged. exec preserves the guest
-# or runtime exit status, and no native compiler/generator fallback is attempted.
-exec "$runtime" run -W exceptions=y -S cwd=/ --dir "$directory::/" "$module" "$@"
+# ---------------------------------------------------------------------------
+# Filesystem roots. Every root is an existing absolute directory, resolved
+# physically, never / and never containing Wasmtime's :: mapping delimiter.
+resolve_root() {
+  local kind=$1 path=$2 resolved
+  [[ "$path" == /* && "$path" != *::* ]] ||
+    fail 64 "$kind must be an absolute path without ::: $path"
+  [[ -d "$path" && -r "$path" && -x "$path" ]] ||
+    fail 66 "$kind is not an accessible directory: $path"
+  resolved=$(unset CDPATH; cd -P -- "$path" && pwd -P) ||
+    fail 66 "$kind cannot be resolved: $path"
+  [[ "$resolved" != *::* ]] || fail 64 "resolved $kind contains ::: $resolved"
+  [[ "$resolved" != / ]] || fail 64 "refusing to use the filesystem root as the $kind"
+  printf '%s\n' "$resolved"
+}
+
+stage=''
+cleanup() {
+  if [[ -n "$stage" ]]; then
+    chmod -R u+w "$stage" 2>/dev/null || true
+    rm -rf -- "$stage" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
+make_stage() {
+  local template
+  for template in "$@"; do
+    stage=$(mktemp -d -- "$template" 2>/dev/null) || continue
+    # Physical path: mktemp may return /var/... while pwd -P reports /private/var/....
+    stage=$(unset CDPATH; cd -P -- "$stage" && pwd -P) && return
+  done
+  stage=''
+  fail 73 "cannot create a staging directory next to $1"
+}
+
+copy_tree() {
+  # Clone when the filesystem supports it, then fall back to a plain copy.
+  local source=$1 destination=$2
+  case $(uname -s) in
+    Darwin) cp -c -R -- "$source" "$destination" 2>/dev/null && return ;;
+    *) cp -R --reflink=auto -- "$source" "$destination" 2>/dev/null && return ;;
+  esac
+  rm -rf -- "$destination"
+  cp -R -- "$source" "$destination"
+}
+
+warn_escaping_symlinks() {
+  # The guest cannot follow absolute symlinks or symlinks that resolve outside
+  # its root; say so up front instead of leaving an opaque kj exception.
+  local root=$1 link target dir resolved hops shown=0
+  while IFS= read -r -d '' link; do
+    resolved=$link
+    hops=0
+    while [[ -L "$resolved" && $hops -lt 40 ]]; do
+      hops=$((hops + 1))
+      target=$(readlink -- "$resolved") || break
+      dir=${resolved%/*}
+      case $target in
+        /*) resolved=$target ;;
+        *)
+          if [[ -d "$dir/$target" ]]; then
+            resolved=$(unset CDPATH; cd -P -- "$dir/$target" && pwd -P) || break
+          else
+            resolved=$(unset CDPATH; cd -P -- "$(dirname -- "$dir/$target")" && pwd -P)/$(basename -- "$dir/$target") || break
+          fi
+          ;;
+      esac
+    done
+    case $resolved in
+      "$root"/*) ;;
+      *)
+        if [[ $shown -lt 8 ]]; then
+          warn "symlink leaves the workspace and cannot be followed by the guest: ${link#"$root/"} -> $(readlink -- "$link")"
+        fi
+        shown=$((shown + 1))
+        ;;
+    esac
+  done < <(find "$root" -type l -print0)
+  [[ $shown -le 8 ]] || warn "$((shown - 8)) more symlinks leave the workspace"
+}
+
+if [[ "$mode" == compiler ]]; then
+  module="$package_root/wasm/capnp.wasm"
+  argv0=capnp
+  make_stage "${TMPDIR:-/tmp}/capnp-wasm.XXXXXX"
+  root="$stage/root"
+  if [[ -n "$workspace" ]]; then
+    workspace=$(resolve_root workspace "$workspace")
+    if [[ -n "${HOME:-}" && "$workspace" == "$(unset CDPATH; cd -P -- "$HOME" 2>/dev/null && pwd -P)" ]]; then
+      warn 'the workspace is your home directory; the guest receives a read-only copy of it'
+    fi
+    entries=$(find "$workspace" -mindepth 1 2>/dev/null | head -n 65537 | wc -l | tr -d ' ')
+    [[ "$entries" -le 65536 ]] ||
+      fail 73 "workspace has more than 65536 entries; point --workspace at the schema directory: $workspace"
+    read -r workspace_kib _ < <(du -sk -- "$workspace")
+    [[ $((workspace_kib * 1024)) -le $max_workspace ]] ||
+      fail 73 "workspace uses more than CAPNP_WASM_MAX_WORKSPACE=$max_workspace bytes of disk; point --workspace at the schema directory: $workspace"
+    copy_tree "$workspace" "$root" || fail 73 "cannot copy the workspace into $stage"
+    warn_escaping_symlinks "$root"
+  else
+    mkdir -- "$root"
+  fi
+  # Wasmtime honors host permissions, so the guest cannot modify the copy.
+  chmod -R a-w "$root"
+else
+  [[ "$module" == /* ]] || fail 64 "module must be an absolute path: $module"
+  [[ -f "$module" && -r "$module" ]] || fail 66 "module is not a readable file: $module"
+  [[ "$(head -c 4 -- "$module" | od -An -tx1 | tr -d ' \n')" == 0061736d ]] ||
+    fail 65 "module is not a WebAssembly binary: $module"
+  argv0=${module##*/}
+  argv0=${argv0%.wasm}
+  [[ -n "$argv0" ]] || argv0=generator
+  output=$(resolve_root 'output directory' "$output")
+  [[ -w "$output" ]] || fail 73 "output directory is not writable: $output"
+  parent=${output%/*}
+  [[ -n "$parent" ]] || parent=/
+  make_stage "$parent/.capnp-wasm.XXXXXX" "$output/.capnp-wasm.XXXXXX"
+  root=$stage
+  if compgen -v CAPNPC_ZIG_ >/dev/null 2>&1; then
+    warn 'CAPNPC_ZIG_* variables are not passed to the guest; use capnpc-zig command-line options instead'
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Publish staged generator output: refuse directory conflicts, symlinks at any
+# destination or parent, and read-only destinations before moving anything.
+publish_output() {
+  local entry rel dest dir
+  while IFS= read -r -d '' entry; do
+    rel=${entry#"$stage/"}
+    dest="$output/$rel"
+    dir=$output
+    while [[ "$rel" == */* ]]; do
+      dir="$dir/${rel%%/*}"
+      rel=${rel#*/}
+      [[ ! -L "$dir" ]] || fail 73 "output path is below a symlink: $dir"
+    done
+    [[ ! -L "$dest" ]] || fail 73 "output path is a symlink: $dest"
+    if [[ -d "$entry" ]]; then
+      if [[ -e "$dest" ]]; then
+        [[ -d "$dest" && -w "$dest" ]] || fail 73 "output directory conflicts with an existing entry: $dest"
+      fi
+    elif [[ -f "$entry" ]]; then
+      [[ ! -d "$dest" ]] || fail 73 "output file conflicts with an existing directory: $dest"
+      [[ ! -e "$dest" || -w "$dest" ]] || fail 73 "output file is read-only: $dest"
+    else
+      fail 73 "generator produced an unsupported entry: $dest"
+    fi
+  done < <(find "$stage" -mindepth 1 -print0)
+  while IFS= read -r -d '' entry; do
+    dest="$output/${entry#"$stage/"}"
+    if [[ -d "$entry" ]]; then
+      [[ -d "$dest" ]] || mkdir -- "$dest" || fail 73 "cannot create output directory: $dest"
+    else
+      mv -f -- "$entry" "$dest" || fail 73 "cannot publish output file: $dest"
+    fi
+  done < <(find "$stage" -mindepth 1 -print0)
+}
+
+# ---------------------------------------------------------------------------
+# Run the guest as a child so staging can be cleaned up and signals forwarded.
+# Background commands ignore SIGINT, so every stop is forwarded as SIGTERM.
+child=''
+stop_signal=''
+# shellcheck disable=SC2329  # invoked from the signal traps
+forward_signal() {
+  stop_signal=$1
+  [[ -z "$child" ]] || kill -s TERM "$child" 2>/dev/null || true
+}
+trap 'forward_signal INT' INT
+trap 'forward_signal TERM' TERM
+trap 'forward_signal HUP' HUP
+
+bounds=(-W "max-wasm-stack=$max_wasm_stack" -W "max-memory-size=$max_memory")
+if [[ "$timeout_seconds" != 0 ]]; then
+  bounds+=(-W "timeout=${timeout_seconds}s")
+fi
+# Run from the module's directory so Wasmtime's own failure text names only
+# the module file, not the host installation path.
+cd -- "${module%/*}"
+"$runtime" run -W exceptions=y "${bounds[@]}" -D "max-backtrace=$max_backtrace" \
+  -S cwd=/ --dir "$root::/" --argv0 "$argv0" "${module##*/}" "$@" <&0 &
+child=$!
+set +e
+wait "$child"
+status=$?
+waits=0
+while [[ $status -gt 128 && $waits -lt 16 ]] && kill -0 "$child" 2>/dev/null; do
+  waits=$((waits + 1))
+  wait "$child"
+  status=$?
+done
+set -e
+child=''
+if [[ -n "$stop_signal" ]]; then
+  cleanup
+  stage=''
+  trap - "$stop_signal"
+  kill -s "$stop_signal" $$
+  exit "$status"
+fi
+if [[ "$mode" == generator && $status -eq 0 ]]; then
+  publish_output
+fi
+exit "$status"
