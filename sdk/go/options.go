@@ -10,8 +10,8 @@ import (
 //
 // The pinned wazero compiler clones the Go-side stack on every Wasm try_table
 // entry. The C++ command modules (the compiler and the cpp generator) enter
-// thousands of try_table blocks per job, which makes them 5-10x slower on the
-// compiler engine than on the interpreter and allocates gigabytes per job. The
+// thousands of try_table blocks per job, which makes them 2-7x slower on the
+// compiler engine than on the interpreter and allocates 10-155 GB per job. The
 // Rust, Go, and Zig generators contain no try_table blocks and run faster on
 // the compiler engine.
 type Engine int
