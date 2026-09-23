@@ -55,13 +55,14 @@ single status record; update it instead of restating status here.
 
 ## Verification by area
 
-`mise run check` runs formatting, lint, vet, clippy, `zig fmt`, doctor, the full
-native and Wasm build, and the complete test suite. The CI clean-checkout job
-(setup, `check`, `test:package`, and the Deno 2.6.8 lane) took 9 minutes on
-ubuntu-24.04 and 10 minutes on macos-15 in
+`mise run check` runs `lint` (static checks with no build), `doctor`, and
+`test`, which fans out to one `test:<suite>` task per suite, each building only
+what it reads. The CI clean-checkout job (setup, `check`, `test:package`, and
+the Deno 2.6.8 lane) took 9 minutes on ubuntu-24.04 and 10 minutes on macos-15
+in
 [run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070);
-a local cold build is comparable. For quick iteration, run one `run` line of
-`[tasks.test]` in `mise.toml` after `mise run build`.
+a local cold build is comparable. For quick iteration, run one suite task, or
+`mise run --skip-deps test:<suite>` to rerun it without rebuilding.
 
 - C++ port or Wasm feature profile: `mise run test`.
 - Rust, Go, or Zig generators: `mise run test`; generated-code consumers
@@ -75,8 +76,9 @@ a local cold build is comparable. For quick iteration, run one `run` line of
 - Release scripts, `bin/capnp-wasm`, or packaged docs: `mise run test:package`
   and `mise run test:launcher`; `mise run test:compiler-host-package` for the
   compiler-host flavor.
-- Markdown only: `mise exec -- deno fmt --check <files>` and
-  `mise exec -- deno run --allow-read scripts/check-links.ts`.
+- Markdown only: `mise run check:links` and
+  `mise exec -- deno fmt --check <files>`; `mise run lint` runs both with every
+  other static check.
 
 ## Release and packaging
 

@@ -39,8 +39,5 @@ Server dispatch for generic methods stays erased because bindings are not
 carried on the wire; the typed views are a client-side and adapter-side
 contract. Outputs stay under `build/test/rpc-codegen-*/`.
 
-Run through `mise run test`, or after `mise run build`:
-
-```sh
-mise exec -- deno test --allow-read --allow-write=build --allow-run tests/rpc_codegen_test.ts
-```
+Run `mise run test:rpc-codegen`; it is part of `mise run test` and builds the
+native tools and Zig commands it needs.

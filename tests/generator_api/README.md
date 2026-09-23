@@ -20,8 +20,5 @@ consumer with `zig test` against the exported pinned runtime
 executable that runs in Wasmtime. Outputs stay under
 `build/test/generator-api-*/`.
 
-Run through `mise run test`, or after `mise run build`:
-
-```sh
-mise exec -- deno test --allow-read --allow-write=build --allow-run tests/generator_api_test.ts
-```
+Run `mise run test:generator-api`; it is part of `mise run test` and builds the
+native tools and Zig commands it needs.

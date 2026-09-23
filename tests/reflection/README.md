@@ -10,15 +10,11 @@ below, natively and under WASI: `registry_test`, `generated_builder_test`,
 `copy_limits_test`, and `fuzz_test`. `consumer.zig` additionally runs
 `list_evolution_test`, `list_failure_test`, and `generic_list_test`.
 
-Run from the repository root after `mise run build`:
-
-```sh
-mise exec -- deno test --allow-read --allow-write=build --allow-run tests/reflection/reflection_test.ts
-```
-
-The suite also runs through `mise run test`. Outputs remain under
-`build/test/reflection-*/`, including the original compiler request, generated
-source, executables, embedded schema request, and serialized messages.
+Run `mise run test:reflection` from the repository root; it is part of
+`mise run test` and builds the native tools and Zig commands it needs. Outputs
+remain under `build/test/reflection-*/`, including the original compiler
+request, generated source, executables, embedded schema request, and serialized
+messages.
 
 The consumer reuses the shared `values`, `brands`, and `shared/common` feature
 schemas. `reflection.capnp` adds every scalar width, additional list shapes, and

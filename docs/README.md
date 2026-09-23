@@ -46,5 +46,6 @@ Area guides live beside their code:
 | [Zig parity sprint results](history/zig-parity-sprint-results.md)         | 2026-09-08 | The local acceptance receipt for native capnp-zig `86106c2`                                                            |
 | [Release confidence narrative](history/release-confidence-2026-09.md)     | 2026-09-09 | The hosted CI, Windows, package, and nightly evidence trail through commit `b8d8e3f`                                   |
 
-Every Markdown file outside `ref/` is checked with `deno fmt --check` and
-`scripts/check-links.ts` (relative links and heading anchors).
+Every Markdown file outside `ref/` is link-checked by `mise run check:links`
+(relative links and heading anchors), and `mise run lint` also runs
+`deno fmt --check` over the documented paths.

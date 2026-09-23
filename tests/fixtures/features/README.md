@@ -42,9 +42,10 @@ emits additional typed APIs, so byte identity with that older revision is not a
 contract. The historical revision remains an oracle only in the
 [wire conformance suite](../../wire/README.md).
 
-Run through `mise run test`, or after building:
+Run `mise run test:features` for the TypeScript side and `mise run test:sdk-go`
+for the Go side; both are part of `mise run test` and build what they need. To
+run only the Go corpus test after building:
 
 ```sh
-mise exec -- deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read --allow-write=build --allow-run tests/schema_features_test.ts
 mise exec -- go -C sdk/go test -count=1 -mod=readonly -run TestSchemaFeatures ./...
 ```

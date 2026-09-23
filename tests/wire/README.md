@@ -7,17 +7,9 @@ at `build/src/capnp-zig/src/lib_core.zig`. It also builds the current probe for
 `wasm32-wasi` and runs it in Wasmtime. All emitted non-cyclic messages are
 checked with the pinned reference `build/native/bin/capnp decode`.
 
-Run from the repository root after building the native tools and preparing the
-current source through the regular pipeline:
-
-```sh
-mise run build:native
-mise run build:zig
-mise exec -- deno test --allow-read --allow-write=build --allow-run tests/wire_conformance_test.ts
-```
-
-The suite also runs through `mise run test`. Each run leaves its binary
-fixtures, probe executables, and C++ decoder output in
+Run `mise run test:wire` from the repository root; it is part of `mise run test`
+and builds the native tools and prepares the Zig sources it needs. Each run
+leaves its binary fixtures, probe executables, and C++ decoder output in
 `build/test/wire-conformance-*/{upstream,patched,patched-wasi}/`. The variant
 names date from the patch era: `upstream` is the historical audit revision
 recorded in `generators/zig/historical-reference`, and `patched` is the current

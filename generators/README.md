@@ -53,7 +53,10 @@ Schemas need the upstream `$Go.package` and `$Go.import` annotations. Stage
 `ref/go-capnp/std/go.capnp` on the compiler's include path; the fixture schemas
 show package and import paths for multiple generated packages. Upstream options
 such as `-promises`, `-schemas`, and `-structstrings` remain available to
-command hosts.
+command hosts. The SDKs always run generators with default options; use the
+launcher's generator mode (`capnp-wasm generator … -- ARGS`) to pass options.
+`-schemas=false` also requires `-structstrings=false`, since `String()` methods
+embed schemas.
 
 The Go standard WASI runtime retains `sock_accept` and `sock_shutdown` imports
 even though the generator does not use networking. Artifact checks allow those

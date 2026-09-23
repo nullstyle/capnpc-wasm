@@ -34,12 +34,14 @@ changes. Examples from history:
 | Schema Studio: `examples/browser/`, `scripts/build-studio.ts`, `scripts/serve-example.ts`         | `mise run test:studio`                                                                                                    |
 | Packaging: `scripts/release.ts`, `bin/capnp-wasm`, `docs/releases.md`, `sdk/typescript/README.md` | `mise run test:package`, `mise run test:launcher`, `mise run test:compiler-host-package`                                  |
 | Development runners: `tests/hosts/`                                                               | `mise run test`                                                                                                           |
-| Markdown                                                                                          | `mise exec -- deno fmt --check <files>` and `mise exec -- deno run --allow-read scripts/check-links.ts`                   |
+| Markdown                                                                                          | `mise run check:links` and `mise exec -- deno fmt --check <files>`; `mise run lint` covers both                           |
 | Anything, before a pull request                                                                   | `mise run check`, then `git diff --exit-code`                                                                             |
 
-`mise run check` builds everything and runs the whole suite. To iterate on one
-suite after `mise run build`, run one of the `run` lines of `[tasks.test]` in
-`mise.toml`.
+`mise run check` runs `lint`, `doctor`, and `test`. `test` fans out to one
+`test:<suite>` task per suite (`mise tasks ls` lists them), each depending only
+on the build outputs it reads, so `mise run test:<suite>` builds what that suite
+needs and `mise run --skip-deps test:<suite>` reruns it without rebuilding.
+`mise run fmt` applies every formatter that `lint` checks.
 
 ## Reproducing the CI lanes
 
@@ -165,4 +167,5 @@ Per reference:
   maintained moves to `docs/history/` with a dated banner.
 - `docs/releases.md` and `sdk/typescript/README.md` are copied into release
   archives verbatim; editing them changes packaged bytes.
-- Format with `deno fmt` and run `scripts/check-links.ts` before committing.
+- Format the files you touched with `deno fmt` and run `mise run check:links`
+  before committing; `mise run lint` checks both.
