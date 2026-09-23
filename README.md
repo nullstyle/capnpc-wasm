@@ -73,23 +73,60 @@ the backend supports them. Mise stores installed tools in its managed tool
 directory, and the project redirects build output and working caches below this
 checkout. Initial installation and reference fetching need network access.
 
-The setup targets macOS and Linux on arm64 and x64. Native builds still need the
-platform development SDK and linker (Xcode Command Line Tools on macOS, a system
-C/C++ development environment on Linux). These host prerequisites are distinct
-from the managed WASI SDK and its bundled target sysroot.
+Prerequisites, on macOS and Linux (arm64 and x64):
 
-Use `mise exec -- <command>` when running tools directly. No shell activation,
-globally installed Cap'n Proto compiler, Node installation, or second task
-runner is required for this setup.
+- Run `mise trust` once in every new clone or worktree; mise refuses untrusted
+  configuration, and a non-interactive session stops there.
+- macOS: the Xcode Command Line Tools, for the platform SDK. The pinned Clang
+  and its ld64 linker do the linking; `mise run doctor` prints the linker and
+  SDK in use and link-tests `cc`, `clang++`, `rustc`, and the WASI SDK.
+- Debian/Ubuntu: `g++-14 pkg-config`, as CI installs on Ubuntu 24.04. The pinned
+  Clang builds the native tools as C++23 against the system libstdc++, and
+  CMake's package probes use pkg-config.
+- Disk and time: the managed toolchain is about 4 GB, the optional browsers 1.5
+  GB, and a checkout grows to about 3 GB (`build/`, `dist/`, `.cache/`). The
+  first `mise run check` takes about 10 minutes on a 4-core CI runner;
+  afterwards `mise run test` takes about two minutes and `mise run lint`
+  seconds.
+
+These host prerequisites are distinct from the managed WASI SDK and its bundled
+target sysroot. Use `mise exec -- <command>` when running tools directly. No
+shell activation, globally installed Cap'n Proto compiler, Node installation, or
+second task runner is required for this setup.
+
+An ignored `mise.local.toml` tunes a checkout: `[settings] jobs` bounds parallel
+tasks (`MISE_JOBS=1` serializes them for a readable log), and `[env]` values for
+`CMAKE_BUILD_PARALLEL_LEVEL` and `CARGO_BUILD_JOBS` (default: half the cores) or
+`PLAYWRIGHT_BROWSERS_PATH` (a browser cache shared between worktrees) override
+the defaults.
 
 ## Build and test
 
 ```sh
-mise run build        # native reference tools and WASI modules
-mise run test         # builds as needed, then runs the host comparison suite
-mise run check        # adds formatting, lint, type, and environment checks
+mise run build        # native reference tools, WASI modules, and the dist/ SDK bundle
+mise run test         # builds what each suite reads, then runs every suite in parallel
+mise run check        # lint (static checks, no build) + doctor + test
+mise run ci           # the CI check job: check, package gates, Deno worker lane, clean tree
 mise run test:browser # Chromium, Firefox, WebKit: offline execution and cancellation
 ```
+
+| Task                                                                     | Checks                                                                                                                 | Builds first                  |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `lint`, `fmt`                                                            | shellcheck, formatting, `deno lint`/`check`, `go vet`, clippy, `zig fmt`, Markdown links; `fmt` applies the formatters | nothing                       |
+| `test:zig-unit`                                                          | capnp-zig unit tests                                                                                                   | Zig generator                 |
+| `test:toolchain`                                                         | compiler and generators in Wasmtime, wazero, and Deno against native output                                            | everything                    |
+| `test:wire`, `test:reflection`, `test:generator-api`, `test:rpc-codegen` | Zig wire conformance, reflection, generator API, RPC codegen                                                           | native tools, Zig generator   |
+| `test:sdk-ts`                                                            | `sdk/typescript/` on the pinned Deno (worker tests ignored there)                                                      | Wasm generators               |
+| `test:features`                                                          | schema feature corpus through the SDK, compiled with the pinned runtimes                                               | native tools, Wasm generators |
+| `test:sdk-go`                                                            | Go SDK                                                                                                                 | native tools, Wasm generators |
+| `test:deno-worker`                                                       | `sdk/typescript/` and the compiler-host gate on Deno 2.6.8, including worker termination                               | native tools, SDK bundle      |
+| `test:package`, `test:launcher`, `test:compiler-host-package`            | release archives, external consumers, the Wasmtime launcher                                                            | native tools, SDK bundle      |
+| `test:browser-bootstrap`, `test:browser`, `test:studio`                  | Playwright permission boundary; SDK and Schema Studio in real browsers (`browser:install` first)                       | native tools, SDK bundle      |
+| `clean:test`, `clean`, `clean:all`                                       | remove `build/test` and the Zig test scratch; `build/` and `dist/`; those plus `.cache/`                               |                               |
+
+`mise run --skip-deps test:<suite>` reruns one suite without its build check,
+and arguments after `--` reach the suite:
+`mise run --skip-deps test:toolchain -- --filter wazero`.
 
 Native tools are in `build/native/bin/`; Wasm commands are in `build/wasm/bin/`.
 Wasm builds export the compiler sources into `build/src/`, apply the project

@@ -81,6 +81,33 @@ a local cold build is comparable. For quick iteration, run one suite task, or
   `mise exec -- deno fmt --check <files>`; `mise run lint` runs both with every
   other static check.
 
+## Inner loop
+
+Run the narrowest task that covers the change: every `test:<suite>` builds only
+what it reads, and `mise run --skip-deps test:<suite> -- --filter <name>` reruns
+one suite without the build check, `--filter` selecting a host or fixture. Warm
+suites take 1 to 40 s, `mise run test` about two minutes, `mise run lint`
+seconds with no build. Then run the area's gate from Verification by area.
+
+| Change                                     | Fastest check                                                                                  |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `patches/`, `cmake/`, `scripts/build-*.sh` | `test:toolchain` (`-- --filter wasmtime` for one host)                                         |
+| `generators/rust`, `generators/go`         | `test:toolchain`, `test:features`                                                              |
+| `generators/zig`, Zig fixtures             | `test:zig-unit`, then `test:wire`, `test:reflection`, `test:generator-api`, `test:rpc-codegen` |
+| `sdk/typescript/`                          | `test:sdk-ts`, `test:features`; `test:deno-worker` for the worker path                         |
+| `sdk/go/`                                  | `test:sdk-go`                                                                                  |
+| `scripts/*.ts`, `bin/`, `release.json`     | `lint`, then `test:package`                                                                    |
+| `examples/browser/`, Studio scripts        | `build:studio`, then `test:studio`                                                             |
+| Markdown, `mise.toml`, workflows           | `lint`, then `ci`                                                                              |
+
+Probes and logs go in `build/scratch/<name>/`; `mise run clean` removes them
+with the rest of `build/` and `dist/`, `clean:test` prunes suite work
+directories and the Zig test scratch, and `clean:all` also drops `.cache/`. When
+other work shares the machine, set `jobs` and the build caps in an ignored
+`mise.local.toml`; `MISE_JOBS=1` serializes tasks for a readable log. Commit
+each task on its own in the conventional style CONTRIBUTING.md defines, and
+finish with `mise run ci` before a rebase or hand-off.
+
 ## Release and packaging
 
 - `release.json` holds one version for the three archive flavors: `capnpc-wasm`
