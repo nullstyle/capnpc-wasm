@@ -57,6 +57,11 @@ PLAYWRIGHT_BROWSERS_PATH = "{{config_root}}/.cache/playwright"
 # sees the pinned compilers; exports nothing where the default link works.
 _.source = { path = "{{config_root}}/scripts/lib/toolchain-env.sh", tools = true }
 
+[vars]
+# Environment the parity suites may read: the keep-test-dirs switch plus the
+# variables they forward to native compilers and the pinned language tools.
+suite_env = "CAPNP_KEEP_TEST_DIRS,PATH,HOME,TMPDIR,CC,CXX,SDKROOT,CARGO_TARGET_DIR,CARGO_HOME,RUSTUP_HOME,DENO_DIR,GOPATH,GOCACHE,GOTOOLCHAIN,GOFLAGS,GOPROXY,ZIG_GLOBAL_CACHE_DIR"
+
 [tasks.setup]
 description = "Initialize pinned references and verify installed tools (run mise install first)"
 run = [{ task = "refs:sync" }, { task = "doctor" }]
@@ -125,21 +130,67 @@ run = "deno run --allow-read --allow-run=git scripts/check-zig-sync.ts"
 description = "Build the test host from the pinned wazero reference"
 run = "go -C tests/hosts/wazero build -mod=readonly -o ../../../build/hosts/wazero-run ."
 
+# Each suite depends only on the build outputs it reads, so mise runs the
+# suites in parallel and `mise run --skip-deps test:<suite>` reruns one of them.
 [tasks.test]
-description = "Compare compiler/generator behavior in Wasmtime, wazero, and the Deno browser shim"
-depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig", "build:wazero", "build:sdk"]
-run = [
-  "zig test build/src/capnp-zig/src/main.zig --cache-dir build/zig/cache --test-filter 'main tests' --test-filter Generator.importPath --test-filter reflection",
-  "deno test --allow-read --allow-write=build --allow-run tests/toolchain_test.ts",
-  "deno test --allow-read --allow-write=build --allow-run tests/wire_conformance_test.ts",
-  "deno test --allow-read --allow-write=build --allow-run tests/reflection/reflection_test.ts",
-  "deno test --allow-read --allow-write=build --allow-run tests/generator_api_test.ts",
-  "deno test --allow-read --allow-write=build --allow-run tests/rpc_codegen_test.ts",
-  "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts",
-  "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read --allow-write=build --allow-run tests/schema_features_test.ts",
-  # Generated Wasm and shared fixtures live outside the Go module's cache inputs.
-  "go -C sdk/go test -count=1 -mod=readonly ./...",
+description = "Run every comparison suite: hosts, Zig, SDKs, and feature corpus (builds as needed)"
+depends = [
+  "test:zig-unit",
+  "test:toolchain",
+  "test:wire",
+  "test:reflection",
+  "test:generator-api",
+  "test:rpc-codegen",
+  "test:sdk-ts",
+  "test:features",
+  "test:sdk-go",
 ]
+
+[tasks."test:zig-unit"]
+description = "Run the pinned capnp-zig unit tests for the generator, import paths, and reflection"
+depends = ["build:zig"]
+run = "zig test build/src/capnp-zig/src/main.zig --cache-dir build/zig/cache --test-filter 'main tests' --test-filter Generator.importPath --test-filter reflection"
+
+[tasks."test:toolchain"]
+description = "Compare compiler and generator behavior in Wasmtime, wazero, and the Deno browser shim"
+depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig", "build:wazero"]
+run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/toolchain_test.ts"
+
+[tasks."test:wire"]
+description = "Check Zig wire-format conformance against the native compiler and the historical generator"
+depends = ["build:native", "build:zig"]
+run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/wire_conformance_test.ts"
+
+[tasks."test:reflection"]
+description = "Check Zig binary schema reflection and generated views against native output"
+depends = ["build:native", "build:zig"]
+run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/reflection/reflection_test.ts"
+
+[tasks."test:generator-api"]
+description = "Check the Zig generator API against native output"
+depends = ["build:native", "build:zig"]
+run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/generator_api_test.ts"
+
+[tasks."test:rpc-codegen"]
+description = "Check Zig RPC code generation and its compiled consumers"
+depends = ["build:native", "build:zig"]
+run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/rpc_codegen_test.ts"
+
+[tasks."test:sdk-ts"]
+description = "Run every TypeScript SDK test under sdk/typescript/ on the pinned Deno"
+depends = ["build:wasm", "build:rust", "build:go", "build:zig"]
+run = "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/"
+
+[tasks."test:features"]
+description = "Compare the schema feature corpus across the SDK and native generators, then compile the output"
+depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig"]
+run = "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/schema_features_test.ts"
+
+[tasks."test:sdk-go"]
+description = "Run the Go SDK tests against the built Wasm commands and native oracle"
+depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig"]
+# Generated Wasm and shared fixtures live outside the Go module's cache inputs.
+run = "go -C sdk/go test -count=1 -mod=readonly ./..."
 
 [tasks."build:sdk"]
 description = "Bundle the browser/Deno SDK, identical Wasm commands, and include schemas into dist"
