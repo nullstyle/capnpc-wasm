@@ -72,7 +72,9 @@ type BrowserState = {
 type BrowserGlobal = typeof globalThis & { capnpTest: BrowserState };
 type HostileOutcome = {
   request?: number[];
-  outputs?: Record<string, number[]>;
+  // Entries, not an object: Playwright's result transport cannot carry an own
+  // "__proto__" key (WebKit drops it; Deno refuses the prototype assignment).
+  outputs?: [string, number[]][];
   plain?: boolean;
   error?: {
     name: string;
@@ -799,15 +801,14 @@ try {
               ? Array.from((result as Result).request)
               : undefined,
             outputs: files
-              ? Object.fromEntries(
-                Object.entries(files).map((
-                  [path, data],
-                ) => [path, Array.from(data)]),
-              )
+              ? Object.entries(files).map((
+                [path, data],
+              ) => [path, Array.from(data)] as [string, number[]])
               : undefined,
             plain: files
               ? Object.getPrototypeOf(files) === Object.prototype &&
-                Object.getPrototypeOf(result.outputs) === Object.prototype
+                Object.getPrototypeOf(result.outputs) === Object.prototype &&
+                Object.keys(files).every((path) => Object.hasOwn(files, path))
               : undefined,
             elapsed: performance.now() - started,
           };
@@ -861,13 +862,14 @@ try {
           );
         }
         if (guest.expectOutputs) {
+          const sorted = (entries: [string, number[]][]) =>
+            JSON.stringify(
+              [...entries].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0),
+            );
           assert(
             outcome.plain === true && outcome.outputs &&
-              JSON.stringify(Object.keys(outcome.outputs).sort()) ===
-                JSON.stringify(Object.keys(guest.expectOutputs).sort()) &&
-              Object.entries(guest.expectOutputs).every(([path, bytes]) =>
-                JSON.stringify(outcome.outputs![path]) === JSON.stringify(bytes)
-              ),
+              sorted(outcome.outputs) ===
+                sorted(Object.entries(guest.expectOutputs)),
             `${label} outputs differ: ${JSON.stringify(outcome)}`,
           );
         }
