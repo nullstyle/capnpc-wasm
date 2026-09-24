@@ -15,8 +15,8 @@ change is allowed with that line, after it the contract is additive.
 
 The limit defaults are machine-readable in
 [`tests/fixtures/contract/limits.json`](../tests/fixtures/contract/limits.json).
-The Go test `TestContractLimits` asserts `DefaultLimits()` against it, and the
-TypeScript conformance test asserts `defaultLimits` against the same file.
+The Go test `TestContractLimits` asserts `DefaultLimits()` against it; the
+TypeScript assertion of `defaultLimits` against the same file is pending (T13).
 
 ## Names
 
@@ -115,6 +115,7 @@ TypeScript additionally reports shape mistakes that Go's types prevent:
 `entrypoints must be an array of paths`,
 `generators must be an array of language names`,
 `importPaths must be an array of directory paths`,
+`limits must be an object of resource limits`,
 `compile request must be an object`, and `generation request must be an object`.
 
 ## Limits
@@ -133,7 +134,7 @@ Limits are fixed for the lifetime of a compiler.
 | `workspaceEntries` | 4,096           | Files plus implied directories of `files` and `includeFiles`, excluding mount roots; the entrypoint count; the import root count | Before the guest starts                                                |
 | `pathBytes`        | 4,096           | UTF-8 bytes of each workspace, entrypoint, import root, source prefix, and generated output path                                 | Before the guest starts; output paths while the generator runs         |
 | `requestBytes`     | 64 MiB          | A request supplied to generation; the compiler's stdout                                                                          | Before the guest starts; the compiler's output while it runs           |
-| `outputBytes`      | 64 MiB          | File contents each generator retains, charged for the command's lifetime                                                         | While the generator runs                                               |
+| `outputBytes`      | 64 MiB          | File contents each generator retains; removed and replaced files stay charged                                                    | While the generator runs                                               |
 | `outputEntries`    | 4,096           | Files and directories each generator creates over its lifetime; removing an entry does not refund it                             | While the generator runs                                               |
 | `stdoutBytes`      | 64 MiB          | Captured stdout per command; the compiler's stdout is bounded by the smaller of this and `requestBytes`                          | While the command runs                                                 |
 | `stderrBytes`      | 1 MiB           | Captured stderr per command                                                                                                      | While the command runs                                                 |
@@ -155,7 +156,10 @@ for a byte or entry budget and `ENAMETOOLONG` for a path over `pathBytes`, may
 continue, and is classified by the host when it stops: the job fails with the
 budget whatever the guest's exit status, and its stderr, which may describe the
 failed write, is preserved. Neither SDK publishes any output of a job that
-exceeded a budget.
+exceeded a budget. Generated path lengths are the one budget TypeScript checks
+after the guest exits (`collectFiles`), so an output path over `pathBytes` is
+reported there only when the guest exited 0; Go rejects the creation and
+classifies the job whatever the exit status.
 
 Fixed internal bounds are not limits: TypeScript caps live descriptors at 1,024
 (`ENFILE`), and Go bounds filesystem lookups at `pathBytes` plus the longest
@@ -178,19 +182,19 @@ stages and is empty for the compiler.
 
 ## Errors
 
-| Cause                                                                                              | TypeScript                                                                                                            | Go                                                                                                                                              |
-| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Invalid caller input: paths, entrypoints, generators, import roots, request bytes, limits, options | `TypeError`, identical in direct and worker execution                                                                 | `*Error{Stage: validate}` matching `ErrInvalidRequest`                                                                                          |
-| Caller input over a budget before any guest starts                                                 | `TypeError` reading `<subject> exceeds <limitName> limit`                                                             | `*Error{Stage: validate, Limit: "<limitName>"}` matching both `ErrInvalidRequest` and `ErrLimitExceeded`                                        |
-| Module bytes empty, not a WASI command, or rejected by the engine                                  | `TypeError` from the factory; `the engine rejected the Wasm module: <engine>` with the engine error as `cause`        | `*Error{Stage: modules}` matching `ErrInvalidRequest`; `Language` names the generator; `Err` wraps the engine error                             |
-| Engine without standardized Wasm exception handling                                                | `TypeError` from the factory before any module is compiled                                                            | Not applicable: the pinned wazero supports it                                                                                                   |
-| A guest exits nonzero                                                                              | `CompileError{stage, exitCode, diagnostics}`                                                                          | `*Error{Stage, Language, ExitCode, Diagnostics}`; `Err` reads `exited with status <n>`                                                          |
-| A guest traps                                                                                      | `CompileError{stage, diagnostics, cause}` without `exitCode`                                                          | `*Error{Stage, Language, Diagnostics}` with `ExitCode` 0; `Err` wraps the runtime's trap error                                                  |
-| A guest exceeds a budget while it runs                                                             | `CompileError{stage, diagnostics, cause}` without `exitCode`; the message names the limit                             | `*Error{Stage, Language, Limit, Diagnostics}` matching `ErrLimitExceeded` only, `ExitCode` 0; `Err` reads `<limitName> resource limit exceeded` |
-| A guest exits 0 without honoring its contract                                                      | `CompileError` without `exitCode`: `compiler emitted no request`, `<language> generator unexpectedly wrote to stdout` | `*Error` with `ExitCode` 0: `compiler emitted an empty CodeGeneratorRequest`, `generator unexpectedly wrote to stdout`                          |
-| Cancelled                                                                                          | Worker: `DOMException` named `TimeoutError`, or the abort `signal.reason`. Direct: not cancellable                    | `*Error` at the stage that was running (or `validate` before one ran) matching `context.Canceled` or `context.DeadlineExceeded`                 |
-| Closed                                                                                             | `Error("worker compiler is disposed")`; direct compilers are not closed                                               | `*Error{Stage: validate}` matching `ErrClosed`; a job terminated by `Close` reports `ErrClosed` at its stage                                    |
-| Unsupported worker runtime                                                                         | `Error` naming the runtime and pointing to `createCompiler`                                                           | Not applicable                                                                                                                                  |
+| Cause                                                                                              | TypeScript                                                                                                                             | Go                                                                                                                                                                                                                            |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Invalid caller input: paths, entrypoints, generators, import roots, request bytes, limits, options | `TypeError`, identical in direct and worker execution                                                                                  | `*Error{Stage: validate}` matching `ErrInvalidRequest`                                                                                                                                                                        |
+| Caller input over a budget before any guest starts                                                 | `TypeError` reading `<subject> exceeds <limitName> limit`, including `initial guest memory exceeds memoryPages limit` from the factory | `*Error{Stage: validate, Limit: "<limitName>"}` matching both `ErrInvalidRequest` and `ErrLimitExceeded`; a module whose initial memory exceeds `memoryPages` is `*Error{Stage: modules, Limit: "memoryPages"}` matching both |
+| Module bytes empty, not a WASI command, or rejected by the engine                                  | `TypeError` from the factory; `the engine rejected the Wasm module: <engine>` with the engine error as `cause`                         | `*Error{Stage: modules}` matching `ErrInvalidRequest`; `Language` names the generator; `Err` wraps the engine error                                                                                                           |
+| Engine without standardized Wasm exception handling                                                | `TypeError` from the factory before any module is compiled                                                                             | Not applicable: the pinned wazero supports it                                                                                                                                                                                 |
+| A guest exits nonzero                                                                              | `CompileError{stage, exitCode, diagnostics}`                                                                                           | `*Error{Stage, Language, ExitCode, Diagnostics}`; `Err` reads `exited with status <n>`                                                                                                                                        |
+| A guest traps                                                                                      | `CompileError{stage, diagnostics, cause}` without `exitCode`                                                                           | `*Error{Stage, Language, Diagnostics}` with `ExitCode` 0; `Err` wraps the runtime's trap error                                                                                                                                |
+| A guest exceeds a budget while it runs                                                             | `CompileError{stage, diagnostics, cause}` without `exitCode`; the message names the limit                                              | `*Error{Stage, Language, Limit, Diagnostics}` matching `ErrLimitExceeded` only, `ExitCode` 0; `Err` reads `<limitName> resource limit exceeded`                                                                               |
+| A guest exits 0 without honoring its contract                                                      | `CompileError` without `exitCode`: `compiler emitted no request`, `<language> generator unexpectedly wrote to stdout`                  | `*Error` with `ExitCode` 0: `compiler emitted an empty CodeGeneratorRequest`, `generator unexpectedly wrote to stdout`                                                                                                        |
+| Cancelled                                                                                          | Worker: `DOMException` named `TimeoutError`, or the abort `signal.reason`. Direct: not cancellable                                     | `*Error` at the stage that was running (or `validate` before one ran) matching `context.Canceled` or `context.DeadlineExceeded`                                                                                               |
+| Closed                                                                                             | `Error("worker compiler is disposed")`; direct compilers are not closed                                                                | `*Error{Stage: validate}` matching `ErrClosed`; a job terminated by `Close` reports `ErrClosed` at its stage                                                                                                                  |
+| Unsupported worker runtime                                                                         | `Error` naming the runtime and pointing to `createCompiler`                                                                            | Not applicable                                                                                                                                                                                                                |
 
 `RangeError` is never used for limits; the worker protocol preserves a
 `RangeError` only when the engine throws one.
@@ -235,7 +239,8 @@ files as a single compile.
   [feature corpus](../tests/fixtures/features/README.md) and the compiler-path
   fixture (`tests/package/compiler-path-fixture.ts`, mirrored in the Go test
   `TestCompilerPathFixtureMatchesNative`) with both import root orders.
-- The limits fixture pins the defaults in both SDKs.
+- The limits fixture pins the Go defaults (`TestContractLimits`); the TypeScript
+  assertion is pending (T13).
 - The invalid-schema fixtures under `tests/fixtures/invalid/` are compiler exit
   1 with clean diagnostics in both SDKs; malformed generation requests are
   generator exit 1 without outputs.

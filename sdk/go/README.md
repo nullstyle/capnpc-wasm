@@ -179,7 +179,8 @@ compiler, err := capnpcwasm.New(ctx, modules, capnpcwasm.WithLimits(limits))
 | `StderrBytes`      | 1 MiB           | Captured stderr per command                                                               |
 
 Caller input over a budget is rejected before any guest starts: the returned
-`*Error` has stage `validate`, names the budget in `Limit`, and matches both
+`*Error` has stage `validate` (or `modules`, for a module whose initial memory
+exceeds `MemoryPages`), names the budget in `Limit`, and matches both
 `ErrInvalidRequest` and `ErrLimitExceeded`. A budget a running guest exceeds
 (stdout, stderr, output bytes or entries, output path length, or the compiler's
 request output over `RequestBytes`) fails the job at the guest's stage with an
@@ -187,8 +188,8 @@ request output over `RequestBytes`) fails the job at the guest's stage with an
 whatever exit status the guest chose. The guest observes `ERANGE` for a byte or
 entry budget and `ENAMETOOLONG` for an output path over `PathBytes`, because
 wazero's filesystem interface defines no `ENOSPC` or `EFBIG`; its stderr is
-preserved. Output bytes stay charged after a file is removed, truncated, or
-renamed, and entry creation consumes a command-lifetime budget. Growth past
+preserved. Output bytes stay charged after a file is removed or replaced by a
+rename, and entry creation consumes a command-lifetime budget. Growth past
 `MemoryPages` fails inside the guest, which then exits or traps as it would on
 any host. These are per-job limits, not a process-wide memory budget.
 
