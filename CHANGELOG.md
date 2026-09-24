@@ -87,6 +87,31 @@ version that ships them.
   vendored under `third_party/`, musl's COPYRIGHT included) with a
   `THIRD_PARTY_NOTICES-<flavor>.md` per archive flavor and `components.json`;
   the misattributed Zig libc/libc++ texts are gone.
+- Release pipeline: `.github/workflows/release.yml` builds each flavor from its
+  tag (`capnp-wasm-tools-v*`, `capnp-wasm-compiler-host-v*`, `capnpc-wasm-v*`)
+  on a clean checkout with a green CI run (or the full check), runs the package
+  gates, attaches build-provenance and SBOM attestations, and drafts the
+  prerelease; a `workflow_dispatch` run is a dry run. `scripts/release.ts` gains
+  `--publish` (requires the tag at `HEAD`, a clean tree, and a CHANGELOG entry),
+  refuses dirty trees and versions whose tag exists at another commit in
+  candidate mode (`--allow-dirty`, `--allow-existing-tag`), and takes
+  `--out <dir>`; the package tests prepare under `build/test/` and never touch
+  `dist/releases/`.
+- Release assets: `SHA256SUMS` lists the archive, `<stem>.manifest.json` (the
+  manifest as its own asset, so `sha256sum -c` passes before extraction), and
+  `<stem>.spdx.json`, an SPDX 2.3 SBOM built from the manifest,
+  `components.json`, and the tool pins; `<stem>.notes.md` carries the release
+  notes. `scripts/verify-release.ts` takes `--sums`, `--expect-manifest-sha256`,
+  `--expect-commit`, and `--require-clean`.
+- Packaged documents: each archive's `README.md` is generated per flavor from
+  `scripts/templates/` (verification, package-relative usage, links to the
+  repository at the producer commit; no status claims) and its examples run in
+  `test:package` and `test:compiler-host-package`; `docs/typescript.md` and the
+  packaged `sdk/go/README.md` have their relative links rewritten to the
+  repository at that commit; `docs/releases.md` is no longer copied into
+  archives. `THIRD_PARTY_NOTICES.md` ships at the package root and `licenses/`
+  holds only the flavor's texts. The full SDK archive packages every non-test
+  `.go` file of the Go SDK.
 
 ## capnp-wasm-compiler-host
 

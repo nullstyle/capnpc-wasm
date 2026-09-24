@@ -54,6 +54,11 @@ the [launcher contract](docs/releases.md#repository-toolchain-launcher) shows.
 Deno and browser applications use the
 [compiler-host archive](docs/releases.md#compiler-and-typescript-host-package)
 instead: it bundles the compiler with the TypeScript SDK and needs no Wasmtime.
+Releases after these are built only by the tag-triggered
+[release workflow](docs/releases.md#release-process): their `SHA256SUMS` lists
+the archive, its manifest, and an SPDX SBOM (no `--ignore-missing` needed), and
+`gh attestation verify <archive> --repo nullstyle/capnpc-wasm` checks the build
+provenance.
 
 ## Bootstrap
 
@@ -237,10 +242,11 @@ pinned generator. Consumption details, including package manifests, are in the
 The release archives include a small Bash/Wasmtime launcher for build systems.
 It runs schema compilation, binary conversion, and separately built WASI
 language generators with explicit filesystem roots, preserving binary streams
-and exit statuses. `mise run release:tools` creates a compiler-only archive for
-consumers that pin their own generators; `mise run test:package` checks both
+and exit statuses. `mise run release:tools` prepares a compiler-only candidate
+for consumers that pin their own generators; `mise run test:package` checks both
 archive variants with real external consumers, and `mise run test:launcher`
-checks the launcher alone. See the
+checks the launcher alone. Published assets come only from the
+[release workflow](docs/releases.md#release-process). See the
 [launcher contract and examples](docs/releases.md#repository-toolchain-launcher).
 
 `mise run release:compiler-host` prepares a separate compiler/TypeScript host
