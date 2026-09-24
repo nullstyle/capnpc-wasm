@@ -8,7 +8,7 @@ import { root } from "./paths.ts";
  * Host environment variables that child processes receive. Everything else is
  * dropped, so a developer's RUSTFLAGS, CARGO_* or GOFLAGS settings cannot
  * change what the consumer steps compile. Keep this list equal to
- * `[vars].suite_env` in mise.toml, which the six suite tasks pass as their
+ * `[vars].suite_env` in mise.toml, which the seven suite tasks pass as their
  * `--allow-env` list.
  *
  * PATH, HOME and TMPDIR are what the pinned tools need to run at all. CC and

@@ -81,8 +81,8 @@ func run() int {
 		host, guest, _ := strings.Cut(dir, "::")
 		filesystem = filesystem.WithDirMount(host, guest)
 	}
-	// The guest sees the tool name, as the SDKs pass it, so diagnostics do not
-	// leak the host module path.
+	// The guest sees the tool name, as the SDKs and the packaged launcher pass
+	// it, so diagnostics do not leak the host module path.
 	args := append([]string(nil), flag.Args()...)
 	args[0] = strings.TrimSuffix(filepath.Base(args[0]), ".wasm")
 	moduleConfig := wazero.NewModuleConfig().

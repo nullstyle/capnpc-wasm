@@ -127,8 +127,8 @@ async function main(): Promise<number> {
       "usage: main.ts [--dir host::/] [--export-always] module.wasm [args...]",
     );
   }
-  // The guest sees the tool name (capnp, capnpc-c++, ...), as the SDKs pass
-  // it, so diagnostics do not leak the host module path.
+  // The guest sees the tool name (capnp, capnpc-c++, ...), as the SDKs and the
+  // packaged launcher pass it, so diagnostics do not leak the host module path.
   args[0] = modulePath.slice(modulePath.lastIndexOf("/") + 1).replace(
     /\.wasm$/,
     "",

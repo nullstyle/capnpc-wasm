@@ -18,15 +18,16 @@ mise exec -- deno run --unstable-sloppy-imports --allow-read --allow-write \
 
 Each invocation creates a fresh Wasm instance and in-memory filesystem. The
 guest's `argv[0]` is the module file name without `.wasm` (`capnp`,
-`capnpc-c++`, ...), as the SDKs pass it, so diagnostics never contain the host
-path. Stdin, stdout, and stderr remain binary; stdin is read to EOF before
-execution. The optional single `--dir host::/` loads a trusted staging directory
-into guest `/`. Only successful command exits copy created or modified files
-back to that directory. The test-only `--export-always` option (before the
-module path) bypasses that transactional export and copies the files back after
-any exit, so negative-path tests can observe what a failing guest wrote.
-Deletions are not exported. Symlinks, special files, and invalid path components
-are rejected. Host environment variables are not inherited.
+`capnpc-c++`, ...), as the SDKs and the packaged launcher pass it, so
+diagnostics never contain the host path. Stdin, stdout, and stderr remain
+binary; stdin is read to EOF before execution. The optional single
+`--dir host::/` loads a trusted staging directory into guest `/`. Only
+successful command exits copy created or modified files back to that directory.
+The test-only `--export-always` option (before the module path) bypasses that
+transactional export and copies the files back after any exit, so negative-path
+tests can observe what a failing guest wrote. Deletions are not exported.
+Symlinks, special files, and invalid path components are rejected. Host
+environment variables are not inherited.
 
 ## Exit status
 

@@ -74,7 +74,8 @@ export const wasmHosts: readonly WasmHost[] = [
 /**
  * The command line that runs any module on a host with `directory` as `/`
  * and `argv0` as the guest's program name. wazero-run and the Deno host
- * derive argv[0] from the module file name, and Wasmtime needs --argv0.
+ * derive argv[0] from the module file name; Wasmtime needs --argv0, which the
+ * packaged launcher passes the same way (capnp, or the generator's basename).
  */
 export function moduleCommand(
   host: WasmHost,
@@ -97,7 +98,8 @@ export function moduleCommand(
 
 /**
  * The command line that runs `tool.wasm` on a host with `directory` as `/`.
- * Every host presents the tool name as the guest's argv[0], as the SDKs do.
+ * Every host presents the tool name as the guest's argv[0], as the SDKs and the
+ * packaged launcher do.
  */
 export function guestCommand(
   host: WasmHost,

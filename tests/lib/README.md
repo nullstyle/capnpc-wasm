@@ -26,8 +26,8 @@ hold the call open, and the output captured until then is returned with
 stderr.
 
 Children receive only the variables in `ENV_PASSTHROUGH` plus the explicit `env`
-additions. The list must equal `[vars].suite_env` in `mise.toml`, which the six
-suite tasks pass as their `--allow-env` list: it carries `PATH`, `HOME`,
+additions. The list must equal `[vars].suite_env` in `mise.toml`, which the
+seven suite tasks pass as their `--allow-env` list: it carries `PATH`, `HOME`,
 `TMPDIR`, the native compiler selection (`CC`, `CXX`), what
 `scripts/lib/toolchain-env.sh` exports when the default macOS SDK cannot link
 (`SDKROOT`, or `LDFLAGS` and the host triple's `CARGO_TARGET_*_RUSTFLAGS`), the
