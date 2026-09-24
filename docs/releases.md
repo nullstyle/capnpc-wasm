@@ -30,7 +30,11 @@ published on 2026-09-15 on the maintainer's former release host, the
 `nullstyle/slcp-zig` repository (SLCP is a consuming application project), and
 copied byte for byte to this repository the same day. Versions, archive hashes,
 manifests, and embedded provenance are unchanged; the original download URLs on
-that host remain available for consumers that already pin them.
+that host remain available for consumers that already pin them. These archives
+were built by hand before the release workflow existed, and they predate the
+launcher contract below (`bin/capnp-wasm` bounds, exit statuses, `--help`, and
+`--version`) and the Wasm artifact changes (path-independent bytes, DWARF
+stripped); the next release of each flavor is the first to carry them.
 
 Published assets are immutable: changed bytes need a new version. GitHub's
 generated source archives are separate from the release assets.
