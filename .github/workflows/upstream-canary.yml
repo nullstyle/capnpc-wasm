@@ -1,0 +1,137 @@
+# Reports whether the WASI port still applies to, builds against, and matches
+# the tip of upstream Cap'n Proto's v2 branch. The pin never moves: the newer
+# revision is checked out in ref/capnproto and staged in the runner's index
+# only, so the build scripts (which build the recorded gitlink and refuse a
+# drifted checkout) accept it, and nothing is committed or pushed. A red run
+# is the report: the patch no longer applies, upstream's source lists changed,
+# a port translation unit warns under -Werror, the build breaks, or the
+# parity suites differ from native. Bump ref/capnproto by hand with the
+# checklist in CONTRIBUTING.md.
+name: Upstream canary
+
+on:
+  schedule:
+    # Mondays 06:17 UTC, after a week of upstream commits.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "Cap'n Proto commit to try instead of the tip of v2 (full or abbreviated SHA)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-canary-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+  CARGO_BUILD_JOBS: "4"
+
+jobs:
+  canary:
+    name: Port against upstream v2 (ubuntu-24.04)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install Linux host development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 pkg-config
+      # Confine the token to this step, where the WASI SDK resolves through the
+      # GitHub releases API; see ci.yml.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: 2026.9.1
+      - name: Initialize only pinned top-level references
+        run: mise run setup
+      - name: Stage the upstream revision as the capnproto reference (runner only)
+        id: upstream
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          pinned="$(git rev-parse :ref/capnproto)"
+          if [ -n "$REVISION" ]; then
+            case "$REVISION" in
+              *[!0-9a-f]* | ????????????????????????????????????????*?) echo "revision must be a SHA of at most 40 hex digits" >&2; exit 2 ;;
+            esac
+            git -C ref/capnproto fetch --no-tags origin "$REVISION"
+          else
+            git -C ref/capnproto fetch --no-tags origin v2
+          fi
+          git -C ref/capnproto checkout --detach FETCH_HEAD
+          upstream="$(git -C ref/capnproto rev-parse HEAD)"
+          # The index gitlink is what the build scripts and doctor compare the
+          # checkout with; staging it here changes nothing outside this runner.
+          git add ref/capnproto
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Upstream canary"
+            echo
+            echo "- pinned ref/capnproto: \`$pinned\`"
+            echo "- tried: \`$upstream\` ($(git -C ref/capnproto log -1 --format='%cs %s' HEAD))"
+            echo "- upstream commits since the pin: $(git -C ref/capnproto rev-list --count "$pinned..$upstream" 2>/dev/null || echo 'unknown (pin not an ancestor)')"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Check the staged reference and the toolchain
+        run: mise run doctor
+      # build:wasm exports the staged revision, applies the port patch
+      # (git apply --check fails on drift), checks the source lists against
+      # upstream's CMake lists, and compiles the port's translation units with
+      # -Werror.
+      - name: Apply the port to the upstream revision and build the modules
+        id: build
+        run: mise run build:wasm
+      - name: Build the native oracle from the same revision
+        id: native
+        run: mise run build:native
+      - name: Compare the compiler and generators with native on every host
+        id: toolchain
+        run: mise run test:toolchain
+      - name: Compare the non-compile CLI with native on every host
+        id: cli
+        run: mise run test:cli-parity
+      - name: Check the staged modules against the module contract
+        id: contract
+        run: mise run check:wasm-artifacts
+      - name: Report
+        if: always()
+        env:
+          BUILD: ${{ steps.build.outcome }}
+          NATIVE: ${{ steps.native.outcome }}
+          TOOLCHAIN: ${{ steps.toolchain.outcome }}
+          CLI: ${{ steps.cli.outcome }}
+          CONTRACT: ${{ steps.contract.outcome }}
+        run: |
+          {
+            echo
+            echo "| Step | Outcome |"
+            echo "| --- | --- |"
+            echo "| patch applies, source lists match, port units compile with -Werror | $BUILD |"
+            echo "| native oracle builds | $NATIVE |"
+            echo "| toolchain parity suite | $TOOLCHAIN |"
+            echo "| CLI parity suite | $CLI |"
+            echo "| module contract | $CONTRACT |"
+            echo
+            echo "The pin was not moved; bump ref/capnproto with the checklist in CONTRIBUTING.md."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Preserve failing fixtures
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: upstream-canary-fixtures
+          path: build/test/
+          if-no-files-found: ignore
+          retention-days: 7
