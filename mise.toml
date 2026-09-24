@@ -110,7 +110,8 @@ run = "rm -rf build dist"
 
 [tasks."clean:all"]
 description = "Remove build/, dist/, and every project cache under .cache/ (Deno, Go, Zig, downloaded browsers)"
-run = "rm -rf build dist .cache"
+# Go extracts modules read-only; go clean removes them where rm alone fails.
+run = ["go clean -modcache", "rm -rf build dist .cache"]
 
 [tasks.lint]
 description = "Static checks without a build: shell, formatting, lint, type checks, vet, clippy"
