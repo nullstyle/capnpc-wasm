@@ -60,11 +60,11 @@ release status; update it instead of restating status here.
 
 `mise run check` runs `lint` (static checks with no build), `doctor`, and `test`
 (the parity, Zig, SDK, and feature-corpus suites, one `test:<suite>` task each,
-building only what it reads). `test:browser`, `test:studio`, `test:package`,
-`test:launcher`, and `test:deno-worker` are separate and run only when named.
-The CI clean-checkout job (setup, `check`, `test:package`, and the Deno 2.6.8
-lane) took 9 minutes on ubuntu-24.04 and 10 minutes on macos-15 in
-[run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070);
+building only what it reads). `test:studio-unit`, `test:browser`, `test:studio`,
+`test:package`, `test:launcher`, and `test:deno-worker` are separate and run
+only when named. The CI clean-checkout job (setup, `check`, `test:package`, and
+the Deno 2.6.8 lane) took 9 minutes on ubuntu-24.04 and 10 minutes on macos-15
+([run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070));
 a local cold build is comparable. For quick iteration, run one suite task, or
 `mise run --skip-deps test:<suite>` to rerun it without rebuilding.
 
@@ -78,7 +78,11 @@ a local cold build is comparable. For quick iteration, run one suite task, or
 - Go SDK: `mise run test:sdk-go` and `mise run test:sdk-go-race` (`lint` runs
   the vet).
 - Schema Studio (`examples/browser/`, `scripts/build-studio.ts`,
-  `scripts/serve-example.ts`): `mise run test:studio`.
+  `scripts/serve-example.ts`): `mise run test:studio-unit` for the pure state
+  and workspace modules, then `mise run test:studio`; the driver runs under
+  Studio's Content-Security-Policy and fails on any axe-core violation. Keep the
+  CSP hash in `examples/browser/index.html` in step with its inline boot script;
+  `build:studio` fails otherwise.
 - Release scripts, `bin/capnp-wasm`, or packaged docs: `mise run test:package`
   and `mise run test:launcher`; `mise run test:compiler-host-package` for the
   compiler-host flavor.
@@ -104,7 +108,7 @@ run the area's gate from Verification by area.
 | `sdk/typescript/`                          | `test:sdk-ts`, `test:features`; `test:deno-worker` for the worker path                         |
 | `sdk/go/`                                  | `test:sdk-go`                                                                                  |
 | `scripts/*.ts`, `bin/`, `release.json`     | `lint`, then `test:package`                                                                    |
-| `examples/browser/`, Studio scripts        | `build:studio`, then `test:studio`                                                             |
+| `examples/browser/`, Studio scripts        | `test:studio-unit`, `build:studio`, then `test:studio`                                         |
 | Markdown, `mise.toml`, workflows           | `lint`, then `ci`                                                                              |
 
 Probes and logs go in `build/scratch/<name>/`; `mise run clean` removes them

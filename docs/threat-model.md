@@ -117,8 +117,14 @@ test harnesses, not hosts for untrusted input.
 ### Schema Studio
 
 A static site that runs the worker SDK in the browser with a 128-file, 8 MiB
-workspace limit. Diagnostics are rendered as text. The example server sends no
-Content-Security-Policy (`SEC-10`); a deployment sets its own headers.
+workspace limit (512 files and folders combined; the compiler budget adds the
+bundled includes). Diagnostics are rendered as text. `index.html` carries a
+Content-Security-Policy (scripts from the origin plus a hash for its boot script
+and `'wasm-unsafe-eval'`; workers from the origin or blob URLs; no objects, base
+URLs, or foreign form targets), and `scripts/serve-example.ts` adds
+`frame-ancestors 'none'`, COOP, CORP, `Referrer-Policy: no-referrer`, and a
+loopback `Host` allow-list (`SEC-10`); a deployment sends the same headers. ZIP
+imports check declared sizes and entry counts before inflating.
 
 ### Release integrity
 
@@ -184,4 +190,3 @@ independent check.
 | Launcher invocation                     | Resolved: `CDPATH`-safe, symlink-resolving, executable with `package.json` `bin`       | `SEC-06`, `GAP1-V1` (fixed)             |
 | Release trust                           | Unsigned, hand-built assets; CI token and download hardening                           | `SEC-04`, `SEC-08`                      |
 | Names and diagnostics                   | Control characters pass through; host filesystems differ                               | `SEC-05`, `GAP3-07`                     |
-| Studio                                  | No Content-Security-Policy from the example server                                     | `SEC-10`                                |

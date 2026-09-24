@@ -192,11 +192,12 @@ cancellation of an infinite Wasm command. The shared
 [feature corpus](tests/fixtures/features/README.md) covers binary embeds, 64-bit
 limits, generic brands, pointer defaults, groups, and relative imports. The
 [Schema Studio](examples/browser/README.md) browser workbench supports
-multi-file schema editing, folder imports, C++/Rust/Go/Zig output, compiler
-diagnostics, and source/output ZIP downloads. It loads generators on demand and
-reuses the compiled request while its workspace is unchanged. The
-[release guide](docs/releases.md) describes the published archives and testing a
-full SDK candidate with `mise run test:package`.
+multi-file schema editing, folder and ZIP imports, C++/Rust/Go/Zig output,
+compiler diagnostics, and source/output ZIP downloads, under a
+Content-Security-Policy. It loads generators on demand and reuses the compiled
+request while its workspace is unchanged. The [release guide](docs/releases.md)
+describes the published archives and testing a full SDK candidate with
+`mise run test:package`.
 
 ## Support matrix
 

@@ -31,7 +31,7 @@ changes. Examples from history:
 | Zig reference or mirrored fixtures: `ref/capnp-zig`, `generators/zig/sync.json`                   | `mise run build:zig` (runs `check:zig-sync`), then `mise run test`                              |
 | TypeScript SDK: `sdk/typescript/`                                                                 | `mise run test`, `mise run test:browser`, and `mise run test:deno-worker`                       |
 | Go SDK: `sdk/go/`                                                                                 | `mise run test:sdk-go` and `mise run test:sdk-go-race` (`mise run lint` runs the vet)           |
-| Schema Studio: `examples/browser/`, `scripts/build-studio.ts`, `scripts/serve-example.ts`         | `mise run test:studio`                                                                          |
+| Schema Studio: `examples/browser/`, `scripts/build-studio.ts`, `scripts/serve-example.ts`         | `mise run test:studio-unit`, then `mise run test:studio`                                        |
 | Packaging: `scripts/release.ts`, `bin/capnp-wasm`, `docs/releases.md`, `sdk/typescript/README.md` | `mise run test:package`, `mise run test:launcher`, `mise run test:compiler-host-package`        |
 | Development runners: `tests/hosts/`                                                               | `mise run test`                                                                                 |
 | Markdown                                                                                          | `mise run check:links` and `mise exec -- deno fmt --check <files>`; `mise run lint` covers both |
