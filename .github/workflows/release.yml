@@ -1,0 +1,315 @@
+# Builds one release-archive flavor from its tag and drafts the release, or
+# dry-runs the same build from a manual dispatch. Every step calls the scripts
+# a maintainer runs locally: scripts/release.ts in --publish mode (which
+# refuses a dirty tree, an untagged HEAD, and a missing CHANGELOG.md entry),
+# the package gates (test:package, test:compiler-host-package, test:launcher,
+# test:deno-worker), and scripts/verify-release.ts from the checkout.
+#
+# A tag push (capnp-wasm-tools-v*, capnp-wasm-compiler-host-v*, or
+# capnpc-wasm-v*, matching the version in release.json) produces a DRAFT
+# prerelease with the archive, its manifest, the SPDX SBOM, and SHA256SUMS,
+# plus Sigstore build-provenance and SBOM attestations. A maintainer verifies
+# the draft, records the digests in docs/releases.md, and publishes it. A
+# workflow_dispatch run builds and verifies the same way but never creates a
+# release, an attestation, or a tag; its outputs are workflow artifacts.
+#
+# Repository settings that only a human can enable (docs/releases.md lists the
+# same): immutable releases; tag rulesets for capnp-wasm-*, capnpc-wasm-*, and
+# sdk/go/* (creation restricted to maintainers, deletion and update blocked);
+# branch protection on main with the CI checks required; Actions permissions
+# that allow this workflow's contents, id-token, and attestations grants.
+name: Release
+
+on:
+  push:
+    tags:
+      - "capnp-wasm-tools-v*"
+      - "capnp-wasm-compiler-host-v*"
+      - "capnpc-wasm-v*"
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: Archive flavor to build (dry run; nothing is published)
+        type: choice
+        options:
+          - capnp-wasm-tools
+          - capnp-wasm-compiler-host
+          - capnpc-wasm
+        default: capnp-wasm-tools
+        required: true
+
+# Each job declares the permissions it needs; the build job has none beyond
+# reading the repository and its CI runs.
+permissions: {}
+
+# One run per tag or dispatched ref; a release build is never cancelled.
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+  CARGO_BUILD_JOBS: "4"
+
+jobs:
+  build:
+    name: Build and verify ${{ github.event_name == 'push' && github.ref_name || inputs.flavor }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      flavor: ${{ steps.release.outputs.flavor }}
+      version: ${{ steps.release.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+      stem: ${{ steps.release.outputs.stem }}
+      commit: ${{ steps.release.outputs.commit }}
+      ci_run: ${{ steps.ci.outputs.run_url }}
+    steps:
+      # The full history and every tag: release.ts checks that HEAD carries
+      # the release tag, and sources.json hashes the tracked files.
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Resolve the flavor, version, and tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          FLAVOR_INPUT: ${{ inputs.flavor }}
+        run: |
+          version="$(jq -r .version release.json)"
+          if [ "$EVENT_NAME" = push ]; then
+            tag="$REF_NAME"
+            flavor="${tag%-v*}"
+            if [ "$tag" != "${flavor}-v${version}" ]; then
+              echo "tag $tag does not name the release.json version $version (expected ${flavor}-v${version})" >&2
+              exit 1
+            fi
+          else
+            flavor="$FLAVOR_INPUT"
+            tag="${flavor}-v${version}"
+          fi
+          case "$flavor" in
+            capnp-wasm-tools) flag=--tools-only ;;
+            capnp-wasm-compiler-host) flag=--compiler-host ;;
+            capnpc-wasm) flag= ;;
+            *) echo "unknown flavor: $flavor" >&2; exit 1 ;;
+          esac
+          {
+            echo "flavor=$flavor"
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "stem=${flavor}-${version}"
+            echo "flag=$flag"
+            echo "commit=$(git rev-parse HEAD)"
+          } >> "$GITHUB_OUTPUT"
+      # A release commit must have a green CI run (ci.yml) for its exact
+      # commit; a tag on a commit CI never saw, or whose run failed, gets the
+      # full check here instead. HEAD is used rather than GITHUB_SHA, which
+      # names the tag object for an annotated tag.
+      - name: Look up the CI conclusion for this commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          run_url="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${COMMIT}&status=success&per_page=1" --jq '.workflow_runs[0].html_url // empty')"
+          if [ -n "$run_url" ]; then
+            echo "CI passed for ${COMMIT}: $run_url"
+            echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
+            echo "check=skip" >> "$GITHUB_OUTPUT"
+          else
+            echo "no successful CI run for ${COMMIT}; running the full check in this job"
+            echo "check=run" >> "$GITHUB_OUTPUT"
+          fi
+      # Unpinned by design: Ubuntu's archive serves only the current build of
+      # a package, so an exact version pin breaks at every security update.
+      - name: Install Linux host development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 pkg-config
+      # Confine the token to this step, where the WASI SDK resolves through the
+      # GitHub releases API (see ci.yml).
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: 2026.9.1
+      - name: Initialize only pinned top-level references
+        run: mise run setup
+      - name: Run the full check (no successful CI run for this commit)
+        if: steps.ci.outputs.check == 'run'
+        run: mise run check
+      - name: Build the native tools and the SDK bundle
+        run: mise run build
+      # Publish mode refuses a dirty tree, a HEAD without the release tag, and
+      # a missing CHANGELOG.md entry. A dispatched dry run builds a candidate
+      # instead (the tag may not exist, or may exist at another commit).
+      - name: Prepare the release archive
+        env:
+          FLAG: ${{ steps.release.outputs.flag }}
+          MODE: ${{ github.event_name == 'push' && '--publish' || '--allow-existing-tag' }}
+        run: |
+          args=(--out build/release "$MODE")
+          if [ -n "$FLAG" ]; then args=("$FLAG" "${args[@]}"); fi
+          mise exec -- deno run --allow-read --allow-write=build --allow-run=git,go \
+            scripts/release.ts "${args[@]}"
+      - name: Verify release archives and external package consumers
+        run: mise run test:package
+      - name: Verify the packaged Wasmtime launcher
+        run: mise run test:launcher
+      - name: Verify supported Deno worker execution and termination
+        run: mise run test:deno-worker
+      # Independent of release.ts: the manifest asset must name this commit
+      # and a clean tree, and the archive must extract to exactly that manifest.
+      - name: Verify the assets from the checkout's verifier
+        env:
+          STEM: ${{ steps.release.outputs.stem }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+        run: |
+          cd "build/release/${STEM}"
+          sha256sum -c SHA256SUMS
+          commit="$(jq -r .source.commit "${STEM}.manifest.json")"
+          dirty="$(jq -r .source.dirty "${STEM}.manifest.json")"
+          if [ "$commit" != "$COMMIT" ] || [ "$dirty" != false ]; then
+            echo "manifest records commit $commit (dirty: $dirty); expected $COMMIT, clean" >&2
+            exit 1
+          fi
+          manifest_sha256="$(sha256sum "${STEM}.manifest.json" | cut -d ' ' -f 1)"
+          mkdir extracted
+          tar -xzf "${STEM}.tgz" -C extracted
+          cd "$GITHUB_WORKSPACE"
+          mise exec -- deno run --allow-read scripts/verify-release.ts \
+            --sums "build/release/${STEM}/SHA256SUMS" \
+            --expect-manifest-sha256 "$manifest_sha256" \
+            --expect-commit "$COMMIT" --require-clean \
+            "build/release/${STEM}/extracted/package"
+          rm -r "build/release/${STEM}/extracted"
+      - name: Verify checks leave the tree unchanged
+        run: |
+          changes="$(git status --porcelain)"
+          if [ -n "$changes" ]; then
+            echo "checks left tracked or untracked changes:"
+            echo "$changes"
+            exit 1
+          fi
+      - name: Upload the release assets and notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ steps.release.outputs.stem }}
+          path: |
+            build/release/${{ steps.release.outputs.stem }}/*.tgz
+            build/release/${{ steps.release.outputs.stem }}/*.manifest.json
+            build/release/${{ steps.release.outputs.stem }}/*.spdx.json
+            build/release/${{ steps.release.outputs.stem }}/*.notes.md
+            build/release/${{ steps.release.outputs.stem }}/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preserve failing test fixtures
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ steps.release.outputs.stem }}-fixtures
+          path: build/test/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Only a tag push reaches this job. It never runs repository build code: it
+  # re-verifies the uploaded assets with the verifier from a fresh checkout,
+  # attests them, and drafts the prerelease. The write-capable token exists
+  # only here.
+  publish:
+    name: Attest and draft ${{ needs.build.outputs.tag }}
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      STEM: ${{ needs.build.outputs.stem }}
+      TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-${{ needs.build.outputs.stem }}
+          path: release
+      - name: Refuse to touch an existing release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release $TAG already exists; published assets are immutable, so a changed build needs a new version" >&2
+            exit 1
+          fi
+      # The fresh checkout is at the tag, so HEAD is the tagged commit.
+      - name: Verify the downloaded assets
+        env:
+          COMMIT: ${{ needs.build.outputs.commit }}
+        run: |
+          cd release
+          sha256sum -c SHA256SUMS
+          commit="$(jq -r .source.commit "${STEM}.manifest.json")"
+          if [ "$commit" != "$COMMIT" ] || [ "$commit" != "$(git rev-parse HEAD)" ]; then
+            echo "manifest records commit $commit; expected $COMMIT (HEAD $(git rev-parse HEAD))" >&2
+            exit 1
+          fi
+      - name: Attest build provenance for the assets
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release/${{ env.STEM }}.tgz
+            release/${{ env.STEM }}.manifest.json
+            release/${{ env.STEM }}.spdx.json
+            release/SHA256SUMS
+      - name: Attest the SBOM for the archive
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: release/${{ env.STEM }}.tgz
+          sbom-path: release/${{ env.STEM }}.spdx.json
+      - name: Draft the prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLAVOR: ${{ needs.build.outputs.flavor }}
+          VERSION: ${{ needs.build.outputs.version }}
+          CI_RUN: ${{ needs.build.outputs.ci_run }}
+        run: |
+          notes="release/${STEM}.notes.md"
+          {
+            echo
+            echo "## Provenance"
+            echo
+            echo "- Release workflow run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            if [ -n "$CI_RUN" ]; then
+              echo "- CI run for the tagged commit: ${CI_RUN}"
+            else
+              echo "- CI: the full check ran inside the release workflow run above"
+            fi
+            echo "- Build provenance and SBOM attestations: \`gh attestation verify ${STEM}.tgz --repo ${GITHUB_REPOSITORY}\`"
+          } >> "$notes"
+          url="$(gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft --prerelease --verify-tag \
+            --title "${FLAVOR} ${VERSION}" --notes-file "$notes" \
+            "release/${STEM}.tgz" "release/${STEM}.manifest.json" \
+            "release/${STEM}.spdx.json" "release/SHA256SUMS")"
+          {
+            echo "### Draft prerelease"
+            echo
+            echo "$url"
+            echo
+            echo '```'
+            cat release/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
