@@ -25,6 +25,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # built with standardized Wasm EH. Its legacy EH and LTO paths are unsupported.
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 add_compile_options(-fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -fno-rtti)
+# Source locations (__FILE__, __builtin_FILE) are recorded relative to c++/src,
+# the form kj already trims diagnostics to, so messages are unchanged and the
+# module bytes no longer depend on the checkout path.
+add_compile_options("-ffile-prefix-map=${src}/=")
 add_compile_definitions(KJ_NO_RTTI=1 KJ_HAS_LIBDL=0)
 add_link_options(-fwasm-exceptions -Wl,-z,stack-size=8388608)
 link_libraries(unwind)

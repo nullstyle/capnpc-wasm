@@ -31,6 +31,9 @@ wasm_toolchain="$wasm_toolchain|ninja=$(command -v ninja || echo missing)=$(ninj
 wasm_toolchain="$wasm_toolchain|clang=$("$sdk_path/bin/clang" --version | head -n 1)"
 wasm_toolchain="$wasm_toolchain|toolchain-file=$(git hash-object "$sdk_path/share/cmake/wasi-sdk-p1.cmake")"
 wasm_toolchain="$wasm_toolchain|cmakelists=$(git hash-object cmake/CMakeLists.txt)"
+# The source directory is part of the compile flags (its prefix is mapped out
+# of the modules), so a moved checkout reconfigures too.
+wasm_toolchain="$wasm_toolchain|source-dir=$root/$source_dir"
 # The cross build must not see the host linker fallback that
 # scripts/lib/toolchain-env.sh may export in LDFLAGS: CMake seeds
 # CMAKE_EXE_LINKER_FLAGS from it and the WASI clang would then use Apple's ld.
