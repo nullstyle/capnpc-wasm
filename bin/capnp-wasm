@@ -169,6 +169,14 @@ max_backtrace=16
 runtime=${CAPNP_WASM_WASMTIME:-wasmtime}
 command -v "$runtime" >/dev/null 2>&1 ||
   fail 69 "Wasmtime $expected_version is required; executable not found: $runtime"
+# The guest runs from the module's directory, so the runtime path must not
+# depend on the current directory.
+case $runtime in
+  */*) ;;
+  *) runtime=$(command -v -- "$runtime") ||
+    fail 69 "Wasmtime $expected_version is required; executable not found: $runtime" ;;
+esac
+case $runtime in /*) ;; *) runtime=$PWD/$runtime ;; esac
 actual_banner=$("$runtime" --version) || fail 69 'failed to read Wasmtime version'
 actual_version=${actual_banner#wasmtime }
 actual_version=${actual_version%% *}
@@ -394,7 +402,7 @@ fi
 # the module file, not the host installation path.
 cd -- "${module%/*}"
 "$runtime" run -W exceptions=y "${bounds[@]}" -D "max-backtrace=$max_backtrace" \
-  -S cwd=/ --dir "$root::/" --argv0 "$argv0" "${module##*/}" "$@" <&0 &
+  -S cwd=/ --dir "$root::/" --argv0="$argv0" "./${module##*/}" "$@" <&0 &
 child=$!
 set +e
 wait "$child"

@@ -645,6 +645,14 @@ async function checkCliContract(context: Context) {
       env: { CAPNP_WASM_WASMTIME: wrapper },
     }),
   );
+  // A relative CAPNP_WASM_WASMTIME resolves against the caller's directory,
+  // although the guest runs from the module's directory.
+  success(
+    await run([...compiler, "--version"], {
+      cwd: temporary,
+      env: { CAPNP_WASM_WASMTIME: "./runtime with spaces" },
+    }),
+  );
   const newerPatch = await run([...compiler, "--version"], {
     env: {
       CAPNP_WASM_WASMTIME: await fakeRuntime(`${major}.${minor}.${patch + 1}`),
@@ -1174,6 +1182,41 @@ async function checkGeneratorSemantics(context: Context) {
   const beforeParent = await snapshot(temporary);
   exitCode(await generate(symlinkedParent, nested), 73, "symlinked parent");
   sameSnapshot(beforeParent, await snapshot(temporary), "symlinked parent");
+  // A module whose name starts with a dash is not taken for a Wasmtime option,
+  // and the guest still sees that name as argv[0].
+  const dashed = `${temporary}/-dashed.wasm`;
+  await Deno.copyFile(module, dashed);
+  const dashOutput = `${temporary}/dash output`;
+  await Deno.mkdir(dashOutput);
+  success(
+    await run([
+      ...launcher,
+      "generator",
+      "--module",
+      dashed,
+      "--output",
+      dashOutput,
+      "--",
+    ], { input: twoFiles }),
+  );
+  assert(
+    (await snapshot(dashOutput)).has("first.capnp.h"),
+    "dashed module produced no output",
+  );
+  const dashHelp = await run([
+    ...launcher,
+    "generator",
+    "--module",
+    dashed,
+    "--output",
+    dashOutput,
+    "--",
+    "--help",
+  ]);
+  assert(
+    (text.decode(dashHelp.stdout) + stderrOf(dashHelp)).includes("-dashed"),
+    `dashed module argv[0]: ${stderrOf(dashHelp)}`,
+  );
   // A symlink created by the guest is refused before anything is published.
   const linkModule = `${temporary}/symlink module/symlink.wasm`;
   await Deno.mkdir(`${temporary}/symlink module`);
