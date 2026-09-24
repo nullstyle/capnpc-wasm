@@ -110,23 +110,27 @@ mise run ci           # the CI check job: check, package gates, Deno worker lane
 mise run test:browser # Chromium, Firefox, WebKit: offline execution and cancellation
 ```
 
-| Task                                                                     | Checks                                                                                                                 | Builds first                  |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `lint`, `fmt`                                                            | shellcheck, formatting, `deno lint`/`check`, `go vet`, clippy, `zig fmt`, Markdown links; `fmt` applies the formatters | nothing                       |
-| `test:zig-unit`                                                          | capnp-zig unit tests                                                                                                   | Zig generator                 |
-| `test:toolchain`                                                         | compiler and generators in Wasmtime, wazero, and Deno against native output                                            | everything                    |
-| `test:wire`, `test:reflection`, `test:generator-api`, `test:rpc-codegen` | Zig wire conformance, reflection, generator API, RPC codegen                                                           | native tools, Zig generator   |
-| `test:sdk-ts`                                                            | `sdk/typescript/` on the pinned Deno (worker tests ignored there)                                                      | Wasm generators               |
-| `test:features`                                                          | schema feature corpus through the SDK, compiled with the pinned runtimes                                               | native tools, Wasm generators |
-| `test:sdk-go`                                                            | Go SDK                                                                                                                 | native tools, Wasm generators |
-| `test:deno-worker`                                                       | `sdk/typescript/` and the compiler-host gate on Deno 2.6.8, including worker termination                               | native tools, SDK bundle      |
-| `test:package`, `test:launcher`, `test:compiler-host-package`            | release archives, external consumers, the Wasmtime launcher                                                            | native tools, SDK bundle      |
-| `test:browser-bootstrap`, `test:browser`, `test:studio`                  | Playwright permission boundary; SDK and Schema Studio in real browsers (`browser:install` first)                       | native tools, SDK bundle      |
-| `clean:test`, `clean`, `clean:all`                                       | remove `build/test` and the Zig test scratch; `build/` and `dist/`; those plus `.cache/`                               |                               |
+| Task                                                                     | Checks                                                                                                                 | Builds first                                  |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `lint`, `fmt`                                                            | shellcheck, formatting, `deno lint`/`check`, `go vet`, clippy, `zig fmt`, Markdown links; `fmt` applies the formatters | nothing                                       |
+| `test:zig-unit`                                                          | capnp-zig unit tests                                                                                                   | Zig generator                                 |
+| `test:toolchain`                                                         | compiler and generators in Wasmtime, wazero, and Deno against native output                                            | everything                                    |
+| `test:wire`, `test:reflection`, `test:generator-api`, `test:rpc-codegen` | Zig wire conformance, reflection, generator API, RPC codegen                                                           | native tools, Zig generator                   |
+| `test:sdk-ts`                                                            | `sdk/typescript/` on the pinned Deno (worker tests ignored there)                                                      | Wasm generators                               |
+| `test:features`                                                          | schema feature corpus through the SDK, compiled with the pinned runtimes                                               | native tools, Wasm generators                 |
+| `test:sdk-go`                                                            | Go SDK                                                                                                                 | native tools, Wasm generators                 |
+| `test:deno-worker`                                                       | `sdk/typescript/` and the compiler-host gate on Deno 2.6.8, including worker termination                               | native tools, SDK bundle                      |
+| `test:package`, `test:compiler-host-package`                             | release archives and external consumers                                                                                | native tools, SDK bundle                      |
+| `test:launcher`                                                          | the packaged Wasmtime launcher                                                                                         | SDK bundle                                    |
+| `test:browser-bootstrap`                                                 | Playwright permission boundary, no browser launched                                                                    | nothing                                       |
+| `test:browser`, `test:studio`                                            | SDK and Schema Studio in real browsers (`browser:install` first)                                                       | native tools, SDK bundle, and the Studio site |
+| `clean:test`, `clean`, `clean:all`                                       | remove `build/test` and the Zig test scratch; `build/` and `dist/`; those plus `.cache/`                               |                                               |
 
 `mise run --skip-deps test:<suite>` reruns one suite without its build check,
-and arguments after `--` reach the suite:
-`mise run --skip-deps test:toolchain -- --filter wazero`.
+and arguments after `--` reach the suite: `--filter <name>` selects a host or
+fixture in the Deno suites
+(`mise run --skip-deps test:toolchain -- --filter wazero`), and `test:sdk-go`
+takes `-run <name>`.
 
 Native tools are in `build/native/bin/`; Wasm commands are in `build/wasm/bin/`.
 Wasm builds export the compiler sources into `build/src/`, apply the project

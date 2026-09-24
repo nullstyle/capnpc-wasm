@@ -84,10 +84,12 @@ a local cold build is comparable. For quick iteration, run one suite task, or
 ## Inner loop
 
 Run the narrowest task that covers the change: every `test:<suite>` builds only
-what it reads, and `mise run --skip-deps test:<suite> -- --filter <name>` reruns
-one suite without the build check, `--filter` selecting a host or fixture. Warm
-suites take 1 to 40 s, `mise run test` about two minutes, `mise run lint`
-seconds with no build. Then run the area's gate from Verification by area.
+what it reads, and `mise run --skip-deps test:<suite>` reruns one without the
+build check. Arguments after `--` reach the suite: `--filter <name>` selects a
+host or fixture in the Deno suites, `test:sdk-go` takes `-run <name>`, and
+`test:zig-unit` fixes its own filters. Warm suites take 1 to 40 s,
+`mise run test` about two minutes, `mise run lint` seconds with no build. Then
+run the area's gate from Verification by area.
 
 | Change                                     | Fastest check                                                                                  |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
