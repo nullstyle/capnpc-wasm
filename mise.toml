@@ -284,10 +284,18 @@ rmdir "$scratch"
 [tasks."test:deno-worker"]
 description = "Run the SDK tests and the compiler-host gate on the supported Deno worker runtime (worker termination coverage)"
 depends = ["deno-worker:install", "build:native", "build:sdk"]
+# Both this lane and test:compiler-host-package rewrite the same
+# dist/releases/<compiler-host stem>; run after it whenever both are scheduled.
+wait_for = ["test:compiler-host-package"]
 run = '''
 set -eu
 version="$(sed -n '{{vars.worker_version_sed}}' sdk/typescript/worker-client.ts)"
+test -n "$version" || { echo "supportedDenoWorkerVersion not found in sdk/typescript/worker-client.ts" >&2; exit 1; }
 deno_bin="$(mise where "deno@$version")/bin/deno"
+case "$("$deno_bin" --version | head -n 1)" in
+  "deno $version "*) ;;
+  *) echo "expected Deno $version at $deno_bin, got: $("$deno_bin" --version | head -n 1)" >&2; exit 1 ;;
+esac
 "$deno_bin" test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/
 deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts "$deno_bin"
 '''
