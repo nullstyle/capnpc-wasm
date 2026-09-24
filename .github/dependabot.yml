@@ -1,0 +1,76 @@
+# Dependabot version updates. Each ecosystem is grouped into one pull request
+# per cadence so the CI check runs once per batch. Pins that follow a gitlink
+# under ref/ move only with a deliberate reference bump (CONTRIBUTING.md):
+# wazero in sdk/go must equal the ref/wazero gitlink (doctor rejects anything
+# else), and the capnp crates are path dependencies on ref/capnproto-rust.
+# generators/go, tests/consumers/go, and tests/hosts/wazero replace their
+# modules with the checkouts under ref/, so they are not listed. mise tool
+# pins are not a Dependabot ecosystem; the supply-chain workflow reports newer
+# releases of those.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: gomod
+    directory: /sdk/go
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      go:
+        patterns: ["*"]
+    ignore:
+      # Pinned to the ref/wazero gitlink; the nightly workflow tests newer
+      # wazero releases as a drift signal instead.
+      - dependency-name: github.com/tetratelabs/wazero
+  - package-ecosystem: cargo
+    directories:
+      - /generators/rust
+      - /tests/consumers/rust
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      cargo:
+        patterns: ["*"]
+    ignore:
+      # Path dependencies on ref/capnproto-rust, bumped with that reference.
+      - dependency-name: capnp
+      - dependency-name: capnpc
+  - package-ecosystem: deno
+    directories:
+      - /tests/browser
+      - /examples/browser
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      deno:
+        patterns: ["*"]
+  # A monthly reminder of upstream movement, never an automatic bump: the
+  # references are updated deliberately with the CONTRIBUTING.md checklist,
+  # and the pull request's CI run shows what the move would break.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "build(refs)"
+    open-pull-requests-limit: 1
+    groups:
+      references:
+        patterns: ["*"]
