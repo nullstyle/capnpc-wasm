@@ -41,6 +41,11 @@ jobs:
         with:
           version: 2026.9.1
           install_args: go deno
+      # generators/go replaces capnproto.org/go/capnp/v3 with the ref/go-capnp
+      # checkout, so govulncheck needs the references initialized at their
+      # gitlinks (git only; no tools involved).
+      - name: Initialize only pinned top-level references
+        run: mise run refs:sync
       # osv-scanner is not a project tool: audit:osv runs it ad hoc from a
       # scratch directory so the project lock is never rewritten. Installing
       # it here keeps the GitHub API token out of the scan step.
