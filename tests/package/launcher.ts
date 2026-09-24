@@ -214,11 +214,13 @@ const op = {
   drop: [0x1a],
   localGet: (index: number) => [0x20, ...uleb(index)],
   localSet: (index: number) => [0x21, ...uleb(index)],
+  i32Load: [0x28, 0x02, 0x00],
   i32Store: [0x36, 0x02, 0x00],
   i32Store8: [0x3a, 0x00, 0x00],
   memorySize: [0x3f, 0x00],
   memoryGrow: [0x40, 0x00],
   i32Const: (value: number) => [0x41, ...sleb(value)],
+  i64Const: (value: number) => [0x42, ...sleb(value)],
   i32Ne: [0x47],
   i32Add: [0x6a],
   i32Sub: [0x6b],
@@ -354,32 +356,59 @@ const growModule = wasmModule([
   ),
 ]);
 
-// A command that creates the relative symlink `rel -> a.txt` in guest `/`
-// through path_symlink on the preopened directory (fd 3) and exits 0.
+// A command that creates `/a.txt` through path_open on the preopened directory
+// (fd 3), closes it, links `rel -> a.txt` through path_symlink, and exits 0:
+// a symlink to an existing file, which an unguarded publish would move.
+const I64 = 0x7e;
 const symlinkModule = wasmModule([
   section(
     1,
-    vector([[0x60, 5, I32, I32, I32, I32, I32, 1, I32], [0x60, 0, 0]]),
+    vector([
+      [0x60, 9, I32, I32, I32, I32, I32, I64, I64, I32, I32, 1, I32],
+      [0x60, 1, I32, 1, I32],
+      [0x60, 5, I32, I32, I32, I32, I32, 1, I32],
+      [0x60, 0, 0],
+    ]),
   ),
   section(
     2,
     vector([
-      [...name("wasi_snapshot_preview1"), ...name("path_symlink"), 0, 0],
+      [...name("wasi_snapshot_preview1"), ...name("path_open"), 0, 0],
+      [...name("wasi_snapshot_preview1"), ...name("fd_close"), 0, 1],
+      [...name("wasi_snapshot_preview1"), ...name("path_symlink"), 0, 2],
     ]),
   ),
-  section(3, vector([[1]])),
+  section(3, vector([[3]])),
   section(5, vector([[0, 1]])),
-  section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 1]])),
+  section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 3]])),
   section(
     10,
     vector([
       body([], [
+        // path_open(fd 3, dirflags 0, "a.txt", 5, O_CREAT, rights read|write,
+        // inheriting 0, fdflags 0, &fd at 64)
+        ...op.i32Const(3),
+        ...op.i32Const(0),
+        ...op.i32Const(0),
+        ...op.i32Const(5),
+        ...op.i32Const(1),
+        ...op.i64Const(0x42),
+        ...op.i64Const(0),
+        ...op.i32Const(0),
+        ...op.i32Const(64),
+        ...op.call(0),
+        ...op.drop,
+        ...op.i32Const(64),
+        ...op.i32Load,
+        ...op.call(1),
+        ...op.drop,
+        // path_symlink("a.txt", 5, fd 3, "rel", 3)
         ...op.i32Const(0),
         ...op.i32Const(5),
         ...op.i32Const(3),
         ...op.i32Const(16),
         ...op.i32Const(3),
-        ...op.call(0),
+        ...op.call(2),
         ...op.drop,
       ]),
     ]),
@@ -1229,7 +1258,8 @@ async function checkGeneratorSemantics(context: Context) {
     (text.decode(dashHelp.stdout) + stderrOf(dashHelp)).includes("-dashed"),
     `dashed module argv[0]: ${stderrOf(dashHelp)}`,
   );
-  // A symlink created by the guest is refused before anything is published.
+  // A symlink created by the guest, even to a file it also created, is refused
+  // before anything is published.
   const linkModule = `${temporary}/symlink module/symlink.wasm`;
   await Deno.mkdir(`${temporary}/symlink module`);
   await Deno.writeFile(linkModule, symlinkModule);
