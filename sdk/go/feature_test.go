@@ -26,7 +26,7 @@ func TestSchemaFeatures(t *testing.T) {
 		t.Fatal(err)
 	}
 	if testing.Short() {
-		t.Skip("native comparison of every feature scenario is skipped in short mode")
+		t.Skip("skipped in short mode: compares every feature scenario with native output")
 	}
 	compiler := sharedCompiler(t)
 	for _, scenario := range manifest.Scenarios {

@@ -174,9 +174,10 @@ mise exec -- go -C sdk/go test -run '^$' -bench . -benchmem ./...
 
 The tests share one compiler built from the real modules. Set
 `CAPNPC_WASM_TEST_ENGINE=compiler` or `interpreter` to run the suite under one
-engine; the default is `auto`. `-short` skips the native comparison of every
-feature scenario. A failed native comparison keeps its work directory under
-`build/test/`; set `CAPNP_KEEP_TEST_DIRS=1` to keep them after success too.
+engine; the default is `auto`. `-short` skips `TestSchemaFeatures`, which
+compares every feature scenario with native output. A failed native comparison
+keeps its work directory under `build/test/`; set `CAPNP_KEEP_TEST_DIRS=1` to
+keep them after success too.
 
 Tests run the actual built modules, compare canonical requests and generated
 source with native upstream tools, run concurrent and repeated jobs, and cover

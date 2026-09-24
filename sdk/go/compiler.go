@@ -293,7 +293,7 @@ func (c *Compiler) Close(ctx context.Context) error {
 }
 
 // closeRuntimes releases every runtime once. Callers guarantee that no job is
-// active, because closing the compiler engine unmaps its executable code.
+// active: a runtime is closed only after the last job that uses it has stopped.
 func (c *Compiler) closeRuntimes() error {
 	c.release.Do(func() {
 		for _, r := range c.runtimes {
@@ -338,7 +338,7 @@ func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error)
 		return Result{}, &Error{Stage: "validate", Err: err}
 	}
 	defer done()
-	if err := ctx.Err(); err != nil {
+	if err := jobErr(ctx); err != nil {
 		return Result{}, &Error{Stage: "validate", Err: err}
 	}
 	if err := c.validate(request); err != nil {
@@ -405,7 +405,7 @@ func (c *Compiler) Generate(ctx context.Context, request GenerationRequest) (Gen
 		return GenerationResult{}, &Error{Stage: "validate", Err: err}
 	}
 	defer done()
-	if err := ctx.Err(); err != nil {
+	if err := jobErr(ctx); err != nil {
 		return GenerationResult{}, &Error{Stage: "validate", Err: err}
 	}
 	if len(request.Request) == 0 || len(request.Request) > maxBytes {
@@ -472,15 +472,22 @@ func (c *Compiler) run(ctx context.Context, cmd command, filesystem wazero.FSCon
 	if errors.As(err, &exit) && exit.ExitCode() == 0 {
 		err = nil
 	}
-	if ctx.Err() != nil {
-		err = ctx.Err()
-		if errors.Is(context.Cause(ctx), ErrClosed) {
-			err = ErrClosed
-		}
+	if ctxErr := jobErr(ctx); ctxErr != nil {
+		err = ctxErr
 	} else if stdout.exceeded || stderr.exceeded {
 		err = errors.New("command stdio exceeded its size limit")
 	}
 	return stdout.Bytes(), stderr.String(), err
+}
+
+// jobErr reports why a job context ended: ErrClosed when Close terminated
+// the job, otherwise the context error itself. It is nil while the context
+// is live.
+func jobErr(ctx context.Context) error {
+	if errors.Is(context.Cause(ctx), ErrClosed) {
+		return ErrClosed
+	}
+	return ctx.Err()
 }
 
 // sleep implements the guest's nanosleep (poll_oneoff clock subscriptions) so

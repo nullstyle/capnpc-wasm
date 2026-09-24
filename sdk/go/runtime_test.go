@@ -349,3 +349,32 @@ func TestCompilationCache(t *testing.T) {
 		t.Fatal("cached modules produced different output")
 	}
 }
+
+// TestCloseWithExpiredContextTerminatesActiveCall closes with a context that
+// has already ended while a job runs: Close returns the context error at once
+// and the job fails with ErrClosed, not with the closing context's error.
+func TestCloseWithExpiredContextTerminatesActiveCall(t *testing.T) {
+	c := newCompiler(t, sleepCommand, nil)
+	results := make(chan error, 1)
+	go func() {
+		_, err := c.Compile(t.Context(), compileOnly())
+		results <- err
+	}()
+	waitFor(t, "the job to register", func() bool { return c.ActiveJobs() == 1 })
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	start := time.Now()
+	err := c.Close(expired)
+	if elapsed := time.Since(start); !errors.Is(err, context.Canceled) || elapsed > promptly {
+		t.Fatalf("Close with an expired context returned %v after %v", err, elapsed)
+	}
+	err = <-results
+	var failure *capnpcwasm.Error
+	if !errors.Is(err, capnpcwasm.ErrClosed) || errors.Is(err, context.Canceled) || !errors.As(err, &failure) || failure.Stage != "compile" {
+		t.Fatalf("terminated job returned %v, want ErrClosed", err)
+	}
+	if err := c.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	assertClosed(t, c)
+}
