@@ -891,6 +891,73 @@ async function checkCompilerSemantics(context: Context, request: Uint8Array) {
     73,
     "workspace over CAPNP_WASM_MAX_WORKSPACE",
   );
+  // More than 65536 entries is refused with the hint even though head cuts
+  // find short (its SIGPIPE must not trip the launcher's pipefail).
+  const crowded = `${temporary}/crowded workspace`;
+  await Deno.mkdir(crowded);
+  success(
+    await run([
+      "bash",
+      "-c",
+      'cd "$1" && seq 1 65537 | sed "s/^/f/" | xargs touch',
+      "_",
+      crowded,
+    ]),
+  );
+  const tooMany = await run([
+    ...launcher,
+    "compiler",
+    "--workspace",
+    crowded,
+    "--",
+    "--version",
+  ]);
+  assert(
+    tooMany.code === 73 &&
+      stderrOf(tooMany).includes("more than 65536 entries") &&
+      stderrOf(tooMany).includes("point --workspace"),
+    `crowded workspace: ${tooMany.code} ${stderrOf(tooMany)}`,
+  );
+  success(await run(["bash", "-c", 'rm -rf -- "$1"', "_", crowded]));
+  // An unreadable subdirectory fails the copy with exit 73 and a message, and
+  // leaves nothing behind in TMPDIR.
+  const shielded = `${temporary}/shielded workspace`;
+  const scratch = `${temporary}/scratch tmpdir`;
+  await Deno.mkdir(`${shielded}/private`, { recursive: true });
+  await Deno.mkdir(scratch);
+  await Deno.writeTextFile(`${shielded}/private/x.capnp`, "");
+  await Deno.chmod(`${shielded}/private`, 0o000);
+  try {
+    let privileged = true;
+    try {
+      for await (const _entry of Deno.readDir(`${shielded}/private`)) {
+        // Readable despite mode 000: running as root.
+      }
+    } catch {
+      privileged = false;
+    }
+    const unreadable = await run([
+      ...launcher,
+      "compiler",
+      "--workspace",
+      shielded,
+      "--",
+      "--version",
+    ], { env: { TMPDIR: scratch } });
+    if (!privileged) {
+      assert(
+        unreadable.code === 73 &&
+          stderrOf(unreadable).includes("cannot copy the workspace"),
+        `unreadable subdirectory: ${unreadable.code} ${stderrOf(unreadable)}`,
+      );
+    }
+    assert(
+      (await snapshot(scratch)).size === 0,
+      "staging left behind in TMPDIR after a failed workspace copy",
+    );
+  } finally {
+    await Deno.chmod(`${shielded}/private`, 0o755);
+  }
 }
 
 async function checkCompilerConfinement(context: Context) {

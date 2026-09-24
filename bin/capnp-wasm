@@ -204,7 +204,7 @@ resolve_root() {
 stage=''
 cleanup() {
   if [[ -n "$stage" ]]; then
-    chmod -R u+w "$stage" 2>/dev/null || true
+    chmod -R u+rwX "$stage" 2>/dev/null || true
     rm -rf -- "$stage" 2>/dev/null || true
   fi
 }
@@ -228,7 +228,8 @@ copy_tree() {
     Darwin) cp -c -R -- "$source" "$destination" 2>/dev/null && return ;;
     *) cp -R --reflink=auto -- "$source" "$destination" 2>/dev/null && return ;;
   esac
-  rm -rf -- "$destination"
+  chmod -R u+rwX "$destination" 2>/dev/null || true
+  rm -rf -- "$destination" 2>/dev/null || true
   cp -R -- "$source" "$destination"
 }
 
@@ -277,10 +278,15 @@ if [[ "$mode" == compiler ]]; then
     if [[ -n "${HOME:-}" && "$workspace" == "$(unset CDPATH; cd -P -- "$HOME" 2>/dev/null && pwd -P)" ]]; then
       warn 'the workspace is your home directory; the guest receives a read-only copy of it'
     fi
-    entries=$(find "$workspace" -mindepth 1 2>/dev/null | head -n 65537 | wc -l | tr -d ' ')
+    # head stops find early on large trees, so find's SIGPIPE, like an
+    # unreadable subdirectory, must not trip pipefail; the copy below reports
+    # entries it cannot read.
+    entries=$({ find "$workspace" -mindepth 1 2>/dev/null || true; } | head -n 65537 | wc -l | tr -d ' ')
     [[ "$entries" -le 65536 ]] ||
       fail 73 "workspace has more than 65536 entries; point --workspace at the schema directory: $workspace"
-    read -r workspace_kib _ < <(du -sk -- "$workspace")
+    workspace_kib=$({ du -sk -- "$workspace" 2>/dev/null || true; } | head -n 1)
+    workspace_kib=${workspace_kib%%[^0-9]*}
+    [[ "$workspace_kib" =~ ^[0-9]+$ ]] || fail 73 "cannot measure the workspace: $workspace"
     [[ $((workspace_kib * 1024)) -le $max_workspace ]] ||
       fail 73 "workspace uses more than CAPNP_WASM_MAX_WORKSPACE=$max_workspace bytes of disk; point --workspace at the schema directory: $workspace"
     copy_tree "$workspace" "$root" || fail 73 "cannot copy the workspace into $stage"
