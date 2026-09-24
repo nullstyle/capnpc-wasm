@@ -140,15 +140,15 @@ diff --git a/c++/src/kj/filesystem-disk-unix.c++ b/c++/src/kj/filesystem-disk-un
  struct MmapRange {
    uint64_t offset;
    uint64_t size;
-@@ -264,6 +269,8 @@
- };
+@@ -265,6 +270,8 @@
  
  constexpr MmapDisposer mmapDisposer = MmapDisposer();
-+
-+#endif
  
++#endif
++
  class DiskHandle {
    // We need to implement each of ReadableFile, AppendableFile, File, ReadableDirectory, and
+   // Directory for disk handles. There is a lot of implementation overlap between these, especially
 @@ -357,6 +364,20 @@
      return total;
    }
@@ -170,15 +170,15 @@ diff --git a/c++/src/kj/filesystem-disk-unix.c++ b/c++/src/kj/filesystem-disk-un
    Array<const byte> mmap(uint64_t offset, uint64_t size) const {
      if (size == 0) return nullptr;  // zero-length mmap() returns EINVAL, so avoid it
      auto range = getMmapRange(offset, size);
-@@ -378,6 +399,8 @@
-     return Array<byte>(reinterpret_cast<byte*>(mapping) + (offset - range.offset),
+@@ -379,6 +400,8 @@
                         size, mmapDisposer);
    }
-+
-+#endif
  
++#endif
++
    // File ----------------------------------------------------------------------
  
+   void write(uint64_t offset, ArrayPtr<const byte> data) const {
 @@ -460,6 +483,11 @@
      KJ_SYSCALL(ftruncate(fd, size));
    }
@@ -191,15 +191,15 @@ diff --git a/c++/src/kj/filesystem-disk-unix.c++ b/c++/src/kj/filesystem-disk-un
    class WritableFileMappingImpl final: public WritableFileMapping {
    public:
      WritableFileMappingImpl(Array<byte> bytes): bytes(kj::mv(bytes)) {}
-@@ -508,6 +536,8 @@
-                              size, mmapDisposer);
+@@ -509,6 +537,8 @@
      return heap<WritableFileMappingImpl>(kj::mv(array));
    }
-+
-+#endif
  
++#endif
++
    size_t copyChunk(uint64_t offset, int fromFd, uint64_t fromOffset, uint64_t size) const {
      // Copies a range of bytes from `fromFd` to this file in the most efficient way possible for
+     // the OS. Only returns less than `size` if EOF. Does not account for holes.
 @@ -904,7 +934,17 @@
      }
  
@@ -227,3 +227,72 @@ diff --git a/c++/src/kj/filesystem-disk-unix.c++ b/c++/src/kj/filesystem-disk-un
            // - No mknodat() on OSX, gotta open() a file, ugh.
            // - On a modern FreeBSD, mknodat() is reserved strictly for device nodes,
            //   you cannot create a regular file using it (EINVAL).
+@@ -1685,6 +1725,17 @@
+ #endif
+         return result;
+       }
++#endif
++#if __wasi__
++      case ENOENT:
++      case ENOTCAPABLE:
++        // WASI has no ambient filesystem: a path resolves only inside a directory the host
++        // preopened. Name the missing capability instead of reporting a missing file.
++        if (dir[0] == '/' && dir[1] == '\0') {
++          KJ_FAIL_REQUIRE("the host did not preopen a directory at \"/\"; this command needs "
++                          "the guest filesystem mounted there");
++        }
++        KJ_FAIL_SYSCALL("open(dir, O_RDONLY)", error, dir);
+ #endif
+       default:
+         KJ_FAIL_SYSCALL("open(dir, O_RDONLY)", error, dir);
+diff --git a/c++/src/kj/main.c++ b/c++/src/kj/main.c++
+--- a/c++/src/kj/main.c++
++++ b/c++/src/kj/main.c++
+@@ -50,7 +50,15 @@
+ 
+ TopLevelProcessContext::TopLevelProcessContext(StringPtr programName)
+     : programName(programName),
++#if __wasi__
++      // Hosts that implement proc_exit() as a thrown JavaScript exception unwind it through the
++      // C++ frames under Wasm exception handling, so exiting from inside the program runs cleanup
++      // pads after "exit" and can reach a terminate pad. Always return the status from main()
++      // instead: crt1 calls proc_exit() from the outermost frame, and only for a nonzero status.
++      cleanShutdown(true) {
++#else
+       cleanShutdown(getenv("KJ_CLEAN_SHUTDOWN") != nullptr) {
++#endif
+   printStackTraceOnCrash();
+ }
+ 
+diff --git a/c++/src/kj/main.h b/c++/src/kj/main.h
+--- a/c++/src/kj/main.h
++++ b/c++/src/kj/main.h
+@@ -175,12 +175,28 @@
+ //
+ // Most users will use the KJ_MAIN() macro rather than call this function directly.
+ 
++#if __wasi__
++// Under Wasm exception handling nothing calls std::terminate() for an exception that escapes
++// main(); the host reports an opaque trap. Construct the main object inside runMainAndExit()'s
++// exception envelope, so a failure there (for example, no directory preopened at "/") is reported
++// as "*** Uncaught exception ***" with exit status 1, like a failure inside the main function.
++#define KJ_MAIN(MainClass) \
++  int main(int argc, char* argv[]) { \
++    ::kj::TopLevelProcessContext context(argv[0]); \
++    ::kj::Maybe<MainClass> mainObject; \
++    return ::kj::runMainAndExit(context, \
++        [&](::kj::StringPtr programName, ::kj::ArrayPtr<const ::kj::StringPtr> params) { \
++          mainObject.emplace(context).getMain()(programName, params); \
++        }, argc, argv); \
++  }
++#else
+ #define KJ_MAIN(MainClass) \
+   int main(int argc, char* argv[]) { \
+     ::kj::TopLevelProcessContext context(argv[0]); \
+     MainClass mainObject(context); \
+     return ::kj::runMainAndExit(context, mainObject.getMain(), argc, argv); \
+   }
++#endif
+ // Convenience macro for declaring a main function based on the given class.  The class must have
+ // a constructor that accepts a ProcessContext& and a method getMain() which returns
+ // kj::MainFunc (probably building it using a MainBuilder).

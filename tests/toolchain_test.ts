@@ -895,8 +895,128 @@ for (const host of wasmHosts) {
         }; the host's random source is not random`,
       );
     });
+
+    await t.step(
+      "commands without a directory preopened at / fail with a clear diagnostic",
+      async () => {
+        // The compiler and the C++ generator open "/" while their main objects
+        // are constructed. Without a preopen that used to escape main() as an
+        // opaque uncaught Wasm exception; the port now reports the missing
+        // host capability the way any other failure is reported: exit 1 and
+        // "*** Uncaught exception ***" with a message naming the preopen.
+        for (const tool of ["capnp", "capnpc-c++"]) {
+          const label = `${tool} without a preopen`;
+          const result = await run([
+            ...host.command,
+            ...(host.name === "wasmtime" ? ["--argv0", tool] : []),
+            `${wasmBin}/${tool}.wasm`,
+            ...(tool === "capnp" ? ["--version"] : []),
+          ], { stdin: new Uint8Array() });
+          const stderr = assertGuestDiagnostic(result, label);
+          assert(
+            stderr.startsWith("*** Uncaught exception ***\n") &&
+              stderr.includes('did not preopen a directory at "/"'),
+            `${label}: diagnostic does not name the missing preopen:\n${stderr}`,
+          );
+        }
+      },
+    );
   });
 }
+
+/**
+ * Runs a command on the browser WASI shim with an empty directory preopened
+ * at "/" and every WASI import wrapped, then prints how the guest exited:
+ * how often it called proc_exit and which imports it called afterwards.
+ * Written to the suite's work directory because it imports the shim from
+ * ref/, which needs the Deno host's config and sloppy imports.
+ */
+const exitProbe = `
+const [root, modulePath, argv0, ...args] = Deno.args;
+const { default: WASI } = await import(root + "/ref/browser_wasi_shim/src/wasi.ts");
+const { File, OpenFile, PreopenDirectory } = await import(root + "/ref/browser_wasi_shim/src/fs_mem.ts");
+const wasi = new WASI([argv0, ...args], [], [
+  new OpenFile(new File(new Uint8Array())),
+  new OpenFile(new File([])),
+  new OpenFile(new File([])),
+  new PreopenDirectory("/", new Map()),
+], { debug: false });
+let exited = false;
+let procExitCalls = 0;
+const callsAfterExit = [];
+const imports = {};
+for (const [name, fn] of Object.entries(wasi.wasiImport)) {
+  imports[name] = (...values) => {
+    if (exited) callsAfterExit.push(name);
+    if (name === "proc_exit") {
+      procExitCalls++;
+      exited = true;
+    }
+    return fn(...values);
+  };
+}
+const { instance } = await WebAssembly.instantiate(
+  await Deno.readFile(modulePath),
+  { wasi_snapshot_preview1: imports },
+);
+const code = wasi.start(instance);
+console.log(JSON.stringify({ code, procExitCalls, callsAfterExit }));
+`;
+
+suite.test("no WASI import runs after proc_exit on the JavaScript shim", async () => {
+  // The browser shim implements proc_exit as a thrown JavaScript exception,
+  // which Wasm exception handling unwinds through the C++ frames. Exiting
+  // from inside the program therefore ran destructors (fd_close calls) after
+  // "exit" and could have reached a terminate pad. The port always returns
+  // the status from main() instead: a success never calls proc_exit, and a
+  // failure calls it once from crt1's outermost frame with nothing after it.
+  const work = await suite.workDir();
+  const probe = `${work}/exit-probe.ts`;
+  await Deno.writeTextFile(probe, exitProbe);
+  const cases: [string, string[], number][] = [
+    ["capnp", ["--version"], 0],
+    ["capnp", ["id"], 0],
+    ["capnp", ["compile", "--bogus"], 1],
+    ["capnpc-c++", [], 1],
+    ["capnpc-capnp", [], 1],
+  ];
+  for (const [tool, args, expectedCode] of cases) {
+    const label = `${tool} ${args.join(" ")}`.trim();
+    const report = JSON.parse(decodeText(
+      await mustSucceed([
+        "deno",
+        "run",
+        "--unstable-sloppy-imports",
+        "--allow-read",
+        "--config",
+        `${root}/tests/hosts/deno/deno.json`,
+        probe,
+        root,
+        `${wasmBin}/${tool}.wasm`,
+        tool,
+        ...args,
+      ], { label: `exit probe for ${label}` }),
+    )) as {
+      code: number;
+      procExitCalls: number;
+      callsAfterExit: string[];
+    };
+    assert(
+      report.code === expectedCode,
+      `${label}: exited ${report.code}, expected ${expectedCode}`,
+    );
+    assert(
+      report.procExitCalls === (expectedCode === 0 ? 0 : 1),
+      `${label}: proc_exit was called ${report.procExitCalls} times`,
+    );
+    assert(
+      report.callsAfterExit.length === 0,
+      `${label}: WASI imports ran after proc_exit: ${
+        report.callsAfterExit.join(", ")
+      }`,
+    );
+  }
+});
 
 suite.test("raw Wasm requests are byte-identical across hosts", () => {
   const requestOf = (host: WasmHost) => {
