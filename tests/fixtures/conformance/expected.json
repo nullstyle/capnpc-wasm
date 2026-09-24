@@ -40,7 +40,9 @@
           "reason": "the launcher passes -I through, and the compiler reports the missing directory as exit 1",
           "finding": "GAP3-01"
         },
-        "studio": { "skip": "the adapter sets no import roots" }
+        "studio": {
+          "skip": "the adapter sets no import roots"
+        }
       }
     },
     "missing-source-prefix": {
@@ -53,12 +55,18 @@
           "reason": "the launcher passes --src-prefix through, and the compiler reports the missing directory as exit 1",
           "finding": "GAP3-01"
         },
-        "studio": { "skip": "the adapter sets no source prefix" }
+        "studio": {
+          "skip": "the adapter sets no source prefix"
+        }
       }
     },
     "nested-structs-60": {
       "expect": "ok",
-      "outputs": { "cpp": 2, "rust": 1, "zig": 1 },
+      "outputs": {
+        "cpp": 2,
+        "rust": 1,
+        "zig": 1
+      },
       "diagnostics": 0
     },
     "nested-structs-200": {
@@ -78,7 +86,11 @@
     },
     "const-chain-100": {
       "expect": "ok",
-      "outputs": { "cpp": 2, "rust": 1, "zig": 1 },
+      "outputs": {
+        "cpp": 2,
+        "rust": 1,
+        "zig": 1
+      },
       "diagnostics": 0
     },
     "const-chain-4000": {
@@ -87,21 +99,34 @@
       "surfaces": {
         "launcher": {
           "expect": "trap",
+          "stage": "compiler",
           "reason": "Wasmtime runs with an 8 MiB call stack, so the guest's 8 MiB linear-memory stack faults first (out-of-bounds memory access)",
           "finding": "GAP3-02"
         },
         "browser-direct": {
-          "expect": ["trap:stack", "trap"],
+          "expect": [
+            "trap:stack",
+            "trap"
+          ],
+          "stage": "compiler",
           "reason": "which stack ends first depends on the engine's thread stack against the guest's 8 MiB linear stack",
           "finding": "GAP3-02"
         },
         "browser-worker": {
-          "expect": ["trap:stack", "trap"],
+          "expect": [
+            "trap:stack",
+            "trap"
+          ],
+          "stage": "compiler",
           "reason": "which stack ends first depends on the engine's worker stack against the guest's 8 MiB linear stack",
           "finding": "GAP3-02"
         },
         "studio": {
-          "expect": ["trap:stack", "trap"],
+          "expect": [
+            "trap:stack",
+            "trap"
+          ],
+          "stage": "compiler",
           "reason": "which stack ends first depends on the engine's worker stack against the guest's 8 MiB linear stack",
           "finding": "GAP3-02"
         }
@@ -109,7 +134,11 @@
     },
     "import-chain-100": {
       "expect": "ok",
-      "outputs": { "cpp": 2, "rust": 1, "zig": 1 },
+      "outputs": {
+        "cpp": 2,
+        "rust": 1,
+        "zig": 1
+      },
       "diagnostics": 0
     },
     "path-4096": {
@@ -135,13 +164,19 @@
       "stage": "go",
       "stderr": true
     },
-    "go-partial-output": { "expect": "exit(1)", "stage": "go", "stderr": true },
+    "go-partial-output": {
+      "expect": "exit(1)",
+      "stage": "go",
+      "stderr": true
+    },
     "compiler-trap": {
       "expect": "trap",
       "stage": "compiler",
       "stderr": false,
       "surfaces": {
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "compiler-stack-overflow": {
@@ -149,22 +184,34 @@
       "stage": "compiler",
       "stderr": false,
       "surfaces": {
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "compiler-timeout": {
       "expect": "timeout",
       "surfaces": {
-        "ts-direct": { "skip": "direct execution has no deadline" },
-        "browser-direct": { "skip": "direct execution has no deadline" },
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "ts-direct": {
+          "skip": "direct execution has no deadline"
+        },
+        "browser-direct": {
+          "skip": "direct execution has no deadline"
+        },
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "limit-memoryPages-initial": {
       "expect": "validation:memoryPages",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "limit-memoryPages-runtime": {
@@ -172,53 +219,81 @@
       "stage": "compiler",
       "stderr": true,
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "limit-workspaceBytes": {
       "expect": "validation:workspaceBytes",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "limit-workspaceEntries": {
       "expect": "validation:workspaceEntries",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "limit-pathBytes": {
       "expect": "validation:pathBytes",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "limit-requestBytes-compile": {
       "expect": "limit:requestBytes",
       "stage": "compiler",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "limit-stdoutBytes-compile": {
       "expect": "limit:stdoutBytes",
       "stage": "compiler",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "limit-stderrBytes": {
       "expect": "limit:stderrBytes",
       "stage": "compiler",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "generator-partial-exit": {
@@ -226,7 +301,9 @@
       "stage": "cpp",
       "stderr": true,
       "surfaces": {
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-partial-trap": {
@@ -234,7 +311,9 @@
       "stage": "cpp",
       "stderr": true,
       "surfaces": {
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-bad-name": {
@@ -243,24 +322,34 @@
       "surfaces": {
         "go": {
           "expect": "exit(70)",
+          "stage": "cpp",
+          "stderr": false,
           "reason": "the memory filesystem refuses the name at creation (EPERM) and the guest exits 70",
           "finding": "GAP3-01"
         },
         "launcher": {
           "expect": "ok",
-          "outputs": { "cpp": 1 },
+          "outputs": {
+            "cpp": 1
+          },
           "reason": "the launcher applies no output-name policy; the host filesystem accepts a\\b",
           "finding": "GAP3-01"
         },
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-long-name": {
       "expect": "limit:pathBytes",
       "stage": "cpp",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-stderr-flood": {
@@ -270,11 +359,15 @@
       "surfaces": {
         "launcher": {
           "expect": "ok",
-          "outputs": { "cpp": 0 },
+          "outputs": {
+            "cpp": 0
+          },
           "reason": "the launcher has no stream budgets; stderr passes through to the caller",
           "finding": "GAP3-01"
         },
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-stdout-flood": {
@@ -283,11 +376,15 @@
       "surfaces": {
         "launcher": {
           "expect": "ok",
-          "outputs": { "cpp": 0 },
+          "outputs": {
+            "cpp": 0
+          },
           "reason": "the launcher has no stream budgets; stdout passes through to the caller",
           "finding": "GAP3-01"
         },
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-many-files": {
@@ -296,11 +393,15 @@
       "surfaces": {
         "launcher": {
           "expect": "ok",
-          "outputs": { "cpp": 5000 },
+          "outputs": {
+            "cpp": 5000
+          },
           "reason": "the launcher has no output budgets; every file is published",
           "finding": "GAP3-01"
         },
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-big-file": {
@@ -309,11 +410,15 @@
       "surfaces": {
         "launcher": {
           "expect": "ok",
-          "outputs": { "cpp": 1 },
+          "outputs": {
+            "cpp": 1
+          },
           "reason": "the launcher has no output budgets; the 65 MiB file is published",
           "finding": "GAP3-01"
         },
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-memory-grow": {
@@ -321,7 +426,9 @@
       "stage": "cpp",
       "stderr": false,
       "surfaces": {
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-trap": {
@@ -329,7 +436,9 @@
       "stage": "cpp",
       "stderr": false,
       "surfaces": {
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-stack-overflow": {
@@ -337,50 +446,82 @@
       "stage": "cpp",
       "stderr": false,
       "surfaces": {
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-warning": {
       "expect": "ok",
-      "outputs": { "cpp": 0 },
+      "outputs": {
+        "cpp": 0
+      },
       "diagnostics": 1,
       "surfaces": {
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "generator-timeout": {
       "expect": "timeout",
       "surfaces": {
-        "ts-direct": { "skip": "direct execution has no deadline" },
-        "browser-direct": { "skip": "direct execution has no deadline" },
-        "studio": { "skip": "the adapter runs the bundled modules only" }
+        "ts-direct": {
+          "skip": "direct execution has no deadline"
+        },
+        "browser-direct": {
+          "skip": "direct execution has no deadline"
+        },
+        "studio": {
+          "skip": "the adapter runs the bundled modules only"
+        }
       }
     },
     "limit-requestBytes-generate": {
       "expect": "validation:requestBytes",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "limit-outputBytes": {
       "expect": "limit:outputBytes",
       "stage": "cpp",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
     "limit-outputEntries": {
       "expect": "limit:outputEntries",
       "stage": "cpp",
       "surfaces": {
-        "launcher": { "skip": "the launcher has no configurable budgets" },
-        "studio": { "skip": "the adapter's budgets are fixed" }
+        "launcher": {
+          "skip": "the launcher has no configurable budgets"
+        },
+        "studio": {
+          "skip": "the adapter's budgets are fixed"
+        }
       }
     },
-    "request-half-cpp": { "expect": "exit(1)", "stage": "cpp", "stderr": true },
-    "request-one-cpp": { "expect": "exit(1)", "stage": "cpp", "stderr": true },
+    "request-half-cpp": {
+      "expect": "exit(1)",
+      "stage": "cpp",
+      "stderr": true
+    },
+    "request-one-cpp": {
+      "expect": "exit(1)",
+      "stage": "cpp",
+      "stderr": true
+    },
     "request-zeros8-cpp": {
       "expect": "exit(1)",
       "stage": "cpp",
@@ -411,16 +552,36 @@
       "stage": "rust",
       "stderr": true
     },
-    "request-half-go": { "expect": "exit(1)", "stage": "go", "stderr": true },
-    "request-one-go": { "expect": "exit(1)", "stage": "go", "stderr": true },
-    "request-zeros8-go": { "expect": "exit(1)", "stage": "go", "stderr": true },
+    "request-half-go": {
+      "expect": "exit(1)",
+      "stage": "go",
+      "stderr": true
+    },
+    "request-one-go": {
+      "expect": "exit(1)",
+      "stage": "go",
+      "stderr": true
+    },
+    "request-zeros8-go": {
+      "expect": "exit(1)",
+      "stage": "go",
+      "stderr": true
+    },
     "request-pattern4k-go": {
       "expect": "exit(1)",
       "stage": "go",
       "stderr": true
     },
-    "request-half-zig": { "expect": "exit(1)", "stage": "zig", "stderr": true },
-    "request-one-zig": { "expect": "exit(1)", "stage": "zig", "stderr": true },
+    "request-half-zig": {
+      "expect": "exit(1)",
+      "stage": "zig",
+      "stderr": true
+    },
+    "request-one-zig": {
+      "expect": "exit(1)",
+      "stage": "zig",
+      "stderr": true
+    },
     "request-zeros8-zig": {
       "expect": "exit(1)",
       "stage": "zig",

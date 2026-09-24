@@ -1,4 +1,5 @@
 import { packageFiles } from "../../scripts/verify-release.ts";
+import { runLauncherConformance } from "../conformance/launcher-surface.ts";
 
 const text = new TextDecoder();
 const bytes = new TextEncoder();
@@ -1513,8 +1514,18 @@ export async function checkLauncher(
     await checkBounds(context);
     await checkCompilerConfinement(context);
     await checkGeneratorSemantics(context);
+    // The shared failure and limit corpus, on the "launcher" surface of
+    // tests/fixtures/conformance/expected.json.
+    const conformance = await runLauncherConformance({
+      launcher,
+      modules: `${generatorPackage}/wasm`,
+      scratch: temporary,
+    });
+    const skipped = conformance.filter((row) => row.skipped).length;
     console.log(
-      "Packaged launcher passed: self-location, CLI contract and exit codes, bounds, argv[0], read-only workspace, staged output, and confinement",
+      `Packaged launcher passed: self-location, CLI contract and exit codes, bounds, argv[0], read-only workspace, staged output, confinement, and ${
+        conformance.length - skipped
+      } conformance rows (${skipped} not expressible)`,
     );
   } finally {
     await Deno.remove(temporary, { recursive: true });

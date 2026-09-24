@@ -70,8 +70,6 @@ export interface Observation {
   diagnostics?: number;
   /** Files per language on success. */
   outputs?: Record<string, number>;
-  /** Files the launcher published. */
-  published?: number;
   /** Free text for failure messages. */
   detail?: string;
 }
@@ -154,8 +152,6 @@ export interface Expectation {
   diagnostics?: number;
   /** Files per language a successful job returns. */
   outputs?: Record<string, number>;
-  /** Files the launcher publishes. */
-  published?: number;
 }
 
 /** A surface's departure from the reference expectation, with its reason. */
@@ -184,7 +180,12 @@ export async function loadExpected(root: string | URL): Promise<ExpectedFile> {
   return JSON.parse(await Deno.readTextFile(new URL(expectedPath, root)));
 }
 
-/** The expectation for one case on one surface, or the reason it is skipped. */
+/**
+ * The expectation for one case on one surface, or the reason it is skipped.
+ * An override that changes the outcome replaces the whole expectation (its
+ * stage, stderr, diagnostics, and outputs describe that outcome); one that
+ * keeps the outcome adjusts the reference's fields.
+ */
 export function expectationFor(
   expected: ExpectedFile,
   name: string,
@@ -197,7 +198,9 @@ export function expectationFor(
   const { surfaces: _surfaces, ...reference } = entry;
   if (!override) return reference;
   const { reason: _reason, finding: _finding, ...fields } = override;
-  return { ...reference, ...fields };
+  return fields.expect !== undefined
+    ? fields as Expectation
+    : { ...reference, ...fields };
 }
 
 const outcomeWord =
@@ -306,14 +309,6 @@ export function checkObservation(
       mismatches.push(`outputs ${actual}, expected ${wanted}`);
     }
   }
-  if (
-    expectation.published !== undefined &&
-    observation.published !== expectation.published
-  ) {
-    mismatches.push(
-      `${observation.published} files published, expected ${expectation.published}`,
-    );
-  }
   return mismatches;
 }
 
@@ -329,9 +324,6 @@ export function describeObservation(observation: Observation): string {
   }
   if (observation.outputs) {
     parts.push(`outputs=${JSON.stringify(observation.outputs)}`);
-  }
-  if (observation.published !== undefined) {
-    parts.push(`published=${observation.published}`);
   }
   return parts.join(" ");
 }

@@ -181,8 +181,10 @@ func loadConformanceCorpus(t *testing.T) *conformanceCorpus {
 
 const conformanceSimpleSchema = "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
 
-// expectationFor merges the surface override into the reference, or reports
-// the skip reason.
+// expectationFor applies the surface override to the reference, or reports
+// the skip reason. An override that changes the outcome replaces the whole
+// expectation, as expectationFor in tests/conformance/outcome.ts does; one
+// that keeps the outcome adjusts the reference's fields.
 func (corpus *conformanceCorpus) expectationFor(t *testing.T, name, surface string) (expectation, string) {
 	t.Helper()
 	entry, ok := corpus.expected[name]
@@ -196,10 +198,10 @@ func (corpus *conformanceCorpus) expectationFor(t *testing.T, name, surface stri
 	if override.Skip != "" {
 		return expectation{}, override.Skip
 	}
-	merged := entry.expectation
 	if override.Expect != nil {
-		merged.Expect = override.Expect
+		return override.expectation, ""
 	}
+	merged := entry.expectation
 	if override.Stage != nil {
 		merged.Stage = override.Stage
 	}
