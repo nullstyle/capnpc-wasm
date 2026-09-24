@@ -57,6 +57,10 @@ version that ships them.
 - Browsers: `mise run browser:install` verifies every Playwright archive against
   a recorded sha256 before extracting it (Linux and macOS, x64 and arm64);
   `--print-digests` prints the entries to record after a Playwright bump.
+- Toolchain: the Deno worker runtime is the locked tool `deno-worker` (GitHub
+  release asset, sha256 and attestation in `mise.lock`; `deno-worker` on PATH
+  beside the pinned `deno`), and `test:deno-worker` reads the required version
+  from `sdk/typescript/environment.ts`, where wave 1 moved it.
 
 ## capnp-wasm-compiler-host
 
