@@ -7,8 +7,14 @@ stable SDK interface remain pending. `release.json` owns the package name,
 version, private registry flag, and project license selection. The `private`
 flag prevents accidental npm publication; it does not make GitHub release
 downloads private. Project-owned code is licensed under Apache-2.0; upstream
-code retains the licenses shipped in `licenses/`. The full SDK archive includes
-the project license at `LICENSE` and `sdk/go/LICENSE`.
+code retains the licenses shipped in `licenses/`, listed per archive in
+`THIRD_PARTY_NOTICES.md`. The full SDK archive includes the project license at
+`LICENSE` and `sdk/go/LICENSE`.
+
+Releases are built only by the [release workflow](#release-process) from a
+clean, tagged commit. Local preparation (`mise run release:*`) produces
+candidates for inspection and the package tests; nothing built on a workstation
+is uploaded.
 
 ## Public compiler downloads
 
@@ -26,22 +32,24 @@ copied byte for byte to this repository the same day. Versions, archive hashes,
 manifests, and embedded provenance are unchanged; the original download URLs on
 that host remain available for consumers that already pin them.
 
-Publish future compiler assets to `nullstyle/capnpc-wasm`. Release tags point to
-the producer commit recorded in the archive manifest. Upload the verified
-archive and its `SHA256SUMS`; keep published assets immutable and use a new
-version for changed bytes. GitHub's generated source archives are separate from
-the compiler `.tgz` assets.
+Published assets are immutable: changed bytes need a new version. GitHub's
+generated source archives are separate from the release assets.
 
 ## Published releases
 
 The digests below were read on 2026-09-22 from the GitHub release assets
 (`gh release view <tag> --json assets`) so that consumers can pin them
-independently of the download host. `SHA256SUMS` lists two lines: the archive
-and `package/manifest.json`. The compiler-host manifest digests come from local
-archives whose bytes match the published archive digests. No byte-identical
-local copy of the tools rc.2 archive exists, so its manifest digest is not
-recorded; the digest of its `SHA256SUMS` asset, which lists it, is recorded
-instead. Every future publication adds a row here before the tag is pushed.
+independently of the download host. For these three releases `SHA256SUMS` lists
+two lines, the archive and `package/manifest.json`, so `sha256sum -c` needs
+`--ignore-missing` before extraction. From the next release on, `SHA256SUMS`
+lists the three published assets (`<stem>.tgz`, `<stem>.manifest.json`, and
+`<stem>.spdx.json`) and passes on the download directory as is. The
+compiler-host manifest digests come from local archives whose bytes match the
+published archive digests. No byte-identical local copy of the tools rc.2
+archive exists, so its manifest digest is not recorded; the digest of its
+`SHA256SUMS` asset, which lists it, is recorded instead. Every release adds a
+row here after its draft is verified and before it is published (the
+[release process](#release-process) below).
 
 | Release                        | Archive                                                  | Archive SHA-256                                                    | `package/manifest.json` SHA-256                                                                     | Producer commit                            | CI on the producer commit                                                                                                                                                                      |
 | ------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -51,7 +59,77 @@ instead. Every future publication adds a row here before the tag is pushed.
 
 The full SDK archive (`capnpc-wasm-<version>.tgz`) has never been published.
 
-## Prepare a full SDK candidate
+## Release process
+
+`.github/workflows/release.yml` is the only producer of published assets. It
+runs when a tag `capnp-wasm-tools-v<version>`,
+`capnp-wasm-compiler-host-v<version>`, or `capnpc-wasm-v<version>` is pushed,
+and the tag must name the version in `release.json`. A `workflow_dispatch` run
+takes a flavor and performs the same build and checks as a dry run: it uploads
+the assets as workflow artifacts and never creates a release, an attestation, or
+a tag.
+
+1. Set the version in `release.json`, move the flavor's bullets from
+   `## Unreleased` in `CHANGELOG.md` under `## <flavor>` / `### <version>`
+   (publish mode refuses a version without that entry), and commit. CI must be
+   green for that commit.
+2. Push the tag at that commit (an annotated or signed tag; the tag rulesets
+   below decide who may create one). The `build` job checks that the commit has
+   a successful CI run, or runs `mise run check` itself; builds from the clean
+   checkout; runs `scripts/release.ts --publish`, which refuses a dirty tree, a
+   `HEAD` that does not carry the tag, and an existing destination; runs
+   `test:package`, `test:launcher`, and `test:deno-worker`; and verifies with
+   `scripts/verify-release.ts` that the manifest names the tagged commit with
+   `dirty: false` and that the archive extracts to exactly that manifest.
+3. The `publish` job (tag pushes only, and only if no release exists for the
+   tag) re-verifies the uploaded assets, attaches build-provenance and SBOM
+   attestations, and creates a **draft prerelease** titled `<flavor> <version>`
+   with `<stem>.tgz`, `<stem>.manifest.json`, `<stem>.spdx.json`, and
+   `SHA256SUMS`. The notes come from the CHANGELOG entry and the digests, plus
+   the workflow and CI run links.
+4. Download the draft's assets and verify them as a consumer would (below). Add
+   the row to [published releases](#published-releases) in a docs commit, then
+   publish the draft. With immutable releases enabled, the assets can no longer
+   be changed or deleted.
+5. Right after publishing, choose the next version in `release.json` so that
+   later candidates never carry a published version; candidate mode refuses a
+   version whose tag exists at another commit. The Go module tag
+   `sdk/go/v<version>` is created by hand, after the SDK API freeze, and is not
+   part of this workflow.
+
+Repository settings that only a human can enable, and that the workflow assumes:
+immutable releases (Settings, General); tag rulesets for `capnp-wasm-*`,
+`capnpc-wasm-*`, and `sdk/go/*` that restrict creation to maintainers and block
+deletion and updates (require signed tags when every maintainer signs); branch
+protection on `main` requiring the CI checks; and Actions permissions that allow
+the workflow's `contents: write`, `id-token: write`, and `attestations: write`
+grants.
+
+To verify a download, check the assets, compare the archive digest with the
+[published releases](#published-releases) row (a channel independent of the
+release page), verify the provenance, then verify the extracted inventory with
+the verifier from a checkout of the repository at the tag rather than the copy
+inside the archive:
+
+```sh
+sha256sum -c SHA256SUMS
+gh attestation verify capnp-wasm-tools-<version>.tgz --repo nullstyle/capnpc-wasm
+gh attestation verify capnp-wasm-tools-<version>.spdx.json --repo nullstyle/capnpc-wasm
+tar -xzf capnp-wasm-tools-<version>.tgz
+deno run --allow-read scripts/verify-release.ts --sums SHA256SUMS \
+  --expect-manifest-sha256 <digest from the published releases row> \
+  --expect-commit <producer commit> --require-clean ./package
+```
+
+`gh attestation verify` checks the Sigstore signature that GitHub's build
+provenance attestation carries: the asset was produced by this repository's
+release workflow at the tagged commit. `<stem>.spdx.json` is the SPDX 2.3
+software bill of materials for the archive: the project, every reference
+checkout, Go module, crate, and toolchain runtime the archive's artifacts were
+built from, with their commits, versions, and license expressions, plus the tool
+pins from `mise.toml`.
+
+## Prepare a local candidate
 
 From the source checkout, run:
 
@@ -60,30 +138,64 @@ mise run release:prepare
 mise run test:package
 ```
 
-The output is under `dist/releases/capnpc-wasm-0.1.0-rc.3/`: a `package/`
-directory, the npm-compatible `capnpc-wasm-0.1.0-rc.3.tgz` archive, and
-`SHA256SUMS`. Preparation starts from fresh staging directories and removes
-stale assets. Sorted tar entries, fixed permissions, zero ownership, and zero
-timestamps make archive bytes reproducible for the same source and built inputs.
+`release:prepare` builds the full SDK candidate, `release:tools` the
+compiler-only archive, and `release:compiler-host` the compiler and TypeScript
+host archive. The output is under `dist/releases/<stem>/` (for the current
+version, `dist/releases/capnpc-wasm-0.1.0-rc.3/`): a `package/` directory, the
+npm-compatible `<stem>.tgz` archive, `<stem>.manifest.json` (a copy of
+`package/manifest.json`), the `<stem>.spdx.json` SBOM, `<stem>.notes.md`, and
+`SHA256SUMS`, which lists the archive, the manifest asset, and the SBOM.
+Preparation starts from fresh staging directories and removes stale assets.
+Sorted tar entries, fixed permissions, zero ownership, and zero timestamps make
+archive bytes reproducible for the same source and built inputs.
+
+`scripts/release.ts` refuses two states that must never reach a release, and
+`--allow-dirty` and `--allow-existing-tag` are accepted only in candidate mode:
+
+- A working tree with uncommitted or untracked changes: pass `--allow-dirty` for
+  a local experiment (`manifest.json` records `dirty: true`), or commit first.
+- A version whose release tag exists at another commit (for example
+  `capnp-wasm-compiler-host-v0.1.0-rc.3` at `a5ccaae` while `release.json` still
+  says `0.1.0-rc.3`): choose the next version, or pass `--allow-existing-tag`
+  for a throwaway candidate. Task arguments pass through, so
+  `mise run release:compiler-host -- --allow-existing-tag` works.
+
+`--out <dir>` writes `<dir>/<stem>/` instead of `dist/releases/<stem>/`; the
+package tests prepare their candidates under `build/test/` and never touch
+`dist/releases/`. `--publish` is the workflow's mode.
 
 `manifest.json` records every package file's length and SHA-256 digest, the
 source commit and working-tree state, a complete source digest, and the pinned
 reference commits. `provenance/` includes source-file hashes, `mise.toml`,
 `mise.lock`, and the exact Go runtime module version, checksum, and Git
-revision. A dirty checkout is identified explicitly; rerun preparation after the
-final commit to create a candidate tied to that clean commit.
-
-Compare `SHA256SUMS` through your trusted delivery channel before using an
-archive. After extraction, verify its complete inventory and file contents:
+revision. `verify-release.ts` (also copied into the package) checks the
+extracted inventory and file contents, and its options tie the package to the
+published assets and the producer commit:
 
 ```sh
-deno run --allow-read ./package/verify-release.ts ./package
+deno run --allow-read scripts/verify-release.ts --sums dist/releases/<stem>/SHA256SUMS ./package
 ```
 
 The manifest detects changed, missing, and unexpected package files. It is not a
 digital signature: a party able to replace both artifacts and their manifest can
-recompute hashes. Release signing and registry publication are separate future
-actions.
+recompute hashes. Authenticity comes from the release workflow's attestations
+and from the digests recorded under published releases.
+
+## Packaged documents and notices
+
+Each archive's `README.md` is generated from
+`scripts/templates/README-<flavor>.md` with the version, tag, and producer
+commit filled in. It covers verification and usage with package-relative paths
+and links to the repository at the producer commit for everything else; it makes
+no claims about the project's status. `test:package` and
+`test:compiler-host-package` run the README's `ts example` and `sh example`
+blocks against the extracted package and check every relative link in the
+packaged Markdown. The SDK flavors also ship `docs/typescript.md`, the
+TypeScript SDK guide at the producer commit with its relative links rewritten to
+the repository at that commit, and the full SDK ships `sdk/go/README.md` the
+same way. `THIRD_PARTY_NOTICES.md` at the package root lists the components of
+that flavor's artifacts and the texts under `licenses/`, which holds only the
+files those components need.
 
 ## Repository toolchain launcher
 
@@ -199,8 +311,8 @@ eval matrices through the launcher, raw Wasmtime, wazero, and the Deno host,
 byte-compared with the native compiler.
 
 `mise run release:tools` prepares
-`dist/releases/capnp-wasm-tools-0.1.0-rc.3/capnp-wasm-tools-0.1.0-rc.3.tgz`.
-This smaller archive includes the compiler, standard include schemas, launcher,
+`dist/releases/capnp-wasm-tools-<version>/capnp-wasm-tools-<version>.tgz`. This
+smaller archive includes the compiler, standard include schemas, launcher,
 runtime version, licenses, and source provenance/integrity inventory. It omits
 SDK code and generator modules; repository consumers build generators matching
 their own runtime dependency pins. It uses the same `package/` extraction
@@ -214,12 +326,13 @@ flavor.
 
 `mise run release:compiler-host` prepares the
 `@nullstyle/capnp-wasm-compiler-host` candidate at
-`dist/releases/capnp-wasm-compiler-host-0.1.0-rc.3/`. This flavor contains
+`dist/releases/capnp-wasm-compiler-host-<version>/`. This flavor contains
 `wasm/capnp.wasm`, the same pinned `include/` tree, built `typescript/mod.js`,
-`mod.d.ts`, and `worker.js`, licenses, and complete integrity/provenance data.
-It omits language generator modules, the Go SDK, and the external Wasmtime
-launcher. The compiler and include bytes match the compiler-only toolchain
-archive; TypeScript execution needs no Wasmtime install.
+`mod.d.ts`, and `worker.js`, the SDK guide as `docs/typescript.md`, licenses,
+and complete integrity/provenance data. It omits language generator modules, the
+Go SDK, and the external Wasmtime launcher. The compiler and include bytes match
+the compiler-only toolchain archive; TypeScript execution needs no Wasmtime
+install.
 
 Import `createCompiler` or `createWorkerCompiler` from the installed package.
 Supply the packaged compiler bytes with `generators: {}`, then call
@@ -240,25 +353,28 @@ complete canonical requests with the native compiler for both include orders,
 including a parent import and binary embed. Existing rc.2 archives remain
 immutable; consumers opt into the new version with new integrity pins.
 
-`mise run test:compiler-host-package` checks reproducibility, complete extracted
-contents, modified/missing/extra-file rejection, and an external npm-layout Deno
-consumer with a fresh cache. It checks direct/worker request parity, imports and
-binary embeds, diagnostics, limits, active-guest cancellation, and recovery
-after restarting the worker offline on Deno 2.6.8. The default producer-runtime
-check instead verifies direct compilation and actionable worker-version
-rejection. On the supported Deno, an eight-second parent bound also encloses a
-real shared counter probe that confirms execution stops within the engine grace.
-To test another installed Deno without changing the producer pin:
+`mise run test:compiler-host-package` prepares its candidate under
+`build/test/compiler-host/` and checks reproducibility, the three-asset
+`SHA256SUMS` and the verifier options, complete extracted contents, the flavor's
+notices, the packaged links and README example, modified/missing/extra-file
+rejection, and an external npm-layout Deno consumer with a fresh cache. It
+checks direct/worker request parity, imports and binary embeds, diagnostics,
+limits, active-guest cancellation, and recovery after restarting the worker
+offline on Deno 2.6.8. The default producer-runtime check instead verifies
+direct compilation and actionable worker-version rejection. On the supported
+Deno, an eight-second parent bound also encloses a real shared counter probe
+that confirms execution stops within the engine grace. To test another installed
+Deno without changing the producer pin:
 
 ```sh
-mise exec -- deno run --allow-read --allow-write --allow-run \
+mise exec -- deno run --allow-read --allow-write=build \
+  --allow-run=deno,cmake,build/native/bin/normalize-request,build/native/bin/capnp,/absolute/path/to/deno \
   scripts/test-compiler-host-package.ts /absolute/path/to/deno
 ```
 
 The receipt is written to
 `build/test/compiler-host-package-<deno-version>.json`. Compiler host rc.2 and
-rc.3 are published at the links above. Build and verify a clean committed source
-revision before selecting hashes for a new release.
+rc.3 are published at the links above.
 
 ## Deno and npm-compatible JavaScript
 
@@ -271,11 +387,12 @@ checkout. The package exports its main module, `./worker`, `./wasm/*`, and
 An npm-compatible package manager can install the local `.tgz` file. With the
 package installed, import `createCompiler` or `createWorkerCompiler` from
 `@nullstyle/capnpc-wasm`. Alternatively, Deno can import the extracted
-`typescript/mod.js` directly. Load module and schema bytes from the extracted
-package's `wasm/` and `include/` directories using application-owned URLs or
-file reads. Browsers should use the worker entrypoint and keep its URL available
-for cancellation/restart. Modules must be supplied as original byte arrays so
-the SDK can enforce its configured memory ceiling.
+`typescript/mod.js` directly, as the packaged `README.md` example does. Load
+module and schema bytes from the extracted package's `wasm/` and `include/`
+directories using application-owned URLs or file reads. Browsers should use the
+worker entrypoint and keep its URL available for cancellation/restart. Modules
+must be supplied as original byte arrays so the SDK can enforce its configured
+memory ceiling.
 
 ## Go module
 
@@ -283,7 +400,7 @@ The import path is `github.com/nullstyle/capnpc-wasm/sdk/go`, normally aliased
 as `capnpcwasm`. Its `go.mod` requires the exact public wazero pseudo-version
 matching the repository's unchanged `ref/wazero` gitlink, with checksums in
 `go.sum`. It has no dependency on a sibling `ref/` checkout and needs no wazero
-replacement.
+replacement. The full SDK archive ships every non-test `.go` file of the module.
 
 Until a Go module version is published, point only the SDK module at the source
 included in this candidate:
@@ -301,18 +418,22 @@ publish the npm package.
 
 ## Acceptance checks
 
-`test:package` verifies the archive and manifest, extracts into a fresh
-temporary workspace outside this checkout, runs an actual Deno consumer through
-the installed package's npm-style exports with strict TypeScript checking, and
-runs a separate Go module against the included SDK. Both compile a schema and
-generate C++, Rust, Go, and Zig from the packaged assets. The Go consumer
-resolves wazero from its checksum-pinned public module version, with no
-replacement for that dependency. Negative controls modify a manifest digest and
-add a stale file; verification must reject both. The test also prepares the same
-input twice and checks identical archive hashes for both archive variants. Both
-extracted launchers execute the real compiler and C++/Zig generators, preserve
-binary requests and canonicalization bytes, accept paths with spaces, and reject
-malformed inputs, invalid roots, and missing or mismatched runtimes.
+`test:package` prepares the full SDK and tools-only candidates under
+`build/test/package/`, twice each, and checks identical archive and SBOM bytes;
+verifies `SHA256SUMS` with `sha256sum -c` on the candidate directory and with
+`verify-release.ts --sums`, `--expect-manifest-sha256`, `--expect-commit`, and
+`--require-clean`; checks that publish mode refuses the candidate flags and an
+untagged `HEAD`; extracts into a fresh directory under `build/test/`, checks the
+packaged links, notices, and every non-test Go source, runs the README examples,
+then runs an actual Deno consumer through the installed package's npm-style
+exports with strict TypeScript checking, and runs a separate Go module against
+the included SDK. Both compile a schema and generate C++, Rust, Go, and Zig from
+the packaged assets. The Go consumer resolves wazero from its checksum-pinned
+public module version, with no replacement for that dependency. Negative
+controls modify a manifest digest and add a stale file; verification must reject
+both. Both extracted launchers execute the real compiler and C++/Zig generators,
+preserve binary requests and canonicalization bytes, accept paths with spaces,
+and reject malformed inputs, invalid roots, and missing or mismatched runtimes.
 
 Hosted browser/platform checks, nightly fuzz/soak evidence, and application
 validation remain release gates. Successful local packaging alone does not
