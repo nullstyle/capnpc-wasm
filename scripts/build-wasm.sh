@@ -43,6 +43,7 @@ wasm_toolchain="$wasm_toolchain|source-dir=$root/$source_dir"
     -DCMAKE_TOOLCHAIN_FILE="$sdk_path/share/cmake/wasi-sdk-p1.cmake" \
     -DCMAKE_BUILD_TYPE=Release \
     -DCAPNP_SOURCE_DIR="$root/$source_dir" \
+    -DCAPNP_PORT_PATCH="$root/$patch_file" \
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$root/build/wasm/bin"
   cmake --build build/wasm
 )
