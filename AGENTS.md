@@ -33,9 +33,15 @@ release status; update it instead of restating status here.
 - Keep `ref/` pristine at the recorded gitlinks. Project patches and wrappers
   live outside the submodules and apply to disposable copies under `build/`.
 - Tool pins live in `mise.toml`, resolved metadata in `mise.lock`, upstream
-  revisions in gitlinks. After changing a pin, regenerate the lockfile and run
-  `mise run check`. Keep the Zig pin equal to `ref/capnp-zig/mise.toml`. Native
-  Clang builds native tools; the WASI SDK Clang stays off `PATH`.
+  revisions in gitlinks. After changing a pin, run `mise lock <tool>` for that
+  tool (a full `mise lock` also re-resolves the conda packages), keep
+  `lockfile_version = 1` (CI's mise 2026.9.1 cannot read version 2), and run
+  `mise run check`. Native Clang builds native tools; the WASI SDK Clang stays
+  off `PATH`.
+- Keep the Zig pin equal to `ref/capnp-zig/mise.toml`. `mise.lock` records
+  hand-verified sha256 digests with minisign provenance for that development
+  build, which only the community mirrors serve: after a Zig bump run
+  `mise lock zig`, then `mise run mirror:zig -- lock --write`.
 - Preserve the standard binary `CodeGeneratorRequest` boundary with host
   orchestration of generators, WASI Preview 1 command modules (`wasm32-wasip1`),
   standardized Wasm exception handling, and error propagation. Hosts keep
@@ -104,7 +110,12 @@ build check. Arguments after `--` reach the suite: `--filter <name>` selects a
 host or fixture in the Deno suites, `test:sdk-go` takes `-run <name>`, and
 `test:zig-unit` fixes its own filters. Warm suites take 1 to 40 s,
 `mise run test` about two minutes, `mise run lint` seconds with no build. Then
-run the area's gate from Verification by area.
+run the area's gate from Verification by area. The worker runtime is the locked
+tool `deno-worker` (`deno-worker:install`, a dependency of `test:deno-worker`).
+The scheduled checks `audit:osv`, `audit:govulncheck`, `audit:advisories`, and
+`check:lock-urls`, the soak and floor tasks `test:browser-soak`,
+`test:deno-worker-soak`, and `test:sdk-go-floor`, and the drift signal
+`test:sdk-go-wazero-latest` need the network and run only when named.
 
 | Change                                     | Fastest check                                                                                  |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
@@ -161,9 +172,10 @@ finish with `mise run ci` before a rebase or hand-off.
 ## Deno versions
 
 - `mise.toml` pins Deno 2.9.6 for tooling and direct execution.
-- Worker execution requires Deno 2.6.8 (`supportedDenoWorkerVersion`).
-  `sdk/typescript/sdk_test.ts` ignores worker tests on every other version, so
-  `mise run test` on the pinned Deno does not cover worker cancellation. Run the
-  CI lane locally with the commands in
+- Worker execution requires Deno 2.6.8 (`supportedDenoWorkerVersion` in
+  `sdk/typescript/environment.ts`), installed as the locked tool `deno-worker`
+  by `deno-worker:install`. `sdk/typescript/sdk_test.ts` ignores worker tests on
+  every other version, so `mise run test` on the pinned Deno does not cover
+  worker cancellation. Run the CI lane locally with the commands in
   [CONTRIBUTING.md](CONTRIBUTING.md#reproducing-the-ci-lanes)
   (`mise run test:deno-worker`).

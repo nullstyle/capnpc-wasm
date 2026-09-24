@@ -11,6 +11,14 @@ The build also exports the separately pinned historical audit revision under
 builds a command from it. There is no second emitter or RPC transport
 dependency.
 
+The Zig toolchain is the development build pinned in `mise.toml`, equal to the
+`zig` line of `ref/capnp-zig/mise.toml`. ziglang.org no longer lists it: mise
+installs it from the Zig community mirrors, verifies the Zig Software Foundation
+minisign signature, and checks the sha256 that `mise.lock` records for each
+platform. `mise run mirror:zig -- stage` prepares a project-owned mirror of the
+same tarballs, and `mise run check:lock-urls` confirms that a mirror still
+serves them.
+
 Each compile writes a stamp under `build/zig/` recording the Zig version, the
 exported source revision, the flags, and the build script itself. A repeated
 `mise run build:zig` skips compiles whose stamp matches, runs the native and

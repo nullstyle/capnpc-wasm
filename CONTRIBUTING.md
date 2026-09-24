@@ -60,8 +60,9 @@ test -z "$(git status --porcelain)"
 ```
 
 `mise install` and `mise uninstall` run from the project root rewrite
-`mise.lock`, so `deno-worker:install`, which `test:deno-worker` depends on,
-installs the worker Deno with `--cd` from a scratch directory.
+`mise.lock`; `deno-worker:install`, which `test:deno-worker` depends on, runs
+`mise install --locked deno-worker`, which never rewrites it, and checks the
+binary against `sdk/typescript/environment.ts`.
 
 Browsers (ubuntu-24.04):
 
@@ -78,18 +79,26 @@ mise run test:studio chromium firefox webkit
 ### Tool pins
 
 1. Edit the version in `mise.toml` `[tools]`.
-2. Run `mise install`, then `mise lock`, and review the `mise.lock` diff. Keep
-   all four `lockfile_platforms` entries; installing an extra tool inside the
-   project can prune the other platforms' WASI SDK entries (see the comment in
-   `ci.yml`), which is why CI installs Deno 2.6.8 with `--cd` elsewhere.
+2. Run `mise install`, then `mise lock <tool>` for that tool only (a full
+   `mise lock` also re-resolves the conda packages), and review the `mise.lock`
+   diff. Keep `lockfile_version = 1` (CI's mise 2026.9.1 cannot read version 2)
+   and all four `lockfile_platforms` entries; a plain `mise install` of an extra
+   tool inside the project can prune the other platforms' WASI SDK entries (see
+   the comment in `ci.yml`), which is why CI installs Deno 2.6.8 with `--cd`
+   elsewhere and `deno-worker:install` passes `--locked`.
 3. Run `mise run check`.
 
 Zig must equal the `zig` line of `ref/capnp-zig/mise.toml` (both are
-`0.17.0-dev.1683+5ceec001b` today). The Wasmtime pin is copied into every tools
-archive as the required runtime version, so bumping it changes the launcher
-contract for consumers. The Deno pin is the direct-execution version; the worker
-version, 2.6.8, is set separately in `sdk/typescript/worker-client.ts` and in
-`ci.yml`.
+`0.17.0-dev.1683+5ceec001b` today). ziglang.org no longer lists that development
+build: mise installs it from the Zig community mirrors and checks the sha256
+that `mise.lock` records with minisign provenance, so after a Zig bump run
+`mise lock zig`, then `mise run mirror:zig -- lock --write`, which records the
+checksums from signature-verified downloads. The Wasmtime pin is copied into
+every tools archive as the required runtime version, so bumping it changes the
+launcher contract for consumers. The Deno pin is the direct-execution version;
+the worker version, 2.6.8, is the locked tool `deno-worker` in `mise.toml`,
+which must equal `supportedDenoWorkerVersion` in `sdk/typescript/environment.ts`
+and the version `ci.yml` installs.
 
 ### Reference bump checklist
 
@@ -130,7 +139,8 @@ Per reference:
   `mise exec -- go -C <dir> mod tidy` in both directories so `go.sum` matches;
   builds use `-mod=readonly`.
 - `capnp-zig`, in this order: (a) if `ref/capnp-zig/mise.toml` changed its `zig`
-  line, bump the tool pin as above; (b) with the new gitlink staged, run
+  line, bump the tool pin as above, then run `mise lock zig` and
+  `mise run mirror:zig -- lock --write`; (b) with the new gitlink staged, run
   `mise run build:zig`, which exports the tree at the gitlink and fails in
   `check-zig-sync.ts` for every mirrored fixture that differs from its native
   file; (c) refresh the mirrors from the gitlink and review the diff:
@@ -165,9 +175,12 @@ Per reference:
   matches the pin and gitlinks.
 - `WASI`: documentation only.
 - Playwright engines are not a gitlink: bump `playwright` in
-  `tests/browser/deno.json` and `deno.lock`, run `mise run browser:install`,
-  `mise run test:browser`, and `mise run test:studio`, and update the engine
-  table in `tests/browser/README.md`.
+  `tests/browser/deno.json` and `deno.lock`, print the new archive digests with
+  `mise run browser:install -- --print-digests` on each platform, confirm each
+  against a second download, and record them in `tests/browser/install.ts`; then
+  run `mise run browser:install`, `mise run test:browser`, and
+  `mise run test:studio`, and update the engine table in
+  `tests/browser/README.md`.
 
 ## Documentation
 
