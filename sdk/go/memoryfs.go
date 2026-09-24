@@ -76,11 +76,14 @@ func newMemoryFS(files map[string][]byte, readOnly bool, limits Limits) *memoryF
 // every budget, so no legal limit can remove them.
 func newRootFS(source, include *memoryFS, limits Limits) *memoryFS {
 	root := newMemoryFS(nil, true, limits)
-	for prefix, mount := range map[string]*memoryFS{"src": source, "include": include} {
-		root.add(prefix, fs.ModeDir|0755, nil)
-		for name, node := range mount.nodes {
+	for _, mount := range []struct {
+		prefix string
+		fs     *memoryFS
+	}{{"src", source}, {"include", include}} {
+		root.add(mount.prefix, fs.ModeDir|0755, nil)
+		for name, node := range mount.fs.nodes {
 			if name != "." {
-				root.nodes[prefix+"/"+name] = node
+				root.nodes[mount.prefix+"/"+name] = node
 			}
 		}
 	}
