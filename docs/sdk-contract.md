@@ -156,10 +156,13 @@ for a byte or entry budget and `ENAMETOOLONG` for a path over `pathBytes`, may
 continue, and is classified by the host when it stops: the job fails with the
 budget whatever the guest's exit status, and its stderr, which may describe the
 failed write, is preserved. Neither SDK publishes any output of a job that
-exceeded a budget. Generated path lengths are the one budget TypeScript checks
-after the guest exits (`collectFiles`), so an output path over `pathBytes` is
-reported there only when the guest exited 0; Go rejects the creation and
-classifies the job whatever the exit status.
+exceeded a budget. TypeScript bounds every guest path argument at `pathBytes`
+
+- 8 while the guest runs and checks generated paths exactly against `pathBytes`
+  after a zero exit (`collectFiles`, which also re-counts entries and bytes
+  across hard-link aliases), so an output path in between is reported only when
+  the guest exited 0; Go rejects the creation and classifies the job whatever
+  the exit status.
 
 Fixed internal bounds are not limits: TypeScript caps live descriptors at 1,024
 (`ENFILE`), and Go bounds filesystem lookups at `pathBytes` plus the longest

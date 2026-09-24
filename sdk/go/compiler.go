@@ -102,8 +102,8 @@ type Limits struct {
 }
 
 // DefaultLimits returns the limits a Compiler uses without WithLimits. The
-// values are recorded in tests/fixtures/contract/limits.json, which both SDKs
-// assert.
+// values are recorded in tests/fixtures/contract/limits.json, which the Go
+// test TestContractLimits asserts; the TypeScript assertion is pending (T13).
 func DefaultLimits() Limits {
 	return Limits{
 		MemoryPages:      4096,
