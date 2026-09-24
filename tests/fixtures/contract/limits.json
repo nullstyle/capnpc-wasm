@@ -1,0 +1,11 @@
+{
+  "memoryPages": 4096,
+  "workspaceBytes": 67108864,
+  "workspaceEntries": 4096,
+  "pathBytes": 4096,
+  "requestBytes": 67108864,
+  "outputBytes": 67108864,
+  "outputEntries": 4096,
+  "stdoutBytes": 67108864,
+  "stderrBytes": 1048576
+}
