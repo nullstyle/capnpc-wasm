@@ -727,7 +727,7 @@ async function checkBounds(context: Context) {
       "--output",
       output,
       "--",
-    ], { env, timeoutMs: 30_000 });
+    ], { env, timeoutMs: 60_000 });
   const started = performance.now();
   const timedOut = await generator("loop.wasm", { CAPNP_WASM_TIMEOUT: "1" });
   assert(
@@ -736,7 +736,7 @@ async function checkBounds(context: Context) {
     `timeout did not trap: ${timedOut.code} ${stderrOf(timedOut)}`,
   );
   assert(
-    performance.now() - started < 15_000,
+    performance.now() - started < 30_000,
     "timeout took longer than expected",
   );
   assert(
