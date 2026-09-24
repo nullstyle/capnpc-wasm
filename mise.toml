@@ -235,6 +235,8 @@ depends = [
   # The Deno example imports dist/, so the type check of examples/deno.ts lives here.
   "example:deno",
   "test:cli-parity",
+  "test:studio-unit",
+  "test:conformance",
   "check:wasm-artifacts",
 ]
 
@@ -412,6 +414,11 @@ run = "go -C sdk/go test -race -count=1 -mod=readonly -run 'TestCompiler|TestGen
 description = "Compare the non-compile CLI (upstream capnp-test.sh, conversions, eval) with native on the launcher, Wasmtime, wazero, and the Deno host"
 depends = ["build:native", "build:wasm", "build:wazero"]
 run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/cli_parity_test.ts"
+
+[tasks."test:conformance"]
+description = "Check the failure and limit conformance corpus (tests/fixtures/conformance) and run the TypeScript direct surface against it; the other surfaces run it in their own suites"
+depends = ["build:wasm", "build:rust", "build:go", "build:zig"]
+run = "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read --allow-write=build --allow-run=wasm-tools --allow-env={{vars.suite_env}} tests/conformance/conformance_test.ts"
 
 [tasks."test:studio-unit"]
 description = "Run the Schema Studio state and workspace unit tests on the pinned Deno (no browser, no build)"

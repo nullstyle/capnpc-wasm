@@ -1,0 +1,743 @@
+[
+  {
+    "name": "invalid-schema",
+    "op": "compile",
+    "files": {
+      "broken.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Broken { invalid"
+      }
+    },
+    "entrypoints": [
+      "broken.capnp"
+    ],
+    "generators": [
+      "cpp"
+    ],
+    "sha256": "e5e11e3e9cb1da849089bcf2ab14e168e1c4e29d97563876847202a3fff51108"
+  },
+  {
+    "name": "missing-import",
+    "op": "compile",
+    "files": {
+      "m.capnp": {
+        "text": "@0xece4bf9c1f867623;\nusing Missing = import \"not-here.capnp\";\nstruct B { f @0 :Missing.T; }\n"
+      }
+    },
+    "entrypoints": [
+      "m.capnp"
+    ],
+    "generators": [],
+    "sha256": "f965be1d7e90db4832976d1d012605e1e8f352b0e174c9d98815e7f080f08d35"
+  },
+  {
+    "name": "missing-import-root",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "importPaths": [
+      "nope"
+    ],
+    "generators": [],
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "missing-source-prefix",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "sourcePrefix": "nope",
+    "generators": [],
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "nested-structs-60",
+    "op": "compile",
+    "files": {
+      "d.capnp": {
+        "recipe": "nestedStructs",
+        "depth": 60
+      }
+    },
+    "entrypoints": [
+      "d.capnp"
+    ],
+    "generators": [
+      "cpp",
+      "rust",
+      "zig"
+    ],
+    "sha256": "f49abd711d86e667e90ef451236cff1887318ae635fff2938ed67b223b22035f"
+  },
+  {
+    "name": "nested-structs-200",
+    "op": "compile",
+    "files": {
+      "d.capnp": {
+        "recipe": "nestedStructs",
+        "depth": 200
+      }
+    },
+    "entrypoints": [
+      "d.capnp"
+    ],
+    "generators": [
+      "cpp"
+    ],
+    "sha256": "7067c27dc339c2c2c306719458dd32a7b69835534463f0b995a9ddf5b5557a3c"
+  },
+  {
+    "name": "nested-list-200",
+    "op": "compile",
+    "files": {
+      "d.capnp": {
+        "recipe": "nestedList",
+        "depth": 200
+      }
+    },
+    "entrypoints": [
+      "d.capnp"
+    ],
+    "generators": [],
+    "sha256": "1c7db56ab90681ed2f479458d6c62d97fafb4cd0887daa52b79d191cb71498e9"
+  },
+  {
+    "name": "nested-expr-200",
+    "op": "compile",
+    "files": {
+      "d.capnp": {
+        "recipe": "nestedExpr",
+        "depth": 200
+      }
+    },
+    "entrypoints": [
+      "d.capnp"
+    ],
+    "generators": [],
+    "sha256": "4f130970c6dc9e520cd19edf37b38661da67f936428775e6efc2705716a894c9"
+  },
+  {
+    "name": "const-chain-100",
+    "op": "compile",
+    "files": {
+      "c.capnp": {
+        "recipe": "constChain",
+        "depth": 100
+      }
+    },
+    "entrypoints": [
+      "c.capnp"
+    ],
+    "generators": [
+      "cpp",
+      "rust",
+      "zig"
+    ],
+    "sha256": "60ebc9f3302757c4ffab57e1f445632bb7f1532eb789a89de2233208e7679a67"
+  },
+  {
+    "name": "const-chain-4000",
+    "op": "compile",
+    "files": {
+      "c.capnp": {
+        "recipe": "constChain",
+        "depth": 4000
+      }
+    },
+    "entrypoints": [
+      "c.capnp"
+    ],
+    "generators": [],
+    "sha256": "36a5284216ea98ceb8e8e670ce8a847d64199f05e66ef8a6ac050cbb42e0c1d4"
+  },
+  {
+    "name": "import-chain-100",
+    "op": "compile",
+    "filesRecipe": {
+      "recipe": "importChain",
+      "depth": 100
+    },
+    "entrypoints": [
+      "f0.capnp"
+    ],
+    "generators": [
+      "cpp",
+      "rust",
+      "zig"
+    ],
+    "sha256": "64f2b31068300aada26d8ea8fb5cd543174cf3bc7ebaec8b5383bb360945eb06"
+  },
+  {
+    "name": "path-4096",
+    "op": "compile",
+    "files": {
+      "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.capnp"
+    ],
+    "generators": [],
+    "sha256": "bde7010df64b1e7bc96d7766acd2e7a45c4f344b5d2935bcef9842763e39455e"
+  },
+  {
+    "name": "path-4097",
+    "op": "compile",
+    "files": {
+      "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd/fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff.capnp"
+    ],
+    "generators": [],
+    "sha256": "530edeb517c6d6497355be2098ca9fe9149d95dfa5383175b3d7af222ce537d9"
+  },
+  {
+    "name": "go-missing-package",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [
+      "go"
+    ],
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "go-partial-output",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867624;\nusing Go = import \"/go.capnp\";\n$Go.package(\"a\");\n$Go.import(\"example.com/a\");\nstruct A { x @0 :UInt8; }\n"
+      },
+      "b.capnp": {
+        "text": "@0xece4bf9c1f867625;\nstruct B { x @0 :UInt8; }\n"
+      }
+    },
+    "includeFiles": {
+      "go.capnp": {
+        "standard": "go.capnp"
+      }
+    },
+    "entrypoints": [
+      "a.capnp",
+      "b.capnp"
+    ],
+    "generators": [
+      "go"
+    ],
+    "sha256": "2b4b8720a1c7784c5d01ec802840667f7f16ad1dc1e39514e94d68d6c29986d6"
+  },
+  {
+    "name": "compiler-trap",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [],
+    "compiler": "trap",
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "compiler-stack-overflow",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [],
+    "compiler": "recurse",
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "compiler-timeout",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [],
+    "compiler": "loop",
+    "deadlineMs": 500,
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "limit-memoryPages-initial",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [],
+    "limits": {
+      "memoryPages": 100
+    },
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "limit-memoryPages-runtime",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [],
+    "limits": {
+      "memoryPages": 130
+    },
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "limit-workspaceBytes",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [],
+    "limits": {
+      "workspaceBytes": 10
+    },
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "limit-workspaceEntries",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      },
+      "b/c.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [],
+    "limits": {
+      "workspaceEntries": 2
+    },
+    "sha256": "e0c7dc1da218c403ccef1610cec9323fa6a9d98e3af653def4dc0dd2064ee1e5"
+  },
+  {
+    "name": "limit-pathBytes",
+    "op": "compile",
+    "files": {
+      "abcdef.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "abcdef.capnp"
+    ],
+    "generators": [],
+    "limits": {
+      "pathBytes": 5
+    },
+    "sha256": "00550e72915b96a8fe37c6a1c1e106c59631030b1a8b51fbb4e7559cb0a1e997"
+  },
+  {
+    "name": "limit-requestBytes-compile",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [],
+    "limits": {
+      "requestBytes": 100
+    },
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "limit-stdoutBytes-compile",
+    "op": "compile",
+    "files": {
+      "a.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Person { name @0 :Text; }"
+      }
+    },
+    "entrypoints": [
+      "a.capnp"
+    ],
+    "generators": [],
+    "limits": {
+      "stdoutBytes": 100
+    },
+    "sha256": "b31d7ead84aacf2974234f6e25d57e9b2c5ce4dafb2740c3fa7a38d2e76d1b3e"
+  },
+  {
+    "name": "limit-stderrBytes",
+    "op": "compile",
+    "files": {
+      "broken.capnp": {
+        "text": "@0xece4bf9c1f867623; struct Broken { invalid"
+      }
+    },
+    "entrypoints": [
+      "broken.capnp"
+    ],
+    "generators": [],
+    "limits": {
+      "stderrBytes": 10
+    },
+    "sha256": "e5e11e3e9cb1da849089bcf2ab14e168e1c4e29d97563876847202a3fff51108"
+  },
+  {
+    "name": "generator-partial-exit",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "partial-exit"
+    }
+  },
+  {
+    "name": "generator-partial-trap",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "partial-trap"
+    }
+  },
+  {
+    "name": "generator-bad-name",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "bad-name"
+    }
+  },
+  {
+    "name": "generator-long-name",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "long-name"
+    },
+    "limits": {
+      "pathBytes": 16
+    }
+  },
+  {
+    "name": "generator-stderr-flood",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "stderr-flood"
+    }
+  },
+  {
+    "name": "generator-stdout-flood",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "stdout-flood"
+    }
+  },
+  {
+    "name": "generator-many-files",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "many-files"
+    }
+  },
+  {
+    "name": "generator-big-file",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "big-file"
+    }
+  },
+  {
+    "name": "generator-memory-grow",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "memory-grow"
+    }
+  },
+  {
+    "name": "generator-trap",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "trap"
+    }
+  },
+  {
+    "name": "generator-stack-overflow",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "recurse"
+    }
+  },
+  {
+    "name": "generator-warning",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "warn"
+    }
+  },
+  {
+    "name": "generator-timeout",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "generatorGuests": {
+      "cpp": "loop"
+    },
+    "deadlineMs": 500
+  },
+  {
+    "name": "limit-requestBytes-generate",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "limits": {
+      "requestBytes": 100
+    }
+  },
+  {
+    "name": "limit-outputBytes",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "limits": {
+      "outputBytes": 100
+    }
+  },
+  {
+    "name": "limit-outputEntries",
+    "op": "generate",
+    "request": "valid",
+    "generators": [
+      "cpp"
+    ],
+    "limits": {
+      "outputEntries": 1
+    }
+  },
+  {
+    "name": "request-half-cpp",
+    "op": "generate",
+    "request": "half",
+    "generators": [
+      "cpp"
+    ]
+  },
+  {
+    "name": "request-one-cpp",
+    "op": "generate",
+    "request": "one",
+    "generators": [
+      "cpp"
+    ]
+  },
+  {
+    "name": "request-zeros8-cpp",
+    "op": "generate",
+    "request": "zeros8",
+    "generators": [
+      "cpp"
+    ]
+  },
+  {
+    "name": "request-pattern4k-cpp",
+    "op": "generate",
+    "request": "pattern4k",
+    "generators": [
+      "cpp"
+    ]
+  },
+  {
+    "name": "request-half-rust",
+    "op": "generate",
+    "request": "half",
+    "generators": [
+      "rust"
+    ]
+  },
+  {
+    "name": "request-one-rust",
+    "op": "generate",
+    "request": "one",
+    "generators": [
+      "rust"
+    ]
+  },
+  {
+    "name": "request-zeros8-rust",
+    "op": "generate",
+    "request": "zeros8",
+    "generators": [
+      "rust"
+    ]
+  },
+  {
+    "name": "request-pattern4k-rust",
+    "op": "generate",
+    "request": "pattern4k",
+    "generators": [
+      "rust"
+    ]
+  },
+  {
+    "name": "request-half-go",
+    "op": "generate",
+    "request": "half",
+    "generators": [
+      "go"
+    ]
+  },
+  {
+    "name": "request-one-go",
+    "op": "generate",
+    "request": "one",
+    "generators": [
+      "go"
+    ]
+  },
+  {
+    "name": "request-zeros8-go",
+    "op": "generate",
+    "request": "zeros8",
+    "generators": [
+      "go"
+    ]
+  },
+  {
+    "name": "request-pattern4k-go",
+    "op": "generate",
+    "request": "pattern4k",
+    "generators": [
+      "go"
+    ]
+  },
+  {
+    "name": "request-half-zig",
+    "op": "generate",
+    "request": "half",
+    "generators": [
+      "zig"
+    ]
+  },
+  {
+    "name": "request-one-zig",
+    "op": "generate",
+    "request": "one",
+    "generators": [
+      "zig"
+    ]
+  },
+  {
+    "name": "request-zeros8-zig",
+    "op": "generate",
+    "request": "zeros8",
+    "generators": [
+      "zig"
+    ]
+  },
+  {
+    "name": "request-pattern4k-zig",
+    "op": "generate",
+    "request": "pattern4k",
+    "generators": [
+      "zig"
+    ]
+  }
+]
