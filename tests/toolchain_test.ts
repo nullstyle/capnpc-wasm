@@ -33,6 +33,7 @@ import {
   run,
 } from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
+import { checkModule, modules } from "../scripts/check-wasm-artifacts.ts";
 
 const suite = testSuite("toolchain-");
 
@@ -276,24 +277,22 @@ async function prepare() {
 let baseline: ReturnType<typeof prepare> | undefined;
 const fixture = () => baseline ??= prepare();
 
-suite.test("Wasm artifacts import only WASI Preview 1 and export command entrypoints", async () => {
-  for (
-    const name of [
-      "capnp",
-      "capnpc-c++",
-      "capnpc-capnp",
-      "capnpc-rust",
-      "capnpc-go",
-      "capnpc-zig",
-    ]
-  ) {
+suite.test("Wasm artifacts meet the module contract, import only WASI Preview 1, and export command entrypoints", async () => {
+  // The contract (per-class feature allow-list, declared target features, no
+  // DWARF, no build-host paths, size budget) is defined once in
+  // scripts/check-wasm-artifacts.ts; the build scripts apply it to each
+  // module they link and check:wasm-artifacts to dist/wasm.
+  const contract = {
+    root,
+    home: Deno.env.get("HOME") || undefined,
+  };
+  for (const name of Object.keys(modules)) {
     const path = `${wasmBin}/${name}.wasm`;
-    await mustSucceed([
-      "wasm-tools",
-      "validate",
-      "--features=-legacy-exceptions,-threads,-shared-everything-threads,-memory64",
-      path,
-    ], { label: `${name} feature profile` });
+    const problems = await checkModule(path, name, contract);
+    assert(
+      problems.length === 0,
+      `${name} breaks the module contract:\n${problems.join("\n")}`,
+    );
     const module = await WebAssembly.compile(await Deno.readFile(path));
     for (const imported of WebAssembly.Module.imports(module)) {
       assert(

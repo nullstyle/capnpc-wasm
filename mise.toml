@@ -235,6 +235,7 @@ depends = [
   # The Deno example imports dist/, so the type check of examples/deno.ts lives here.
   "example:deno",
   "test:cli-parity",
+  "check:wasm-artifacts",
 ]
 
 [tasks."test:zig-unit"]
@@ -529,3 +530,8 @@ run = [
 [tasks."audit:advisories"]
 description = "Query OSV.dev for advisories against the runtime pins and the npm packages in the Deno lockfiles (network)"
 run = "deno run --allow-read --allow-net=api.osv.dev scripts/check-advisories.ts"
+
+[tasks."check:wasm-artifacts"]
+description = "Check the staged dist/wasm modules against the module contract: feature allow-lists, declared target features, no DWARF or build-host paths, size budgets"
+depends = ["build:sdk"]
+run = "deno run --allow-read --allow-env=HOME --allow-run=wasm-tools scripts/check-wasm-artifacts.ts"

@@ -19,6 +19,7 @@ CGO_ENABLED=0 go -C generators/go build -mod=readonly -trimpath \
 CGO_ENABLED=0 GOOS=wasip1 GOARCH=wasm go -C generators/go build \
   -mod=readonly -trimpath -o ../../build/wasm/bin/capnpc-go.wasm \
   capnproto.org/go/capnp/v3/capnpc-go
-wasm-tools validate \
-  --features=-legacy-exceptions,-threads,-shared-everything-threads,-memory64 \
-  build/wasm/bin/capnpc-go.wasm
+# The module contract (feature allow-list, no DWARF, no build-host paths,
+# size budget) has one definition; check:wasm-artifacts applies it to dist/.
+deno run --allow-read --allow-env=HOME --allow-run=wasm-tools \
+  scripts/check-wasm-artifacts.ts --module build/wasm/bin/capnpc-go.wasm

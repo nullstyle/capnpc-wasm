@@ -46,8 +46,8 @@ wasm_toolchain="$wasm_toolchain|source-dir=$root/$source_dir"
     -DCMAKE_RUNTIME_OUTPUT_DIRECTORY="$root/build/wasm/bin"
   cmake --build build/wasm
 )
-for tool in capnp capnpc-c++ capnpc-capnp; do
-  wasm-tools validate \
-    --features=-legacy-exceptions,-threads,-shared-everything-threads,-memory64 \
-    "build/wasm/bin/$tool.wasm"
-done
+# The module contract (feature allow-list, no DWARF, no build-host paths,
+# size budget) has one definition; check:wasm-artifacts applies it to dist/.
+deno run --allow-read --allow-env=HOME --allow-run=wasm-tools \
+  scripts/check-wasm-artifacts.ts --module build/wasm/bin/capnp.wasm \
+  build/wasm/bin/capnpc-c++.wasm build/wasm/bin/capnpc-capnp.wasm

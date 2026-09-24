@@ -82,9 +82,10 @@ if [[ "$failed" -ne 0 ]]; then
   exit 1
 fi
 
-wasm-tools validate \
-  --features=-legacy-exceptions,-threads,-shared-everything-threads,-memory64 \
-  build/zig/bin/capnpc-zig.wasm
+# The module contract (feature allow-list, no DWARF, no build-host paths,
+# size budget) has one definition; check:wasm-artifacts applies it to dist/.
+deno run --allow-read --allow-env=HOME --allow-run=wasm-tools \
+  scripts/check-wasm-artifacts.ts --module build/zig/bin/capnpc-zig.wasm
 
 install_if_changed() {
   # usage: install_if_changed <source> <destination>; leaves an identical

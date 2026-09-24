@@ -38,6 +38,7 @@ mkdir -p build/native/bin build/wasm/bin
 cp "$CARGO_TARGET_DIR/release/capnpc-rust" build/native/bin/capnpc-rust
 cp "$CARGO_TARGET_DIR/wasm32-wasip1/release/capnpc-rust.wasm" \
   build/wasm/bin/capnpc-rust.wasm
-wasm-tools validate \
-  --features=-legacy-exceptions,-threads,-shared-everything-threads,-memory64 \
-  build/wasm/bin/capnpc-rust.wasm
+# The module contract (feature allow-list, no DWARF, no build-host paths,
+# size budget) has one definition; check:wasm-artifacts applies it to dist/.
+deno run --allow-read --allow-env=HOME --allow-run=wasm-tools \
+  scripts/check-wasm-artifacts.ts --module build/wasm/bin/capnpc-rust.wasm
