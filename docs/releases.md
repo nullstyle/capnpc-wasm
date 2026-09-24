@@ -147,7 +147,9 @@ npm-compatible `<stem>.tgz` archive, `<stem>.manifest.json` (a copy of
 `SHA256SUMS`, which lists the archive, the manifest asset, and the SBOM.
 Preparation starts from fresh staging directories and removes stale assets.
 Sorted tar entries, fixed permissions, zero ownership, and zero timestamps make
-archive bytes reproducible for the same source and built inputs.
+archive bytes reproducible for the same source and built inputs, and the Wasm
+modules are byte-identical from any checkout path
+(`mise run check:wasm-artifacts` rejects build-host paths and DWARF).
 
 `scripts/release.ts` refuses two states that must never reach a release, and
 `--allow-dirty` and `--allow-existing-tag` are accepted only in candidate mode:
