@@ -9,6 +9,7 @@ import {
   ERRNO_BADF,
   ERRNO_INVAL,
   ERRNO_NFILE,
+  ERRNO_NOTSUP,
 } from "../../ref/browser_wasi_shim/src/wasi_defs.ts";
 import type { ResourceLimits } from "./types.ts";
 
@@ -290,14 +291,17 @@ export function boundWasiIO(wasi: WASI, limits: ResourceLimits): void {
     count: number,
     ...rest: unknown[]
   ) => {
+    // The shim serves exactly one clock subscription (48 bytes in, 32 bytes
+    // out). Treat the count as the unsigned value the guest passed, so a
+    // negative i32 cannot slip past the shim's own checks to a raw read.
+    const subscriptions = count >>> 0;
+    if (subscriptions === 0) return ERRNO_INVAL;
+    if (subscriptions !== 1) return ERRNO_NOTSUP;
     const size = memory().length;
-    // The shim accepts exactly one subscription (48 bytes) and one event
-    // (32 bytes); it rejects other counts itself.
-    if (
-      (count >>> 0) === 1 &&
-      ((input >>> 0) + 48 > size || (output >>> 0) + 32 > size)
-    ) return ERRNO_INVAL;
-    return poll(input, output, count, ...rest);
+    if ((input >>> 0) + 48 > size || (output >>> 0) + 32 > size) {
+      return ERRNO_INVAL;
+    }
+    return poll(input, output, 1, ...rest);
   };
 
   // Bound guest path copies while allowing /include mount prefixes and the
@@ -329,12 +333,25 @@ export function boundWasiIO(wasi: WASI, limits: ResourceLimits): void {
   }
 
   // Cap live descriptors. path_open is the only import that adds one; close
-  // and renumber are the only ones that release slots.
-  let live = wasi.fds.filter((descriptor) => descriptor !== undefined).length;
+  // and renumber are the only ones that release slots. The shim retains a
+  // new descriptor before it writes the fd number, so the result pointer is
+  // checked here first: a guest cannot make that write throw after the push
+  // and catch the exception to keep opening. Should the shim still throw, the
+  // count is rebuilt from its table rather than left stale.
+  const countLive = () =>
+    wasi.fds.filter((descriptor) => descriptor !== undefined).length;
+  let live = countLive();
   const open = wasi.wasiImport.path_open;
   wasi.wasiImport.path_open = (...args: unknown[]) => {
+    if (((args[8] as number) >>> 0) + 4 > memory().length) return ERRNO_INVAL;
     if (live >= maximumDescriptors) return ERRNO_NFILE;
-    const ret = open(...args);
+    let ret: unknown;
+    try {
+      ret = open(...args);
+    } catch (cause) {
+      live = countLive();
+      throw cause;
+    }
     if (ret === 0) live++;
     return ret;
   };
@@ -342,8 +359,14 @@ export function boundWasiIO(wasi: WASI, limits: ResourceLimits): void {
     const original = wasi.wasiImport[name];
     wasi.wasiImport[name] = (fd: number, ...args: unknown[]) => {
       const held = wasi.fds[fd] !== undefined;
-      const ret = original(fd, ...args);
-      if (held && wasi.fds[fd] === undefined) live--;
+      let ret: unknown;
+      try {
+        ret = original(fd, ...args);
+      } catch (cause) {
+        live = countLive();
+        throw cause;
+      }
+      if (held && wasi.fds[fd] === undefined && live > 0) live--;
       return ret;
     };
   }

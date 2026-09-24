@@ -29,4 +29,7 @@
       (i32.const 3) (i32.const 256) (i32.const 256) (i64.const 0)
       (i32.const 24)))
     (call $report (call $fd_prestat_dir_name
-      (i32.const 3) (i32.const 512) (i32.const 1)))))
+      (i32.const 3) (i32.const 512) (i32.const 1)))
+    ;; A negative count is a huge unsigned one: unsupported, never a raw read.
+    (call $report (call $poll_oneoff
+      (i32.const 0) (i32.const 64) (i32.const -1) (i32.const 24)))))

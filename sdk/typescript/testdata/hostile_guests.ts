@@ -14,6 +14,7 @@ const EBADF = 8;
 const ENFILE = 41;
 const EPERM = 63;
 const EROFS = 69;
+const ENOTSUP = 58;
 
 export interface HostileGuest {
   /** Where the guest runs: the read-only compiler stage, or a writable generator. */
@@ -94,10 +95,13 @@ export const hostileGuests: Record<string, HostileGuest> = {
   //       (i32.const 3) (i32.const 256) (i32.const 256) (i64.const 0)
   //       (i32.const 24)))
   //     (call $report (call $fd_prestat_dir_name
-  //       (i32.const 3) (i32.const 512) (i32.const 1)))))
+  //       (i32.const 3) (i32.const 512) (i32.const 1)))
+  //     ;; A negative count is a huge unsigned one: unsupported, never a raw read.
+  //     (call $report (call $poll_oneoff
+  //       (i32.const 0) (i32.const 64) (i32.const -1) (i32.const 24)))))
   "guest-pointers": {
     stage: "compiler",
-    expectRequest: [EINVAL, EINVAL, EINVAL, 0, 0],
+    expectRequest: [EINVAL, EINVAL, EINVAL, 0, 0, ENOTSUP],
     bytes: wasm(
       "0061736d0100000001200560047f7f7f7f017f60057f7f7f7e7f017f60037f7f7f017f60" +
         "017f006000000299010416776173695f736e617073686f745f7072657669657731086664" +
@@ -105,10 +109,66 @@ export const hostileGuests: Record<string, HostileGuest> = {
         "656164646972000116776173695f736e617073686f745f70726576696577311366645f70" +
         "7265737461745f6469725f6e616d65000216776173695f736e617073686f745f70726576" +
         "696577310b706f6c6c5f6f6e656f6666000003030203040503010001071302066d656d6f" +
-        "72790200065f737461727400050a5f021400411020003a0000410141084101411810001a" +
-        "0b480041034180807c418080084200411810011004410341807e4180201002100441807e" +
+        "72790200065f737461727400050a6c021400411020003a0000410141084101411810001a" +
+        "0b550041034180807c418080084200411810011004410341807e4180201002100441807e" +
         "410041014118100310044103418002418002420041181001100441034180044101100210" +
-        "040b0b0e010041080b081000000001000000",
+        "04410041c000417f4118100310040b0b0e010041080b081000000001000000",
+    ),
+  },
+  // ;; The shim retains a new descriptor before it writes the fd number. With the
+  // ;; result pointer outside memory that write would throw after the push, and a
+  // ;; guest that catches the exception with catch_all could keep opening past the
+  // ;; descriptor cap. The SDK must reject the pointer with EINVAL before the shim
+  // ;; runs. Reports: the errno, EINVAL count, caught-exception count, and the fd
+  // ;; number a later valid open receives (4 when nothing leaked).
+  // (module
+  //   (import "wasi_snapshot_preview1" "fd_write"
+  //     (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  //   (import "wasi_snapshot_preview1" "path_open"
+  //     (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+  //   (memory (export "memory") 1)
+  //   (data (i32.const 8) "\10\00\00\00\07\00\00\00")
+  //   (data (i32.const 32) "src")
+  //   (func (export "_start")
+  //     (local $i i32) (local $ret i32) (local $einval i32) (local $caught i32)
+  //     (loop $again
+  //       (block $handled
+  //         (block $thrown
+  //           (try_table (catch_all $thrown)
+  //             (local.set $ret (call $path_open
+  //               (i32.const 3) (i32.const 0) (i32.const 32) (i32.const 3)
+  //               (i32.const 0) (i64.const 0) (i64.const 0) (i32.const 0)
+  //               (i32.const 65536))))
+  //           (if (i32.eq (local.get $ret) (i32.const 28))
+  //             (then (local.set $einval (i32.add (local.get $einval) (i32.const 1)))))
+  //           (br $handled))
+  //         (local.set $caught (i32.add (local.get $caught) (i32.const 1))))
+  //       (local.set $i (i32.add (local.get $i) (i32.const 1)))
+  //       (br_if $again (i32.lt_u (local.get $i) (i32.const 2000))))
+  //     ;; A valid open with an in-range result pointer shows whether the table grew.
+  //     (drop (call $path_open
+  //       (i32.const 3) (i32.const 0) (i32.const 32) (i32.const 3) (i32.const 0)
+  //       (i64.const 0) (i64.const 0) (i32.const 0) (i32.const 40)))
+  //     (i32.store8 (i32.const 16) (local.get $ret))
+  //     (i32.store16 (i32.const 17) (local.get $einval))
+  //     (i32.store16 (i32.const 19) (local.get $caught))
+  //     (i32.store16 (i32.const 21) (i32.load (i32.const 40)))
+  //     (drop (call $fd_write
+  //       (i32.const 1) (i32.const 8) (i32.const 1) (i32.const 24)))))
+  "open-catch": {
+    stage: "compiler",
+    // 2000 EINVAL results, nothing caught, and the next fd is still 4.
+    expectRequest: [EINVAL, 0xd0, 0x07, 0, 0, 4, 0],
+    bytes: wasm(
+      "0061736d0100000001190360047f7f7f7f017f60097f7f7f7f7f7e7e7f7f017f60000002" +
+        "460216776173695f736e617073686f745f70726576696577310866645f77726974650000" +
+        "16776173695f736e617073686f745f707265766965773109706174685f6f70656e000103" +
+        "0201020503010001071302066d656d6f72790200065f737461727400020a940101910101" +
+        "047f0340024002401f400102004103410041204103410042004200410041808004100121" +
+        "010b2001411c460440200241016a21020b0c010b200341016a21030b200041016a210020" +
+        "0041d00f490d000b41034100412041034100420042004100412810011a411020013a0000" +
+        "411120023b0100411320033b0100411541282802003b0100410141084101411810001a0b" +
+        "0b16020041080b0810000000070000000041200b03737263",
     ),
   },
   // ;; Every path_open keeps a host descriptor object alive until fd_close. A guest
