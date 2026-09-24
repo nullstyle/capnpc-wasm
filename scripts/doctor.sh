@@ -64,11 +64,14 @@ check "mise ${mise_version%% *} meets the minimum $min_version" \
   check_mise_version "$mise_version" "$min_version"
 banner mise ls --current
 
+# mise merges the global configuration into this listing, so a tool pinned
+# only in ~/.config/mise also shows up here.
 missing="$(mise ls --current --missing 2> /dev/null || true)"
 if [[ -n "$missing" ]]; then
-  fail "pinned tools are installed" "$missing" "run mise install"
+  fail "tools required by the mise configuration are installed" "$missing" \
+    "run mise install (the list includes tools pinned by your global mise config)"
 else
-  pass "pinned tools are installed"
+  pass "tools required by the mise configuration are installed"
 fi
 
 # Each pinned tool on PATH must report its pinned version; otherwise a system
@@ -208,7 +211,7 @@ check "Zig pin matches ref/capnp-zig/mise.toml" \
   check_zig_pin "$(mise current zig 2> /dev/null || true)" ref/capnp-zig/mise.toml
 check "wazero pins in sdk/go and tests/hosts/wazero match the ref/wazero gitlink" \
   "update sdk/go/go.mod to the pseudo-version at the gitlink and keep the replace in tests/hosts/wazero/go.mod" \
-  check_wazero_pin "$(git rev-parse HEAD:ref/wazero)" sdk/go/go.mod tests/hosts/wazero/go.mod ref/wazero
+  check_wazero_pin "$(ref_revision wazero)" sdk/go/go.mod tests/hosts/wazero/go.mod ref/wazero
 check "historical capnp-zig commit is present in ref/capnp-zig" \
   "run mise run refs:sync" \
   check_historical_commit ref/capnp-zig generators/zig/historical-reference

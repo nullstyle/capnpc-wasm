@@ -1,7 +1,8 @@
 // Verify the prepared Zig sources and the mirrored conformance fixtures
 // against the capnp-zig revision this repository records: the ref/capnp-zig
-// gitlink at HEAD. generators/zig/sync.json only maps native fixture paths to
-// their mirrors; every expectation comes from the reference commit itself.
+// gitlink in the index, which a reference bump stages before it is committed.
+// generators/zig/sync.json only maps native fixture paths to their mirrors;
+// every expectation comes from the reference commit itself.
 //
 //   deno run --allow-read --allow-run=git scripts/check-zig-sync.ts
 //   deno run --allow-read --allow-write=tests --allow-run=git \
@@ -15,6 +16,7 @@ const decoder = new TextDecoder();
 type Fixture = { native: string; path: string };
 type Manifest = { version: 2; fixtures: Fixture[] };
 type TreeEntry = { mode: string; kind: string; object: string };
+const regularFileModes = ["100644", "100755"];
 
 const updateFixtures = Deno.args.length === 1 &&
   Deno.args[0] === "--update-fixtures";
@@ -131,7 +133,7 @@ function sourceEntries(
   const found: Record<string, TreeEntry> = {};
   for (const [path, entry] of Object.entries(tree)) {
     if (!path.startsWith(prefix)) continue;
-    if (entry.kind !== "blob" || !["100644", "100755"].includes(entry.mode)) {
+    if (entry.kind !== "blob" || !regularFileModes.includes(entry.mode)) {
       throw new Error(`Unexpected committed source entry: ${path}`);
     }
     found[path.slice(prefix.length)] = entry;
@@ -177,13 +179,13 @@ if (
   manifest.fixtures.some((fixture) =>
     typeof fixture.native !== "string" || typeof fixture.path !== "string" ||
     fixture.native.startsWith("/") || fixture.native.includes("..") ||
-    !fixture.path.startsWith("tests/")
+    !fixture.path.startsWith("tests/") || fixture.path.includes("..")
   )
 ) {
   throw new Error(`Invalid fixture manifest ${manifestPath}`);
 }
 
-const gitlink = await git(".", "rev-parse", `HEAD:${reference}`);
+const gitlink = await git(".", "rev-parse", `:${reference}`);
 const sourceCount = await compareSources(
   "Prepared Zig source",
   preparedSources,
@@ -193,12 +195,14 @@ const sourceCount = await compareSources(
 
 // Mirrored fixtures must be byte-identical to the native files at the gitlink.
 const tree = await committedTree(reference, gitlink);
-const missingNative = manifest.fixtures.filter((fixture) =>
-  tree[fixture.native]?.kind !== "blob"
-);
+const missingNative = manifest.fixtures.filter((fixture) => {
+  const entry = tree[fixture.native];
+  return entry === undefined || entry.kind !== "blob" ||
+    !regularFileModes.includes(entry.mode);
+});
 if (missingNative.length > 0) {
   throw new Error(
-    `Fixture sources missing from ${reference} ${gitlink}: ${
+    `Fixture sources missing from ${reference} ${gitlink} or not regular files: ${
       missingNative.map((fixture) => fixture.native).join(", ")
     }`,
   );
@@ -221,6 +225,9 @@ for (const fixture of manifest.fixtures) {
     await sha256(mirrored) === await sha256(native);
   if (same) continue;
   if (updateFixtures) {
+    await Deno.mkdir(fixture.path.slice(0, fixture.path.lastIndexOf("/")), {
+      recursive: true,
+    });
     await Deno.writeFile(fixture.path, native);
     updated += 1;
   } else {

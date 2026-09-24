@@ -5,9 +5,10 @@
 # caller sets `set -euo pipefail`.
 #
 # ref_revision <name>
-#   Prints the commit this repository records (the gitlink at HEAD) for
-#   ref/<name>. Builds export and compile that commit, never whatever a
-#   checkout happens to contain.
+#   Prints the commit this repository records for ref/<name>: the gitlink in
+#   the index, which `git submodule update` checks out and which a reference
+#   bump stages (`git add ref/<name>`) before it is committed. Builds export
+#   and compile that commit, never whatever a checkout happens to contain.
 # ref_checkout_problem <name>
 #   Prints one line describing why ref/<name> cannot be used, or nothing when
 #   the checkout is initialized, at the recorded commit, and has no local
@@ -16,13 +17,13 @@
 #   Fails with that description for the first reference that has a problem.
 
 ref_revision() {
-  git rev-parse "HEAD:ref/$1"
+  git rev-parse ":ref/$1"
 }
 
 ref_checkout_problem() {
   local name="$1" dir expected actual changes
   dir="ref/$name"
-  if ! expected="$(git rev-parse --verify --quiet "HEAD:$dir")"; then
+  if ! expected="$(git rev-parse --verify --quiet ":$dir")"; then
     echo "$dir is not a reference recorded by this repository"
     return 0
   fi
