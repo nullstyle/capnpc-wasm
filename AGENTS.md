@@ -42,6 +42,11 @@ release status; update it instead of restating status here.
   byte-oriented workspaces, fresh guest instances, read-only inputs, and
   transactional outputs. Cancellation terminates guest execution; a rejected
   promise alone is insufficient.
+- The two SDKs implement one contract,
+  [docs/sdk-contract.md](docs/sdk-contract.md): keep request fields, limits
+  (pinned by `tests/fixtures/contract/limits.json`), stage names, and error
+  classes aligned, and change the contract document and `CHANGELOG.md` with any
+  SDK API change.
 - The [schema feature corpus](tests/fixtures/features/README.md) is shared by
   the TypeScript, Go, and browser tests. Read embeds as bytes; compare the
   complete canonical request and every generated source byte with native output
@@ -70,7 +75,8 @@ a local cold build is comparable. For quick iteration, run one suite task, or
   (after `mise run browser:install` once), and the Deno 2.6.8 worker lane in
   [CONTRIBUTING.md](CONTRIBUTING.md#reproducing-the-ci-lanes)
   (`mise run test:deno-worker`).
-- Go SDK: `mise run test:sdk-go` (`lint` runs the vet).
+- Go SDK: `mise run test:sdk-go` and `mise run test:sdk-go-race` (`lint` runs
+  the vet).
 - Schema Studio (`examples/browser/`, `scripts/build-studio.ts`,
   `scripts/serve-example.ts`): `mise run test:studio`.
 - Release scripts, `bin/capnp-wasm`, or packaged docs: `mise run test:package`

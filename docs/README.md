@@ -6,14 +6,15 @@ provenance, not for guidance.
 
 ## Current
 
-| Document                                              | Use it for                                                                                                 |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| [Architecture](architecture.md)                       | The data flow from schemas through the compiler and generators to the hosts, and which directory owns what |
-| [Threat model](threat-model.md)                       | Trust boundaries per host, which inputs are untrusted, known gaps, and guidance for consumers              |
-| [Releases](releases.md)                               | Published archives and their digests, candidate preparation and verification, launcher and package details |
-| [Release readiness](release-readiness.md)             | The gate table, the 0.1.0 definition of done, and the nightly ledger                                       |
-| [Deno worker termination](deno-worker-termination.md) | The evidence behind the Deno 2.6.8 worker requirement                                                      |
-| [Release evidence](release-evidence/)                 | Machine-readable receipts referenced by the readiness page and the history narrative                       |
+| Document                                              | Use it for                                                                                                     |
+| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| [Architecture](architecture.md)                       | The data flow from schemas through the compiler and generators to the hosts, and which directory owns what     |
+| [Threat model](threat-model.md)                       | Trust boundaries per host, which inputs are untrusted, known gaps, and guidance for consumers                  |
+| [SDK contract](sdk-contract.md)                       | The request fields, limits, stage names, error classes, and command lines shared by the TypeScript and Go SDKs |
+| [Releases](releases.md)                               | Published archives and their digests, candidate preparation and verification, launcher and package details     |
+| [Release readiness](release-readiness.md)             | The gate table, the 0.1.0 definition of done, and the nightly ledger                                           |
+| [Deno worker termination](deno-worker-termination.md) | The evidence behind the Deno 2.6.8 worker requirement                                                          |
+| [Release evidence](release-evidence/)                 | Machine-readable receipts referenced by the readiness page and the history narrative                           |
 
 Root documents: [README](../README.md) for the consumer quick start, support
 matrix, generated-code runtime requirements, and layout;
