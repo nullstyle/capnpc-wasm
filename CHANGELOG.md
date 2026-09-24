@@ -34,6 +34,21 @@ version that ships them.
 - Documentation: `docs/sdk-contract.md` defines the shared SDK contract, with
   the limit defaults pinned in `tests/fixtures/contract/limits.json`; the Go
   package consumer compares complete digest maps and the compiler-path fixture.
+- Schema Studio: new files carry the Go and C++ annotations, saved workspace
+  ZIPs import again (declared sizes checked before inflating), hidden entries
+  such as `.git/` are skipped and counted, Studio's limits match the SDK budget
+  including the bundled includes, failures show the SDK message above the raw
+  diagnostics, edits during a run offer a restart, unsupported engines get a
+  clear message, one worker grows with the languages used instead of being
+  rebuilt, the build stages and versions every asset and ships only the used
+  modules with a Licenses page, `index.html` carries a Content-Security-Policy
+  and `serve-example.ts` adds the header-only policies and a loopback Host
+  allow-list, controls stay focusable while a job runs with manual tab
+  activation, live regions announce transitions only with persistent errors,
+  colours are tokens meeting 4.5:1, the resize handle keeps the responsive
+  sidebar, and the page has an `h1`; the pure `state.js` module has Deno unit
+  tests (`test:studio-unit`), and the browser driver adds keyboard, axe-core
+  (4.13.0), cancellation, and asset-failure coverage.
 
 ## capnp-wasm-compiler-host
 
