@@ -1,10 +1,14 @@
 {
   "version": "5",
   "specifiers": {
+    "npm:axe-core@4.13.0": "4.13.0",
     "npm:fflate@0.8.3": "0.8.3",
     "npm:playwright@1.63.0": "1.63.0"
   },
   "npm": {
+    "axe-core@4.13.0": {
+      "integrity": "sha512-UzGt8zg7Ny8djbYMhxl2zuEevVa7r2gJjYY5Lwr1xM7+XU2nd6CkIWFTVcCIbAP63vSz71NaVyyuSk9lHKcy0A=="
+    },
     "fflate@0.8.3": {
       "integrity": "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA=="
     },
@@ -22,6 +26,7 @@
   },
   "workspace": {
     "dependencies": [
+      "npm:axe-core@4.13.0",
       "npm:fflate@0.8.3",
       "npm:playwright@1.63.0"
     ]
