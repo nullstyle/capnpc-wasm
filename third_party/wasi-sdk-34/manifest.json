@@ -1,0 +1,31 @@
+{
+  "//": "License texts of the WASI SDK 34 sysroot runtimes, copied from the wasi-libc and llvm-project commits that ref/wasi-sdk records as nested submodules (src/wasi-libc, src/llvm-project). scripts/package-assets.ts verifies the commits against ref/wasi-sdk and every file against its digest.",
+  "sdk": "34",
+  "sources": {
+    "wasi-libc": {
+      "repository": "https://github.com/WebAssembly/wasi-libc",
+      "gitlink": "src/wasi-libc",
+      "commit": "2e6fb9d8ee0cdf9e431fbcabe8af3115de000a13",
+      "files": {
+        "LICENSE": "2711a8b5a5cdfef0e639f96c1aca12ae23d7d64a02d0507f1bdf14d2b27bbc3a",
+        "LICENSE-APACHE": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+        "LICENSE-APACHE-LLVM": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+        "LICENSE-MIT": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "fts/musl-fts/COPYING": "55af87e4017668f54467a3380e7ebbac5e672d8c763bfe95e6fc882a6fdc4046",
+        "libc-bottom-half/cloudlibc/LICENSE": "c8b789cf5a746611e6300a0cc7750dbf92b61912a709d04e639245f7290656d0",
+        "libc-top-half/musl/COPYRIGHT": "b870108ec5e7790e9f9919064f1b9421d62d5f9b0e6c230c6adf7ea2da62e97b"
+      }
+    },
+    "llvm-project": {
+      "repository": "https://github.com/llvm/llvm-project",
+      "gitlink": "src/llvm-project",
+      "commit": "895aa2c896ada719451be2e3673c83da8ddf1141",
+      "files": {
+        "compiler-rt/LICENSE.TXT": "1a8f1058753f1ba890de984e48f0242a3a5c29a6a8f2ed9fd813f36985387e8d",
+        "libcxx/LICENSE.TXT": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+        "libcxxabi/LICENSE.TXT": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c",
+        "libunwind/LICENSE.TXT": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d"
+      }
+    }
+  }
+}
