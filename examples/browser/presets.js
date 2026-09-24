@@ -1,4 +1,6 @@
-const annotations = (name, importPath = `example.com/studio/${name}`) =>
+// The annotations every bundled example carries, so all four generators work.
+// New files created in Studio derive theirs from the shown schema (state.js).
+export const annotations = (name, importPath = `example.com/studio/${name}`) =>
   `using Cxx = import "/capnp/c++.capnp";
 $Cxx.namespace("studio");
 using Go = import "/go.capnp";

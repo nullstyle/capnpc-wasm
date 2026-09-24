@@ -382,3 +382,7 @@ run = "go -C sdk/go test -race -count=1 -mod=readonly -run 'TestCompiler|TestGen
 description = "Compare the non-compile CLI (upstream capnp-test.sh, conversions, eval) with native on the launcher, Wasmtime, wazero, and the Deno host"
 depends = ["build:native", "build:wasm", "build:wazero"]
 run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/cli_parity_test.ts"
+
+[tasks."test:studio-unit"]
+description = "Run the Schema Studio state and workspace unit tests on the pinned Deno (no browser, no build)"
+run = "deno test --config examples/browser/deno.json --frozen examples/browser/"

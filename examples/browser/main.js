@@ -1,5 +1,12 @@
+// View bindings for Schema Studio. Workspace and job rules live in state.js;
+// this module renders them and wires the DOM, the editors, and the runtime.
 import { createEditor } from "./editor.js";
-import { languages, studioCompiler } from "./compiler.js";
+import {
+  assetVersion,
+  languages,
+  studioCompiler,
+  supportsWasmExceptions,
+} from "./compiler.js";
 import { presets } from "./presets.js";
 import {
   archive,
@@ -9,80 +16,120 @@ import {
   formatBytes,
   importFiles,
   isSchema,
+  limits,
   textOf,
   validateFiles,
 } from "./workspace.js";
+import * as state from "./state.js";
 
 const $ = (selector) => document.querySelector(selector);
+const languageOrder = Object.keys(languages);
 const runtime = studioCompiler(new URL("./assets/", import.meta.url));
-let files = new Map();
-let entrypoints = new Set();
-let activeFile = "";
-let activeLanguage = "cpp";
+const restart = new DOMException(
+  "Restarted with the latest edits",
+  "AbortError",
+);
+
+let workspace = state.openWorkspace(new Map());
+let session = state.createSession("cpp");
 let selectedOutput = "";
-let revision = 0;
-let cachedRequest;
-let requestRevision = -1;
-const outputs = new Map();
-let dirty = false;
-let controller;
+/** The running job's controller and completion, if any. */
+let job;
+let supported = true;
 let fileMode = "add";
 let noticeTimer;
 let updatingEditor = false;
 const editorStates = new Map();
 
-function status(message, state = "success") {
+function status(message, tone = "success") {
   $("#status").textContent = message;
-  $("#status-indicator").dataset.state = state;
+  $("#status-indicator").dataset.state = tone;
 }
 function notice(message) {
   clearTimeout(noticeTimer);
   $("#notice").textContent = message;
-  $("#notice").hidden = false;
-  noticeTimer = setTimeout(() => $("#notice").hidden = true, 5000);
+  noticeTimer = setTimeout(() => $("#notice").textContent = "", 5000);
 }
-function badge(message, state = "") {
+// Errors stay until dismissed; the region is always rendered so they are
+// announced.
+function alert(message) {
+  $("#alert").textContent = message;
+  $("#alert-bar").dataset.open = String(Boolean(message));
+  $("#alert-dismiss").hidden = !message;
+}
+function badge(message, tone = "") {
   $("#output-badge").textContent = message;
-  $("#output-badge").dataset.state = state;
+  $("#output-badge").dataset.state = tone;
 }
-function diagnostics(items, error = false) {
+function diagnostics(items, error = false, header = "") {
   $("#diagnostics").dataset.error = String(error);
   $("#diagnostics").open = error;
   $("#diagnostics-title").textContent = error
     ? "Generation failed"
     : "Compiler diagnostics";
+  $("#diagnostics-error").textContent = header;
+  $("#diagnostics-error").hidden = !header;
   $("#diagnostics-text").textContent = items || "No diagnostics.";
 }
-function busy(value) {
-  $("#generate").disabled = $("#generate-all").disabled = value;
-  $("#cancel").hidden = !value;
-  for (const tab of document.querySelectorAll("[data-language]")) {
-    tab.disabled = value;
-  }
-  // Workspace edits stay available during execution; revision checks below
-  // prevent publishing a result for a snapshot that is no longer current.
+function setEnabled(element, enabled) {
+  element.setAttribute("aria-disabled", String(!enabled));
 }
-function markChanged() {
-  revision++;
-  dirty = true;
-  cachedRequest = undefined;
-  requestRevision = -1;
-  outputs.clear();
+// Controls stay focusable while a job runs: aria-disabled plus handler guards
+// replace the disabled attribute, so keyboard focus never drops to the body.
+function renderControls() {
+  const running = session.job !== null;
+  const stale = state.isJobStale(session, workspace.revision);
+  const canGenerate = supported && (!running || stale);
+  setEnabled($("#generate"), canGenerate);
+  setEnabled($("#generate-all"), canGenerate);
+  const cancel = $("#cancel");
+  if (!running && document.activeElement === cancel) $("#generate").focus();
+  cancel.hidden = !running;
+  document.body.dataset.busy = String(running);
+}
+/** Scroll a result or error into view where the layout stacks vertically. */
+function reveal(selector) {
+  if (!matchMedia("(max-width: 820px)").matches) return;
+  $(selector).scrollIntoView({
+    block: "start",
+    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth",
+  });
+}
+
+/**
+ * Apply a workspace transition that changed content or entrypoints. Status is
+ * announced on transitions only: once when current output becomes stale, and
+ * once when edits arrive during a run that can now be restarted.
+ */
+function changed(next) {
+  const hadRequest = state.canReuseRequest(session, workspace.revision);
+  const wasStale = state.isJobStale(session, workspace.revision);
+  workspace = next;
+  session = state.invalidate(session);
   diagnostics("");
   renderOutput();
   badge("Changes to generate", "stale");
   $("#timing").textContent = "";
-  if (!controller) status("Workspace changed. Generate to update the output.");
+  if (session.job) {
+    if (!wasStale) {
+      status("Workspace changed. Generate to restart with the latest edits.");
+    }
+  } else if (hadRequest) {
+    status("Workspace changed. Generate to update the output.");
+  }
+  renderControls();
 }
 
 const editor = createEditor($("#source-editor"), {
   label: "Schema source",
-  onRun: () => run([activeLanguage]),
+  onRun: () => run([session.language]),
   onChange(text) {
-    if (updatingEditor || !activeFile) return;
-    files.set(activeFile, encoder.encode(text));
-    markChanged();
-    $("#source-size").textContent = formatBytes(files.get(activeFile).length);
+    if (updatingEditor || !workspace.activeFile) return;
+    const bytes = encoder.encode(text);
+    changed(state.editFile(workspace, workspace.activeFile, bytes));
+    $("#source-size").textContent = formatBytes(bytes.length);
   },
   onSelection(line, column) {
     $("#cursor-position").textContent = `Ln ${line}, Col ${column}`;
@@ -93,17 +140,22 @@ const outputEditor = createEditor($("#output-editor"), {
   readonly: true,
 });
 
-function showFile(path) {
-  if (activeFile && !$("#source-editor").hidden) {
-    editorStates.set(activeFile, editor.state());
+/** Keep the shown file's undo history and cursor before the editor changes. */
+function saveEditorState() {
+  const path = workspace.activeFile;
+  if (path && workspace.files.has(path) && !$("#source-editor").hidden) {
+    editorStates.set(path, editor.state());
   }
-  activeFile = path;
-  const bytes = files.get(path);
+}
+
+function renderActiveFile() {
+  const path = workspace.activeFile;
+  const bytes = workspace.files.get(path);
   const text = textOf(bytes);
   updatingEditor = true;
   if (text !== null) {
-    const state = editorStates.get(path);
-    if (state && state.doc.toString() === text) editor.setState(state);
+    const saved = editorStates.get(path);
+    if (saved && saved.doc.toString() === text) editor.setState(saved);
     else editor.setText(text);
   }
   updatingEditor = false;
@@ -142,11 +194,18 @@ function showFile(path) {
   renderFiles();
 }
 
+function showFile(path) {
+  if (path === workspace.activeFile) return;
+  saveEditorState();
+  workspace = state.selectFile(workspace, path);
+  renderActiveFile();
+}
+
 function renderFiles() {
   const container = $("#workspace-files");
   container.replaceChildren();
   const folders = new Set();
-  for (const path of [...files.keys()].sort()) {
+  for (const path of [...workspace.files.keys()].sort()) {
     const parts = path.split("/");
     for (let i = 1; i < parts.length; i++) {
       const folder = parts.slice(0, i).join("/");
@@ -155,17 +214,21 @@ function renderFiles() {
       const label = document.createElement("div");
       label.className = "folder-label";
       label.style.paddingLeft = `${8 + (i - 1) * 12}px`;
-      label.textContent = `⌄  ${parts[i - 1]}`;
+      const caret = document.createElement("span");
+      caret.textContent = "⌄";
+      caret.setAttribute("aria-hidden", "true");
+      label.append(caret, parts[i - 1]);
       container.append(label);
     }
+    const active = path === workspace.activeFile;
     const row = document.createElement("div");
-    row.className = `file-row${path === activeFile ? " active" : ""}`;
+    row.className = `file-row${active ? " active" : ""}`;
     row.style.paddingLeft = `${(parts.length - 1) * 12}px`;
     const button = document.createElement("button");
     button.type = "button";
     button.title = path;
     button.setAttribute("aria-label", `Edit ${path}`);
-    if (path === activeFile) button.setAttribute("aria-current", "page");
+    if (active) button.setAttribute("aria-current", "true");
     const icon = document.createElement("span");
     icon.className = "file-glyph";
     icon.textContent = path.endsWith(".capnp") ? "◇" : "·";
@@ -177,28 +240,29 @@ function renderFiles() {
     button.onclick = () => showFile(path);
     row.append(button);
     if (isSchema(path)) {
+      const toggle = document.createElement("label");
+      toggle.className = "entry-toggle";
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.checked = entrypoints.has(path);
+      checkbox.checked = workspace.entrypoints.has(path);
       checkbox.title = `Generate ${path}`;
       checkbox.setAttribute("aria-label", `Generate ${path}`);
       checkbox.onchange = () => {
-        if (checkbox.checked) entrypoints.add(path);
-        else entrypoints.delete(path);
-        markChanged();
+        changed(state.setEntrypoint(workspace, path, checkbox.checked));
       };
-      row.append(checkbox);
+      toggle.append(checkbox);
+      row.append(toggle);
     }
     container.append(row);
   }
-  $("#file-count").textContent = `${files.size} file${
-    files.size === 1 ? "" : "s"
+  $("#file-count").textContent = `${workspace.files.size} file${
+    workspace.files.size === 1 ? "" : "s"
   }`;
-  $("#remove-file").disabled = files.size <= 1;
+  $("#remove-file").disabled = workspace.files.size <= 1;
 }
 
 function currentEntries() {
-  return outputs.get(activeLanguage) ?? {};
+  return session.outputs.get(session.language) ?? {};
 }
 function selectedBytes() {
   return currentEntries()[selectedOutput];
@@ -232,47 +296,83 @@ function renderOutput() {
       )
     }`
     : "No output yet";
-  $("#download-all").disabled = outputs.size === 0;
+  $("#download-all").disabled = session.outputs.size === 0;
   if (paths.length) badge("Up to date", "success");
-  else {badge(
-      requestRevision === revision ? "Select Generate" : "Ready to generate",
-    );}
+  else if (session.job) badge("Working…");
+  else {
+    badge(
+      state.canReuseRequest(session, workspace.revision)
+        ? "Select Generate"
+        : "Ready to generate",
+    );
+  }
 }
 
-async function run(targets) {
-  if (controller) return;
-  try {
-    validateFiles(files);
-    if (!entrypoints.size) {
-      throw new Error(
-        "Check at least one schema in the workspace sidebar to generate.",
-      );
+/**
+ * Explain a failed job. The SDK's message names the kind (exit, trap, or
+ * budget) and the stage; the diagnostics keep the guest's raw stderr,
+ * including the compile stage when generation failed later.
+ */
+function describeFailure(error, reports) {
+  const blocks = [...reports, ...(error?.diagnostics ?? [])];
+  let detail = blocks.map((item) => `[${item.stage}]\n${item.stderr}`).join(
+    "\n",
+  );
+  let title;
+  if (error?.name === "CompileError") {
+    title = error.message;
+    const limit = /(\w+) resource limit exceeded/.exec(error.message)?.[1];
+    if (limit === "stderrBytes") {
+      detail += "\n\n[diagnostics cut off: stderr exceeded the 1 MiB limit]";
+    } else if (limit) {
+      title += ` (the ${limit} budget bounds every generated file set)`;
     }
-  } catch (error) {
-    status(error.message, "error");
-    diagnostics(error.message, true);
-    return;
-  }
-  const jobRevision = revision;
-  const snapshot = new Map(files);
-  const selected = new Set(entrypoints);
-  controller = new AbortController();
-  const { signal } = controller;
-  busy(true);
+  } else if (error?.name === "TimeoutError") {
+    title =
+      "Generation timed out after 30 seconds. Try again, or simplify the schema.";
+  } else if (error instanceof TypeError) {
+    const budget = /exceeds (\w+) limit/.exec(error.message)?.[1];
+    const advice = {
+      workspaceBytes: `Keep the workspace under ${
+        formatBytes(limits.bytes)
+      } of files.`,
+      workspaceEntries:
+        `Keep the workspace under ${limits.nodes} files and folders combined.`,
+      pathBytes: "Shorten the file paths.",
+      requestBytes:
+        "The compiled schema is larger than the 64 MiB request limit.",
+    }[budget];
+    title = advice
+      ? `The workspace is too large to compile: ${advice}`
+      : `Studio could not build a valid request: ${error.message}`;
+  } else title = error?.message || String(error);
+  return { title, detail };
+}
+
+function staleFinished() {
+  status(
+    "Workspace changed during generation. Generate again to use the latest files.",
+  );
+  badge("Changes to generate", "stale");
+}
+
+async function execute(revision, snapshot, selected, targets, signal) {
+  renderControls();
   diagnostics("");
   badge("Working…");
   const start = performance.now();
   let compileMs = 0;
-  const reused = cachedRequest && requestRevision === revision;
+  const reused = state.canReuseRequest(session, revision);
   const report = (message) => {
-    if (jobRevision === revision) status(message, "loading");
+    if (revision === workspace.revision) status(message, "loading");
   };
+  const reports = [];
   try {
-    let request = cachedRequest;
-    const reports = [];
+    let request = session.request;
     if (!reused) {
       const result = await runtime.compile(
         (includes) => compileWorkspace(snapshot, selected, includes),
+        targets,
         signal,
         report,
       );
@@ -282,19 +382,19 @@ async function run(targets) {
     }
     const generationStart = performance.now();
     const result = await runtime.generate(request, targets, signal, report);
-    if (jobRevision !== revision) {
-      status(
-        "Workspace changed during generation. Generate again to use the latest files.",
-      );
-      badge("Changes to generate", "stale");
+    reports.push(...result.diagnostics);
+    const outcome = state.completeJob(
+      session,
+      workspace.revision,
+      revision,
+      request,
+      result.outputs,
+    );
+    session = outcome.session;
+    if (!outcome.applied) {
+      staleFinished();
       return;
     }
-    cachedRequest = request;
-    requestRevision = revision;
-    for (const [language, entries] of Object.entries(result.outputs)) {
-      outputs.set(language, entries);
-    }
-    reports.push(...result.diagnostics);
     renderOutput();
     diagnostics(
       reports.map((item) => `[${item.stage}]\n${item.stderr}`).join("\n"),
@@ -315,43 +415,96 @@ async function run(targets) {
     } · Generate + load ${
       ((performance.now() - generationStart) / 1000).toFixed(2)
     }s`;
+    reveal("#output-content");
   } catch (error) {
-    if (jobRevision !== revision) {
-      status(
-        "Workspace changed during generation. Generate again to use the latest files.",
-      );
-      badge("Changes to generate", "stale");
-    } else if (signal.aborted) {
+    const cancelled = signal.aborted;
+    const outcome = state.failJob(
+      session,
+      workspace.revision,
+      revision,
+      targets,
+      cancelled,
+    );
+    session = outcome.session;
+    if (signal.reason === restart) {
+      // The restarting run reports its own progress.
+    } else if (cancelled) {
       status("Cancelled. Ready when you are.");
       renderOutput();
+    } else if (!outcome.applied) {
+      staleFinished();
     } else {
       // Never offer a previous successful target's bytes as this failed run.
-      for (const target of targets) outputs.delete(target);
       renderOutput();
-      const detail = error.diagnostics?.map((item) =>
-        `[${item.stage}]\n${item.stderr}`
-      ).join("\n") || error.message || String(error);
-      diagnostics(detail, true);
+      const failure = describeFailure(error, reports);
+      diagnostics(failure.detail, true, failure.title);
       badge("Generation failed", "error");
-      status("Generation failed. See compiler diagnostics below.", "error");
+      status("Generation failed. See the diagnostics below.", "error");
+      reveal("#diagnostics");
     }
   } finally {
-    controller = undefined;
-    busy(false);
+    renderControls();
   }
 }
 
-async function selectLanguage(language) {
-  activeLanguage = language;
+/**
+ * Start a job for the current snapshot. A running job for the same snapshot
+ * is left alone; one for an older snapshot is stopped first, so Generate and
+ * Mod-Enter restart with the latest edits instead of waiting.
+ */
+async function run(targets) {
+  if (!supported) return;
+  if (job) {
+    if (!state.isJobStale(session, workspace.revision)) return;
+    job.controller.abort(restart);
+    await job.done;
+  }
+  try {
+    validateFiles(workspace.files);
+    if (!workspace.entrypoints.size) {
+      throw new Error(
+        "Check at least one schema in the workspace sidebar to generate.",
+      );
+    }
+  } catch (error) {
+    status(error.message, "error");
+    diagnostics("", true, error.message);
+    return;
+  }
+  const revision = workspace.revision;
+  const controller = new AbortController();
+  session = state.beginJob(session, revision, targets);
+  const current = { controller, done: undefined };
+  job = current;
+  current.done = execute(
+    revision,
+    new Map(workspace.files),
+    new Set(workspace.entrypoints),
+    targets,
+    controller.signal,
+  ).finally(() => {
+    if (job === current) job = undefined;
+  });
+  await current.done;
+}
+
+function renderTabs() {
   for (const tab of document.querySelectorAll("[data-language]")) {
-    const selected = tab.dataset.language === language;
+    const selected = tab.dataset.language === session.language;
     tab.setAttribute("aria-selected", String(selected));
     tab.tabIndex = selected ? 0 : -1;
   }
-  $("#output-content").setAttribute("aria-labelledby", `tab-${language}`);
-  $("#generate-label").textContent = `Generate ${languages[language]}`;
+  $("#output-content").setAttribute(
+    "aria-labelledby",
+    `tab-${session.language}`,
+  );
+  $("#generate-label").textContent = `Generate ${languages[session.language]}`;
+}
+async function selectLanguage(language) {
+  session = { ...session, language };
+  renderTabs();
   renderOutput();
-  if (cachedRequest && requestRevision === revision && !outputs.has(language)) {
+  if (state.shouldAutoRun(session, workspace.revision, language)) {
     await run([language]);
   }
 }
@@ -380,20 +533,19 @@ function confirmAction(title, description, action) {
   );
 }
 async function canReplace() {
-  return !dirty ||
+  return !workspace.dirty ||
     await confirmAction(
       "Replace workspace?",
       "This replaces your current files. Save your workspace first if you want to keep your changes.",
       "Replace workspace",
     );
 }
-function replaceWorkspace(next, description) {
-  files = next;
-  entrypoints = new Set([...files.keys()].filter(isSchema));
+function replaceWorkspace(files, description, dirty) {
   editorStates.clear();
-  activeFile = "";
-  markChanged();
-  showFile([...files.keys()].find(isSchema) ?? files.keys().next().value);
+  changed(
+    state.openWorkspace(files, { revision: workspace.revision + 1, dirty }),
+  );
+  renderActiveFile();
   $("#example-description").textContent = description;
   diagnostics("");
 }
@@ -405,8 +557,8 @@ function loadPreset(preset) {
       ) => [path, encoder.encode(text)]),
     ),
     preset.description,
+    false,
   );
-  dirty = false;
 }
 
 for (const preset of presets) {
@@ -430,43 +582,73 @@ $("#examples").onchange = async () => {
 };
 async function openFiles(input, directory) {
   try {
-    const next = await importFiles(input.files, directory);
-    if (!next || !await canReplace()) return;
+    const imported = await importFiles(input.files, directory);
+    if (!imported || !await canReplace()) return;
+    alert("");
     replaceWorkspace(
-      next,
+      imported.files,
       "Imported workspace. Binary assets are kept unchanged.",
+      true,
     );
     currentExample = "custom";
     $("#examples").value = "custom";
-    status("Workspace imported. Select a language and generate.");
+    const count = imported.files.size;
+    status(
+      `Imported ${count} file${count === 1 ? "" : "s"}${
+        imported.archives
+          ? ` from ${imported.archives} archive${
+            imported.archives === 1 ? "" : "s"
+          }`
+          : ""
+      }${
+        imported.hidden
+          ? `, skipped ${imported.hidden} hidden file${
+            imported.hidden === 1 ? "" : "s"
+          }`
+          : ""
+      }. Select a language and generate.`,
+    );
   } catch (error) {
-    notice(error.message);
+    alert(`Import failed. ${error.message}`);
   } finally {
     input.value = "";
   }
 }
+$("#alert-dismiss").onclick = () => alert("");
 $("#import-files").onclick = () => $("#files-input").click();
 $("#import-folder").onclick = () => $("#folder-input").click();
 $("#files-input").onchange = () => openFiles($("#files-input"), false);
 $("#folder-input").onchange = () => openFiles($("#folder-input"), true);
-$("#generate").onclick = () => run([activeLanguage]);
-$("#generate-all").onclick = () => run(Object.keys(languages));
-$("#cancel").onclick = () => controller?.abort();
-for (const tab of document.querySelectorAll("[data-language]")) {
-  tab.onclick = () => selectLanguage(tab.dataset.language);
-  tab.onkeydown = (event) => {
-    const keys = Object.keys(languages);
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-    event.preventDefault();
-    const i = keys.indexOf(activeLanguage);
-    const target = event.key === "Home"
-      ? keys[0]
-      : event.key === "End"
-      ? keys.at(-1)
-      : keys[(i + (event.key === "ArrowRight" ? 1 : 3)) % 4];
-    $(`#tab-${target}`).focus();
-    selectLanguage(target);
+$("#generate").onclick = () => run([session.language]);
+$("#generate-all").onclick = () => run(languageOrder);
+$("#cancel").onclick = () => job?.controller.abort();
+
+// Tabs come from the language list. Activation is manual: arrows, Home and
+// End move focus only, and Enter, Space or a click select the language.
+const tablist = $("#language-tabs");
+for (const language of languageOrder) {
+  const tab = document.createElement("button");
+  tab.type = "button";
+  tab.id = `tab-${language}`;
+  tab.setAttribute("role", "tab");
+  tab.setAttribute("aria-selected", "false");
+  tab.setAttribute("aria-controls", "output-content");
+  tab.tabIndex = -1;
+  tab.dataset.language = language;
+  tab.textContent = languages[language];
+  tab.onclick = () => selectLanguage(language);
+  tab.onfocus = () => {
+    for (const other of tablist.children) {
+      other.tabIndex = other === tab ? 0 : -1;
+    }
   };
+  tab.onkeydown = (event) => {
+    const target = state.tabTarget(languageOrder, language, event.key);
+    if (!target) return;
+    event.preventDefault();
+    $(`#tab-${target}`).focus();
+  };
+  tablist.append(tab);
 }
 $("#output-files").onchange = () => {
   selectedOutput = $("#output-files").value;
@@ -479,7 +661,7 @@ $("#download-file").onclick = () => {
 };
 $("#download-all").onclick = () => {
   const all = new Map();
-  for (const [language, entries] of outputs) {
+  for (const [language, entries] of session.outputs) {
     for (const [path, bytes] of Object.entries(entries)) {
       all.set(`${language}/${path}`, bytes);
     }
@@ -487,9 +669,9 @@ $("#download-all").onclick = () => {
   if (all.size) download(archive(all), "outputs.zip", "application/zip");
 };
 $("#download-workspace").onclick = () => {
-  download(archive(files), "schema-workspace.zip", "application/zip");
+  download(archive(workspace.files), "schema-workspace.zip", "application/zip");
   notice(
-    "Workspace download started. The ZIP preserves folders and binary assets.",
+    "Workspace download started. The ZIP preserves folders and binary assets, and Import files opens it again.",
   );
 };
 $("#copy-output").onclick = async () => {
@@ -497,7 +679,7 @@ $("#copy-output").onclick = async () => {
     await navigator.clipboard.writeText(outputEditor.text());
     notice("Generated source copied.");
   } catch {
-    notice(
+    alert(
       "Clipboard access was denied. Select the code to copy it, or download the file.",
     );
   }
@@ -508,7 +690,7 @@ function openFileDialog(mode) {
     ? "New file"
     : "Rename file";
   $("#file-submit").textContent = mode === "add" ? "Create file" : "Rename";
-  $("#file-path").value = mode === "add" ? "" : activeFile;
+  $("#file-path").value = mode === "add" ? "" : workspace.activeFile;
   $("#file-error").textContent = "";
   $("#file-dialog").showModal();
   $("#file-path").focus();
@@ -522,38 +704,37 @@ $("#file-form").onsubmit = (event) => {
   event.preventDefault();
   try {
     const path = checkPath($("#file-path").value.trim());
-    if (files.has(path) && !(fileMode === "rename" && path === activeFile)) {
-      throw new Error("A file already uses this path.");
-    }
-    const next = new Map(files);
-    let bytes;
+    let next;
     if (fileMode === "rename") {
-      bytes = files.get(activeFile);
-      next.delete(activeFile);
+      const from = workspace.activeFile;
+      next = state.renameFile(workspace, from, path);
+      if (editorStates.has(from)) {
+        editorStates.set(path, editorStates.get(from));
+        editorStates.delete(from);
+      }
     } else {
       const words = crypto.getRandomValues(new Uint32Array(2));
-      const id = (BigInt(words[0]) << 32n | BigInt(words[1]) | (1n << 63n))
-        .toString(16);
-      bytes = encoder.encode(
-        path.endsWith(".capnp")
-          ? `@0x${id};\n\nstruct Example {\n  value @0 :Text;\n}\n`
-          : "",
+      const reference = {
+        path: workspace.activeFile,
+        text: textOf(workspace.files.get(workspace.activeFile)) ?? "",
+      };
+      next = state.addFile(
+        workspace,
+        path,
+        encoder.encode(
+          isSchema(path) || path.endsWith(".capnp")
+            ? state.schemaTemplate(
+              path,
+              state.schemaId(words[0], words[1]),
+              reference,
+            )
+            : "",
+        ),
       );
     }
-    next.set(path, bytes);
-    validateFiles(next);
-    const wasEntry = fileMode === "rename" && entrypoints.has(activeFile);
-    if (fileMode === "rename") {
-      entrypoints.delete(activeFile);
-      editorStates.delete(activeFile);
-    }
-    files = next;
-    if (isSchema(path) && (fileMode === "add" || wasEntry)) {
-      entrypoints.add(path);
-    }
-    activeFile = "";
-    markChanged();
-    showFile(path);
+    saveEditorState();
+    changed(next);
+    renderActiveFile();
     $("#file-dialog").close();
     if (fileMode === "rename") {
       notice("File renamed. Update any imports that refer to its old path.");
@@ -564,38 +745,39 @@ $("#file-form").onsubmit = (event) => {
   }
 };
 $("#remove-file").onclick = async () => {
-  const path = activeFile;
+  const path = workspace.activeFile;
   if (
-    files.size <= 1 ||
+    workspace.files.size <= 1 ||
     !await confirmAction(
       "Delete file?",
       `Delete ${path} from this workspace? Imports that reference it will need to be updated.`,
       "Delete file",
     )
   ) return;
-  files.delete(path);
-  entrypoints.delete(path);
   editorStates.delete(path);
-  activeFile = "";
-  markChanged();
-  showFile(files.keys().next().value);
+  changed(state.deleteFile(workspace, path));
+  renderActiveFile();
+  $("#source-panel").focus();
 };
 
+// The split is stored as a percentage in custom properties; the sidebar
+// column stays with the stylesheet's breakpoints.
 const handle = $("#resize");
 function resize(percent) {
-  percent = Math.max(25, Math.min(75, percent));
-  $("#workbench").style.gridTemplateColumns = `${
-    $(".workspace-panel").getBoundingClientRect().width
-  }px minmax(0,${percent}fr) 5px minmax(0,${100 - percent}fr)`;
-  handle.setAttribute("aria-valuenow", String(Math.round(percent)));
+  const split = state.clampSplit(percent);
+  $("#workbench").style.setProperty("--source-share", `${split}fr`);
+  $("#workbench").style.setProperty("--output-share", `${100 - split}fr`);
+  handle.setAttribute("aria-valuenow", String(split));
 }
 handle.onpointerdown = (event) => {
   handle.setPointerCapture(event.pointerId);
   handle.onpointermove = (move) => {
     const box = $("#workbench").getBoundingClientRect();
     const sidebar = $(".workspace-panel").getBoundingClientRect().width;
+    const width = handle.getBoundingClientRect().width;
     resize(
-      (move.clientX - box.left - sidebar) / (box.width - sidebar - 5) * 100,
+      (move.clientX - box.left - sidebar) / (box.width - sidebar - width) *
+        100,
     );
   };
   handle.onpointerup = handle.onpointercancel = () => {
@@ -611,19 +793,31 @@ handle.onkeydown = (event) => {
   );
 };
 addEventListener("beforeunload", (event) => {
-  if (dirty) {
+  if (workspace.dirty) {
     event.preventDefault();
     event.returnValue = "";
   }
 });
 addEventListener("pagehide", (event) => {
   if (event.persisted) return;
-  controller?.abort();
+  job?.controller.abort();
   runtime.dispose();
   editor.destroy();
   outputEditor.destroy();
 }, { once: true });
 if (!navigator.platform.includes("Mac")) $("#shortcut").textContent = "Ctrl ↵";
+$("#build-version").textContent = `Build ${assetVersion.slice(0, 12)}`;
 loadPreset(presets[0]);
-busy(false);
-await run([activeLanguage]);
+renderTabs();
+if (supportsWasmExceptions()) {
+  renderControls();
+  await run([session.language]);
+} else {
+  supported = false;
+  renderControls();
+  alert(
+    "This browser cannot run Schema Studio: it lacks standardized WebAssembly exception handling (exnref), which the Cap’n Proto compiler needs. Use Chrome 137, Firefox 131, Safari 18.4, or newer.",
+  );
+  status("Unsupported browser. Generation is unavailable here.", "error");
+  badge("Unavailable", "error");
+}

@@ -44,8 +44,14 @@ const language = StreamLanguage.define({
   },
 });
 
+// Colours come from the page's tokens in style.css, so contrast and theming
+// are decided in one place.
 const theme = EditorView.theme({
-  "&": { height: "100%", fontSize: "0.875rem", backgroundColor: "#fff" },
+  "&": {
+    height: "100%",
+    fontSize: "0.875rem",
+    backgroundColor: "var(--editor-bg)",
+  },
   ".cm-scroller": {
     fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
     lineHeight: "1.75",
@@ -53,18 +59,20 @@ const theme = EditorView.theme({
   ".cm-content": { padding: "18px 0" },
   ".cm-line": { padding: "0 18px 0 10px" },
   ".cm-gutters": {
-    backgroundColor: "#fff",
-    color: "#919baa",
+    backgroundColor: "var(--editor-bg)",
+    color: "var(--editor-gutter)",
     border: "none",
     paddingLeft: "10px",
   },
-  ".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "#f3f7f8" },
-  ".cm-cursor": { borderLeftColor: "#087e8b" },
+  ".cm-activeLine, .cm-activeLineGutter": {
+    backgroundColor: "var(--editor-active-line)",
+  },
+  ".cm-cursor": { borderLeftColor: "var(--accent)" },
   "&.cm-focused": { outline: "none" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-    backgroundColor: "#dceff0",
+    backgroundColor: "var(--editor-selection)",
   },
-  ".cm-searchMatch": { backgroundColor: "#ffeaa5" },
+  ".cm-searchMatch": { backgroundColor: "var(--editor-search-match)" },
 });
 
 export function createEditor(
