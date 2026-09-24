@@ -385,7 +385,8 @@ func TestFilesystemOperations(t *testing.T) {
 	})
 
 	// Created names are bounded by pathBytes; lookups are bounded at pathBytes
-	// plus the longest mount prefix and simply miss beyond the budget.
+	// plus the longest mount prefix and simply miss beyond the budget. A
+	// creating operation records the budget at either bound.
 	t.Run("path budget", func(t *testing.T) {
 		bounded := limits
 		bounded.PathBytes = 3
@@ -414,6 +415,41 @@ func TestFilesystemOperations(t *testing.T) {
 		}
 		if got := m.snapshot(); len(got) != 1 {
 			t.Fatalf("rejected names changed the tree: %v", got)
+		}
+
+		// Beyond the lookup bound, a lookup or removal is a plain ENAMETOOLONG
+		// (nothing that long can exist), while a creation is still the
+		// exceeded budget.
+		beyond := strings.Repeat("b", bounded.PathBytes+longestMountPrefix+1)
+		for _, test := range []struct {
+			name  string
+			errno func(m *memoryFS) exsys.Errno
+			limit string
+		}{
+			{"stat", func(m *memoryFS) exsys.Errno { _, e := m.Stat(beyond); return e }, ""},
+			{"open", func(m *memoryFS) exsys.Errno { _, e := m.OpenFile(beyond, exsys.O_RDONLY, 0); return e }, ""},
+			{"readlink", func(m *memoryFS) exsys.Errno { _, e := m.Readlink(beyond); return e }, ""},
+			{"unlink", func(m *memoryFS) exsys.Errno { return m.Unlink(beyond) }, ""},
+			{"rename from", func(m *memoryFS) exsys.Errno { return m.Rename(beyond, "x") }, ""},
+			{"create", func(m *memoryFS) exsys.Errno {
+				_, e := m.OpenFile(beyond, exsys.O_CREAT|exsys.O_WRONLY, 0644)
+				return e
+			}, "pathBytes"},
+			{"mkdir", func(m *memoryFS) exsys.Errno { return m.Mkdir(beyond, 0755) }, "pathBytes"},
+			{"rename to", func(m *memoryFS) exsys.Errno { return m.Rename("abc", beyond) }, "pathBytes"},
+		} {
+			m := newMemoryFS(map[string][]byte{"abc": nil}, false, bounded)
+			if errno := test.errno(m); errno != exsys.ENAMETOOLONG {
+				t.Errorf("%s beyond the lookup bound: %v, want ENAMETOOLONG", test.name, errno)
+			}
+			if m.limit != test.limit {
+				t.Errorf("%s beyond the lookup bound recorded %q, want %q", test.name, m.limit, test.limit)
+			}
+		}
+		// A read-only mount never records a budget.
+		readonly := newMemoryFS(map[string][]byte{"abc": nil}, true, bounded)
+		if _, errno := readonly.OpenFile(beyond, exsys.O_CREAT|exsys.O_WRONLY, 0644); errno != exsys.ENAMETOOLONG || readonly.limit != "" {
+			t.Fatalf("read-only creation beyond the bound: %v, recorded %q", errno, readonly.limit)
 		}
 	})
 

@@ -2,9 +2,40 @@ package capnpcwasm
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"testing"
 )
+
+// TestInitialMemoryPages checks the memory-section decoder on the test
+// guests: one and two pages, a module without a memory section, and inputs
+// that do not decode.
+func TestInitialMemoryPages(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		wasm  string
+		pages uint64
+		ok    bool
+	}{
+		{"one page", "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a040102000b", 1, true},
+		{"two pages", "0061736d01000000010401600000030201000503010002071302066d656d6f72790200065f737461727400000a040102000b", 2, true},
+		{"no memory section", "0061736d0100000001040160000003020100070a01065f737461727400000a040102000b", 0, false},
+		{"not wasm", "6e6f74207761736d", 0, false},
+		{"truncated section", "0061736d010000000503", 0, false},
+		{"empty memory section", "0061736d01000000050100", 0, false},
+		// A 4096-page minimum encodes as a two-byte LEB128 (0x80 0x20).
+		{"multi-byte minimum", "0061736d01000000050401008020", 4096, true},
+	} {
+		wasm, err := hex.DecodeString(test.wasm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pages, ok := initialMemoryPages(wasm)
+		if pages != test.pages || ok != test.ok {
+			t.Errorf("%s: initialMemoryPages = %d, %v, want %d, %v", test.name, pages, ok, test.pages, test.ok)
+		}
+	}
+}
 
 func bookkeepingOnly() *Compiler {
 	return &Compiler{generators: map[Language]command{}, limits: DefaultLimits(), jobs: map[*job]struct{}{}, idle: make(chan struct{})}

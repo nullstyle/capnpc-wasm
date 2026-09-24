@@ -27,8 +27,9 @@ type memoryFS struct {
 	nodes    map[string]*memoryNode
 	readOnly bool
 	limits   Limits
-	// used is the lifetime byte charge: bytes stay charged after unlink,
-	// truncation, and rename so retained descriptors cannot exceed the budget.
+	// used is the byte charge: bytes stay charged after unlink and after a
+	// rename replaces a file, so retained descriptors cannot exceed the
+	// budget; shrinking a file releases its storage and refunds the charge.
 	used int64
 	// created is the lifetime count of entries a guest created, excluding the
 	// root; removing an entry does not refund it.
@@ -66,6 +67,24 @@ func newMemoryFS(files map[string][]byte, readOnly bool, limits Limits) *memoryF
 	}
 	m.readOnly = readOnly
 	return m
+}
+
+// newRootFS builds the compiler's read-only root. The compiler opens
+// /src/<path> and /include/<path> through the root descriptor rather than the
+// longest matching preopen, so the root mirrors the nodes of both mounts under
+// src and include. Those two directories are staged like caller paths, outside
+// every budget, so no legal limit can remove them.
+func newRootFS(source, include *memoryFS, limits Limits) *memoryFS {
+	root := newMemoryFS(nil, true, limits)
+	for prefix, mount := range map[string]*memoryFS{"src": source, "include": include} {
+		root.add(prefix, fs.ModeDir|0755, nil)
+		for name, node := range mount.nodes {
+			if name != "." {
+				root.nodes[prefix+"/"+name] = node
+			}
+		}
+	}
+	return root
 }
 
 func (m *memoryFS) add(name string, mode fs.FileMode, data []byte) *memoryNode {
@@ -109,9 +128,14 @@ func (m *memoryFS) create(name string, mode fs.FileMode) (*memoryNode, exsys.Err
 // contain dot components, redundant separators, and a leading slash, because
 // the compiler opens absolute paths through the root descriptor. Lookups are
 // bounded at PathBytes plus the longest mount prefix; nothing longer can name
-// a node. A trailing slash requires a directory, as on POSIX.
-func (m *memoryFS) resolve(name string) (string, bool, exsys.Errno) {
+// a node. When a writable mount is asked to create a longer name, that is an
+// output path over the budget. A trailing slash requires a directory, as on
+// POSIX.
+func (m *memoryFS) resolve(name string, creating bool) (string, bool, exsys.Errno) {
 	resolved, errno := guestPath(name, m.limits.PathBytes+longestMountPrefix)
+	if errno == exsys.ENAMETOOLONG && creating && !m.readOnly {
+		return "", false, m.exceeded("pathBytes", errno)
+	}
 	if errno != 0 {
 		return "", false, errno
 	}
@@ -162,7 +186,7 @@ func (m *memoryFS) parent(name string) exsys.Errno {
 }
 
 func (m *memoryFS) OpenFile(name string, flag exsys.Oflag, perm fs.FileMode) (exsys.File, exsys.Errno) {
-	name, trailingSlash, errno := m.resolve(name)
+	name, trailingSlash, errno := m.resolve(name, flag&exsys.O_CREAT != 0)
 	if errno != 0 {
 		return nil, errno
 	}
@@ -208,7 +232,7 @@ func (m *memoryFS) OpenFile(name string, flag exsys.Oflag, perm fs.FileMode) (ex
 }
 
 func (m *memoryFS) Stat(name string) (sys.Stat_t, exsys.Errno) {
-	name, _, errno := m.resolve(name)
+	name, _, errno := m.resolve(name, false)
 	if errno != 0 {
 		return sys.Stat_t{}, errno
 	}
@@ -225,7 +249,7 @@ func (m *memoryFS) Readlink(name string) (string, exsys.Errno) {
 	if name == "" {
 		return "", exsys.ENOENT
 	}
-	name, trailingSlash, errno := m.resolve(name)
+	name, trailingSlash, errno := m.resolve(name, false)
 	if errno != 0 {
 		return "", errno
 	}
@@ -251,6 +275,9 @@ func (m *memoryFS) Mkdir(name string, perm fs.FileMode) exsys.Errno {
 	// An existing name is EEXIST whatever its type, as Linux reports for
 	// mkdir("file/"), so the trailing-slash rule does not apply here.
 	name, errno := guestPath(name, m.limits.PathBytes+longestMountPrefix)
+	if errno == exsys.ENAMETOOLONG {
+		return m.exceeded("pathBytes", errno)
+	}
 	if errno != 0 {
 		return errno
 	}
@@ -268,7 +295,7 @@ func (m *memoryFS) Unlink(name string) exsys.Errno {
 	if m.readOnly {
 		return exsys.EROFS
 	}
-	name, _, errno := m.resolve(name)
+	name, _, errno := m.resolve(name, false)
 	if errno != 0 {
 		return errno
 	}
@@ -288,11 +315,11 @@ func (m *memoryFS) Rename(from, to string) exsys.Errno {
 	if m.readOnly {
 		return exsys.EROFS
 	}
-	from, _, errno := m.resolve(from)
+	from, _, errno := m.resolve(from, false)
 	if errno != 0 {
 		return errno
 	}
-	to, _, errno = m.resolve(to)
+	to, _, errno = m.resolve(to, true)
 	if errno != 0 {
 		return errno
 	}

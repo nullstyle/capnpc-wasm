@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -407,7 +408,7 @@ func New(ctx context.Context, modules Modules, opts ...Option) (*Compiler, error
 		if ctx.Err() != nil {
 			break
 		}
-		compilations.Go(func() { u.module, u.err = compileCommand(ctx, u.runtime, u.wasm) })
+		compilations.Go(func() { u.module, u.err = compileCommand(ctx, u.runtime, u.wasm, settings.limits.MemoryPages) })
 	}
 	compilations.Wait()
 	if err := ctx.Err(); err != nil {
@@ -415,7 +416,7 @@ func New(ctx context.Context, modules Modules, opts ...Option) (*Compiler, error
 	}
 	for _, u := range units {
 		if u.err != nil {
-			return nil, &Error{Stage: StageModules, Language: u.language, Err: u.err}
+			return nil, failure(StageModules, u.language, "", nil, u.err)
 		}
 		if u.language == "" {
 			c.compiler = command{runtime: u.runtime, module: u.module}
@@ -457,7 +458,13 @@ func (e *moduleError) Unwrap() error { return e.err }
 
 func (e *moduleError) Is(target error) bool { return target == ErrInvalidRequest }
 
-func compileCommand(ctx context.Context, runtime wazero.Runtime, wasm []byte) (wazero.CompiledModule, error) {
+// compileCommand compiles one module. A module whose initial memory exceeds
+// memoryPages is the exceeded budget, as in the TypeScript SDK, rather than
+// the engine rejection wazero would report for it.
+func compileCommand(ctx context.Context, runtime wazero.Runtime, wasm []byte, memoryPages int) (wazero.CompiledModule, error) {
+	if pages, ok := initialMemoryPages(wasm); ok && pages > uint64(memoryPages) {
+		return nil, inputExceeds("initial guest memory", "memoryPages")
+	}
 	module, err := runtime.CompileModule(ctx, wasm)
 	if err != nil {
 		return nil, &moduleError{fmt.Errorf("the engine rejected the Wasm module: %w", err)}
@@ -467,6 +474,40 @@ func compileCommand(ctx context.Context, runtime wazero.Runtime, wasm []byte) (w
 		return nil, &moduleError{err}
 	}
 	return module, nil
+}
+
+// initialMemoryPages decodes the initial size of a module's first defined
+// memory from its memory section. ok is false when the module has no memory
+// section or does not decode; the engine then reports whatever is wrong.
+func initialMemoryPages(wasm []byte) (pages uint64, ok bool) {
+	const header = 8 // magic and version
+	if len(wasm) < header || string(wasm[:4]) != "\x00asm" {
+		return 0, false
+	}
+	position := header
+	for position < len(wasm) {
+		id := wasm[position]
+		position++
+		size, n := binary.Uvarint(wasm[position:])
+		if n <= 0 || size > uint64(len(wasm)-position-n) {
+			return 0, false
+		}
+		position += n
+		section := wasm[position : position+int(size)]
+		position += int(size)
+		if id != 5 { // the memory section
+			continue
+		}
+		count, n := binary.Uvarint(section)
+		if n <= 0 || count == 0 || len(section) <= n {
+			return 0, false
+		}
+		// Each memory starts with a flags byte and then its minimum, an
+		// unsigned LEB128 that Uvarint decodes for wasm32 and memory64 alike.
+		pages, n = binary.Uvarint(section[n+1:])
+		return pages, n > 0
+	}
+	return 0, false
 }
 
 func validateCommand(module wazero.CompiledModule) error {
@@ -582,23 +623,7 @@ func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error)
 	}
 	source := newMemoryFS(request.Files, true, c.limits)
 	include := newMemoryFS(request.IncludeFiles, true, c.limits)
-	root := newMemoryFS(nil, false, c.limits)
-	root.Mkdir("src", 0755)
-	root.Mkdir("include", 0755)
-	// The compiler opens /src/<path> and /include/<path> through the root
-	// descriptor rather than the longest matching preopen. Mirror the same
-	// read-only nodes there too.
-	for name, node := range source.nodes {
-		if name != "." {
-			root.nodes["src/"+name] = node
-		}
-	}
-	for name, node := range include.nodes {
-		if name != "." {
-			root.nodes["include/"+name] = node
-		}
-	}
-	root.readOnly = true
+	root := newRootFS(source, include, c.limits)
 	fs, err := mount(wazero.NewFSConfig(), root, "/")
 	if err == nil {
 		fs, err = mount(fs, source, "/src")

@@ -338,29 +338,61 @@ func TestOutputBudgetsAtExactBoundaries(t *testing.T) {
 // budget: the host classifies the job, not the guest.
 func TestOutputPathAndEntryBudgetsIgnoreExitStatus(t *testing.T) {
 	for _, test := range []struct {
+		name   string
+		guest  string
 		limit  string
 		adjust func(*capnpcwasm.Limits)
 	}{
-		{"pathBytes", func(l *capnpcwasm.Limits) { l.PathBytes = 2 }},
-		{"outputEntries", func(l *capnpcwasm.Limits) { l.OutputEntries = 0 }},
+		{"pathBytes within the lookup bound", createCommand, "pathBytes", func(l *capnpcwasm.Limits) { l.PathBytes = 2 }},
+		{"pathBytes one byte short", createLongCommand, "pathBytes", func(l *capnpcwasm.Limits) { l.PathBytes = 12 }},
+		{"pathBytes beyond the lookup bound", createLongCommand, "pathBytes", func(l *capnpcwasm.Limits) { l.PathBytes = 0 }},
+		{"outputEntries", createCommand, "outputEntries", func(l *capnpcwasm.Limits) { l.OutputEntries = 0 }},
 	} {
+		t.Run(test.name, func(t *testing.T) {
+			limits := capnpcwasm.DefaultLimits()
+			test.adjust(&limits)
+			c := newCompiler(t, noopCommand, map[string]string{"cpp": test.guest}, capnpcwasm.WithLimits(limits))
+			got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []capnpcwasm.Language{"cpp"}})
+			assertGuestLimit(t, err, "cpp", "cpp", test.limit)
+			if !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
+				t.Fatal("output published")
+			}
+		})
+	}
+	// At the budgets, the three-byte "out" and the 13-byte "generated.txt"
+	// are created.
+	for _, test := range []struct{ guest, name string }{{createCommand, "out"}, {createLongCommand, "generated.txt"}} {
 		limits := capnpcwasm.DefaultLimits()
-		test.adjust(&limits)
-		c := newCompiler(t, noopCommand, map[string]string{"cpp": createCommand}, capnpcwasm.WithLimits(limits))
+		limits.PathBytes, limits.OutputEntries = len(test.name), 1
+		c := newCompiler(t, noopCommand, map[string]string{"cpp": test.guest}, capnpcwasm.WithLimits(limits))
 		got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []capnpcwasm.Language{"cpp"}})
-		assertGuestLimit(t, err, "cpp", "cpp", test.limit)
-		if !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
-			t.Fatalf("%s: output published", test.limit)
+		out, created := got.Outputs["cpp"][test.name]
+		if err != nil || len(got.Outputs["cpp"]) != 1 || !created || len(out) != 0 {
+			t.Fatalf("creation of %q at the budgets: %v, %+v", test.name, err, got.Outputs)
 		}
 	}
-	// At the budgets, the three-byte "out" is created.
+}
+
+// TestCompilerRootIsNotBudgeted checks that the compiler's src and include
+// mirror directories exist under the tightest legal limits: OutputEntries 0
+// and a PathBytes shorter than "include" once removed them and failed every
+// compile with "no such directory".
+func TestCompilerRootIsNotBudgeted(t *testing.T) {
+	modules := loadModules(t)
 	limits := capnpcwasm.DefaultLimits()
-	limits.PathBytes, limits.OutputEntries = 3, 1
-	c := newCompiler(t, noopCommand, map[string]string{"cpp": createCommand}, capnpcwasm.WithLimits(limits))
-	got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []capnpcwasm.Language{"cpp"}})
-	out, created := got.Outputs["cpp"]["out"]
-	if err != nil || len(got.Outputs["cpp"]) != 1 || !created || len(out) != 0 {
-		t.Fatalf("creation at the budgets: %v, %+v", err, got.Outputs)
+	limits.OutputEntries, limits.PathBytes = 0, 6
+	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: modules.Compiler}, testOptions(capnpcwasm.WithLimits(limits))...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close(context.Background())
+	got, err := c.Compile(t.Context(), capnpcwasm.Request{
+		Files:        map[string][]byte{"a": []byte(`@0xece4bf9c1f867623; using Inc = import "/i"; struct Foo { inc @0 :Inc.Value; }`)},
+		IncludeFiles: map[string][]byte{"i": []byte("@0x9c9e5ec72c9f6a21; struct Value { label @0 :Text; }")},
+		Entrypoints:  []string{"a"},
+	})
+	if err != nil || len(got.Request) == 0 || len(got.Diagnostics) != 0 {
+		t.Fatalf("compile under OutputEntries 0 and PathBytes 6: %v, %+v", err, got.Diagnostics)
 	}
 }
 
@@ -369,13 +401,23 @@ func TestOutputPathAndEntryBudgetsIgnoreExitStatus(t *testing.T) {
 func TestMemoryPagesLimit(t *testing.T) {
 	limits := capnpcwasm.DefaultLimits()
 	limits.MemoryPages = 1
-	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: wasmBytes(t, twoPageCommand)}, testOptions(capnpcwasm.WithLimits(limits))...)
-	var failure *capnpcwasm.Error
-	if c != nil || !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageModules || !errors.Is(err, capnpcwasm.ErrInvalidRequest) {
-		t.Fatalf("two-page module accepted under a one-page limit: %v, %v", c, err)
+	// A module over the ceiling is the exceeded budget, as in TypeScript,
+	// at stage modules: it matches both sentinels and names the module.
+	for _, modules := range []capnpcwasm.Modules{
+		{Compiler: wasmBytes(t, twoPageCommand)},
+		{Compiler: wasmBytes(t, noopCommand), Generators: map[capnpcwasm.Language][]byte{"rust": wasmBytes(t, twoPageCommand)}},
+	} {
+		c, err := capnpcwasm.New(t.Context(), modules, testOptions(capnpcwasm.WithLimits(limits))...)
+		var failure *capnpcwasm.Error
+		if c != nil || !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageModules || failure.Limit != "memoryPages" ||
+			!errors.Is(err, capnpcwasm.ErrInvalidRequest) || !errors.Is(err, capnpcwasm.ErrLimitExceeded) ||
+			failure.Err.Error() != "initial guest memory exceeds memoryPages limit" || (failure.Language != "") != (len(modules.Generators) != 0) {
+			t.Fatalf("two-page module accepted under a one-page limit: %v, %#v (%v)", c, failure, err)
+		}
 	}
 	limits.MemoryPages = 2
-	c = newCompiler(t, twoPageCommand, nil, capnpcwasm.WithLimits(limits))
+	c := newCompiler(t, twoPageCommand, nil, capnpcwasm.WithLimits(limits))
+	var failure *capnpcwasm.Error
 	if _, err := c.Compile(t.Context(), compileOnly()); !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageCompiler {
 		t.Fatalf("two-page module under a two-page limit: %v", err)
 	}

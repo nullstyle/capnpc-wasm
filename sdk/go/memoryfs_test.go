@@ -40,6 +40,30 @@ func TestFilesystemCapabilities(t *testing.T) {
 	}
 }
 
+// TestRootFilesystemIsNotBudgeted checks that the compiler's root mirror
+// stages src and include outside every budget, so the tightest legal limits
+// still give the compiler both directories and their mirrored nodes.
+func TestRootFilesystemIsNotBudgeted(t *testing.T) {
+	limits := Limits{MemoryPages: 1, PathBytes: 1}
+	source := newMemoryFS(map[string][]byte{"a": []byte("schema")}, true, limits)
+	include := newMemoryFS(map[string][]byte{"i": nil}, true, limits)
+	root := newRootFS(source, include, limits)
+	for _, name := range []string{"src", "include", "src/a", "include/i", "/src/a", "/include/i"} {
+		if _, errno := root.Stat(name); errno != 0 {
+			t.Errorf("Stat(%q) = %v", name, errno)
+		}
+	}
+	if root.limit != "" || root.created != 0 || !root.readOnly {
+		t.Fatalf("root recorded limit %q, created %d, readOnly %v", root.limit, root.created, root.readOnly)
+	}
+	if root.nodes["src/a"] != source.nodes["a"] || root.nodes["include/i"] != include.nodes["i"] {
+		t.Fatal("root does not share the mounted nodes")
+	}
+	if errno := root.Mkdir("out", 0755); errno != exsys.EROFS {
+		t.Fatalf("root writable: %v", errno)
+	}
+}
+
 func TestFilesystemOutputLimitAndTruncation(t *testing.T) {
 	limits := DefaultLimits()
 	budget := int64(limits.OutputBytes)
