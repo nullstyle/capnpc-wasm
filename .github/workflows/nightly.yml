@@ -1,0 +1,241 @@
+# Scheduled verification that a push never exercises: a cold bootstrap from the
+# committed lock with no tool cache, the browser suites on Linux and macOS,
+# long cancellation soaks, the Go race detector, the go.mod floor toolchain, a
+# drift check against newer wazero, and the reachability of every locked
+# download. Every verification step calls a mise task, so it also runs locally.
+name: Nightly
+
+on:
+  schedule:
+    # Daily at 11:17 UTC, two hours after capnp-zig's nightly (09:17 UTC).
+    - cron: "17 11 * * *"
+  workflow_dispatch:
+    inputs:
+      soak_rounds:
+        description: Soak rounds (each round is 20 cancellation cycles per browser engine and the SDK suite on the Deno worker runtime)
+        type: string
+        default: "5"
+
+permissions:
+  contents: read
+
+# Every run gets its own group: a scheduled run is never cancelled.
+concurrency:
+  group: nightly-${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+  CARGO_BUILD_JOBS: "4"
+  # Empty on a scheduled run, so the default applies there too.
+  CAPNP_SOAK_ROUNDS: ${{ inputs.soak_rounds || '5' }}
+
+jobs:
+  bootstrap:
+    name: Cold bootstrap (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # Unpinned by design: Ubuntu's archive serves only the current build of
+      # a package, so an exact version pin breaks at every security update.
+      - name: Install Linux host development libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 pkg-config
+      # cache: false: unlike CI, no tool cache is restored, so every tool is
+      # downloaded from its locked URL (the pruned Zig build from a community
+      # mirror) and verified against mise.lock by `mise install --locked`,
+      # which never rewrites the lock. The token is confined to this step.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: 2026.9.1
+          cache: false
+      - name: Initialize only pinned top-level references
+        run: mise run setup
+      - name: Check native and Wasm parity, generated consumers, and SDKs
+        run: mise run check
+      - name: Verify release archives and external package consumers
+        run: mise run test:package
+      - name: Verify supported Deno worker execution and termination
+        run: mise run test:deno-worker
+      - name: Run the Go SDK concurrency tests under the race detector
+        run: mise run test:sdk-go-race
+      - name: Verify checks leave the tree unchanged
+        run: |
+          changes="$(git status --porcelain)"
+          if [ -n "$changes" ]; then
+            echo "checks left tracked or untracked changes:"
+            echo "$changes"
+            exit 1
+          fi
+      - name: Preserve receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-bootstrap-${{ matrix.os }}-receipts
+          path: |
+            build/test/package-receipt.json
+            build/test/compiler-host-package-*.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Preserve failing test fixtures
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-bootstrap-${{ matrix.os }}-fixtures
+          path: build/test/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  browsers:
+    name: Browsers and soak (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install Linux host development libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 pkg-config
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: 2026.9.1
+          cache: false
+      - name: Initialize only pinned top-level references
+        run: mise run setup
+      # Playwright's system libraries are a Linux concern; macOS runners carry
+      # WebKit's frameworks already.
+      - name: Install system libraries with the pinned Playwright CLI
+        if: runner.os == 'Linux'
+        run: >-
+          mise exec -- deno run --config tests/browser/deno.json --frozen
+          --allow-read --allow-env --allow-sys --allow-run --allow-net
+          tests/browser/playwright.ts install-deps chromium firefox webkit
+      - name: Verify the browser bootstrap permission boundary
+        run: mise run test:browser-bootstrap
+      # Every archive is verified against the digest recorded in install.ts.
+      - name: Install all pinned browser engines
+        run: mise run browser:install chromium firefox webkit
+      - name: Verify offline compilation, canonical requests, and cancellation
+        run: mise run test:browser chromium firefox webkit
+      - name: Verify Schema Studio workflows and native output parity
+        run: mise run test:studio chromium firefox webkit
+      - name: Soak worker cancellation and recovery in every engine
+        run: mise run test:browser-soak chromium firefox webkit
+      - name: Soak the SDK suite on the supported Deno worker runtime
+        run: mise run test:deno-worker-soak
+      - name: Verify checks leave the tree unchanged
+        run: |
+          changes="$(git status --porcelain)"
+          if [ -n "$changes" ]; then
+            echo "checks left tracked or untracked changes:"
+            echo "$changes"
+            exit 1
+          fi
+      - name: Preserve receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-browsers-${{ matrix.os }}-receipts
+          path: |
+            build/test/browser-verification-*/
+            build/test/studio-*/receipt.json
+          if-no-files-found: ignore
+          retention-days: 90
+      - name: Preserve failing browser fixtures
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-browsers-${{ matrix.os }}-fixtures
+          path: |
+            build/test/browser-*/
+            build/test/studio-*/
+            dist/studio/
+            dist/wasm/
+            dist/typescript/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  go-compat:
+    name: Go floor and wazero drift
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install Linux host development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 pkg-config
+      # The cold check is the bootstrap job's; this job may restore the cache.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: 2026.9.1
+      - name: Initialize only pinned top-level references
+        run: mise run setup
+      # The floor named by sdk/go/go.mod is a support claim; it blocks.
+      - name: Test the Go SDK with the go.mod floor toolchain
+        run: mise run test:sdk-go-floor
+      # A drift signal, not a gate: newer wazero may change experimental APIs.
+      - name: Test the Go SDK against newer wazero (non-blocking)
+        continue-on-error: true
+        run: mise run test:sdk-go-wazero-latest
+      - name: Verify checks leave the tree unchanged
+        run: |
+          changes="$(git status --porcelain)"
+          if [ -n "$changes" ]; then
+            echo "checks left tracked or untracked changes:"
+            echo "$changes"
+            exit 1
+          fi
+      - name: Preserve failing test fixtures
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-go-compat-fixtures
+          path: build/test/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  lock-urls:
+    name: Locked download URLs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # Only the mise binary: the check needs bash and curl, no tools.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          version: 2026.9.1
+          install: false
+          cache: false
+      - name: Request every download URL recorded in mise.lock
+        run: mise run check:lock-urls
