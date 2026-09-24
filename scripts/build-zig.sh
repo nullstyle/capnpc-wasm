@@ -37,11 +37,11 @@ deno run --allow-read --allow-run=git scripts/check-zig-sync.ts
 # Each output carries a stamp of everything that determines it, so an
 # unchanged source, toolchain, and flag set skips the compile entirely.
 zig_version="$(zig version)"
-script_hash="$(git hash-object "$0")"
+script_hash="$(git hash-object scripts/build-zig.sh)"
 
 compile() {
   # usage: compile <name> <output> <zig flags...>
-  local name="$1" output="$2" stamp_file want
+  local name="$1" output="$2" stamp_file want emit_dir
   shift 2
   stamp_file="build/zig/$name.stamp"
   want="zig=$zig_version|source=$source_key|script=$script_hash|flags=$*"
@@ -51,9 +51,17 @@ compile() {
     return 0
   fi
   rm -f "$stamp_file"
-  zig build-exe "$source_dir/src/main.zig" "$@" --cache-dir build/zig/cache \
-    -femit-bin="$output.tmp"
-  mv -f "$output.tmp" "$output"
+  # Emit under the final name in a temporary directory: the macOS ad-hoc code
+  # signature identifier is the file name, and a failed compile must leave
+  # the previous output in place.
+  emit_dir="$(mktemp -d build/zig/.emit.XXXXXX)"
+  if ! zig build-exe "$source_dir/src/main.zig" "$@" --cache-dir build/zig/cache \
+    -femit-bin="$emit_dir/${output##*/}"; then
+    rm -rf "$emit_dir"
+    return 1
+  fi
+  mv -f "$emit_dir/${output##*/}" "$output"
+  rm -rf "$emit_dir"
   printf '%s\n' "$want" > "$stamp_file"
 }
 

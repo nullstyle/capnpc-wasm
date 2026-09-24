@@ -24,10 +24,15 @@ fi
 # The CMake cache keeps the compilers, SDK, and linker flags of its first
 # configure; a changed toolchain stamp reconfigures from scratch.
 native_toolchain="cmake=$(cmake --version | head -n 1)"
+native_toolchain="$native_toolchain|ninja=$(command -v ninja || echo missing)=$(ninja --version 2> /dev/null || echo missing)"
 native_toolchain="$native_toolchain|cc=${CC:-cc}=$(clang --version | head -n 1)"
 native_toolchain="$native_toolchain|cxx=${CXX:-c++}=$(clang++ --version | head -n 1)"
-native_toolchain="$native_toolchain|SDKROOT=${SDKROOT:-}|LDFLAGS=${LDFLAGS:-}"
-native_toolchain="$native_toolchain|capnproto=$revision"
+native_sdk_path="${SDKROOT:-}"
+if [[ -z "$native_sdk_path" && "$(uname -s)" == Darwin ]]; then
+  native_sdk_path="$(xcrun --show-sdk-path 2> /dev/null || true)"
+fi
+native_toolchain="$native_toolchain|SDKROOT=${SDKROOT:-}|sdk=$native_sdk_path"
+native_toolchain="$native_toolchain|LDFLAGS=${LDFLAGS:-}|capnproto=$revision"
 configure_cmake build/native "$native_toolchain" -S ref/capnproto -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_TESTING=OFF -DBUILD_SHARED_LIBS=OFF \

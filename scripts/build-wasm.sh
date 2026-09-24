@@ -27,6 +27,7 @@ sdk_path="$(mise where wasi-sdk)"
 # The CMake cache keeps the SDK, toolchain file, and compiler of its first
 # configure; a changed toolchain stamp reconfigures from scratch.
 wasm_toolchain="cmake=$(cmake --version | head -n 1)|wasi-sdk=$sdk_path"
+wasm_toolchain="$wasm_toolchain|ninja=$(command -v ninja || echo missing)=$(ninja --version 2> /dev/null || echo missing)"
 wasm_toolchain="$wasm_toolchain|clang=$("$sdk_path/bin/clang" --version | head -n 1)"
 wasm_toolchain="$wasm_toolchain|toolchain-file=$(git hash-object "$sdk_path/share/cmake/wasi-sdk-p1.cmake")"
 wasm_toolchain="$wasm_toolchain|cmakelists=$(git hash-object cmake/CMakeLists.txt)"
