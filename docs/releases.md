@@ -397,10 +397,12 @@ memory ceiling.
 ## Go module
 
 The import path is `github.com/nullstyle/capnpc-wasm/sdk/go`, normally aliased
-as `capnpcwasm`. Its `go.mod` requires the exact public wazero pseudo-version
-matching the repository's unchanged `ref/wazero` gitlink, with checksums in
-`go.sum`. It has no dependency on a sibling `ref/` checkout and needs no wazero
-replacement. The full SDK archive ships every non-test `.go` file of the module.
+as `capnpcwasm`. The package name cannot match the path's last element because
+`go` is a keyword; the alias is the intended form. Its `go.mod` requires the
+exact public wazero pseudo-version matching the repository's unchanged
+`ref/wazero` gitlink, with checksums in `go.sum`. It has no dependency on a
+sibling `ref/` checkout and needs no wazero replacement. The full SDK archive
+ships every non-test `.go` file of the module.
 
 Until a Go module version is published, point only the SDK module at the source
 included in this candidate:
@@ -412,9 +414,14 @@ go mod tidy
 ```
 
 Supply `package/wasm/*.wasm` and any required `package/include/` schema bytes to
-the SDK. The eventual nested module tag must use the `sdk/go/v` prefix (for
-example `sdk/go/v0.1.0-rc.3`). Preparing a candidate does not create that tag or
-publish the npm package.
+the SDK. The nested module is tagged `sdk/go/v<version>` with the version in
+`release.json` (for example `sdk/go/v0.1.0-rc.3`), which
+`go get github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.3` resolves; verify a
+tag with
+`GOPROXY=direct go list -m github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.3`.
+The SDK tests skip when the checkout's build outputs are absent, so
+`go test all` passes in a consumer. Preparing a candidate does not create that
+tag or publish the npm package.
 
 ## Acceptance checks
 
