@@ -316,20 +316,38 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Publish staged generator output: refuse directory conflicts, symlinks at any
-# destination or parent, and read-only destinations before moving anything.
+# Publish staged generator output. The check pass refuses symlinks produced by
+# the guest, directory conflicts, read-only destinations, and symlinks at any
+# destination or parent before anything moves. The move pass looks for
+# symlinks again right before each move and, if a move still fails, keeps the
+# staged output rather than deleting what was not published.
+symlink_in_path() {
+  local rel=$1 path=$output
+  while [[ "$rel" == */* ]]; do
+    path="$path/${rel%%/*}"
+    rel=${rel#*/}
+    if [[ -L "$path" ]]; then
+      printf '%s\n' "$path"
+      return
+    fi
+  done
+  [[ ! -L "$path/$rel" ]] || printf '%s\n' "$path/$rel"
+}
+
+publish_fail() {
+  local kept=$stage
+  stage=''
+  fail 73 "$1; unpublished output kept in $kept"
+}
+
 publish_output() {
-  local entry rel dest dir
+  local entry rel dest bad
   while IFS= read -r -d '' entry; do
     rel=${entry#"$stage/"}
     dest="$output/$rel"
-    dir=$output
-    while [[ "$rel" == */* ]]; do
-      dir="$dir/${rel%%/*}"
-      rel=${rel#*/}
-      [[ ! -L "$dir" ]] || fail 73 "output path is below a symlink: $dir"
-    done
-    [[ ! -L "$dest" ]] || fail 73 "output path is a symlink: $dest"
+    bad=$(symlink_in_path "$rel")
+    [[ -z "$bad" ]] || fail 73 "output path is a symlink or below one: $bad"
+    [[ ! -L "$entry" ]] || fail 73 "generator produced a symlink: $dest"
     if [[ -d "$entry" ]]; then
       if [[ -e "$dest" ]]; then
         [[ -d "$dest" && -w "$dest" ]] || fail 73 "output directory conflicts with an existing entry: $dest"
@@ -342,11 +360,14 @@ publish_output() {
     fi
   done < <(find "$stage" -mindepth 1 -print0)
   while IFS= read -r -d '' entry; do
-    dest="$output/${entry#"$stage/"}"
+    rel=${entry#"$stage/"}
+    dest="$output/$rel"
+    bad=$(symlink_in_path "$rel")
+    [[ -z "$bad" ]] || publish_fail "output path became a symlink: $bad"
     if [[ -d "$entry" ]]; then
-      [[ -d "$dest" ]] || mkdir -- "$dest" || fail 73 "cannot create output directory: $dest"
+      [[ -d "$dest" ]] || mkdir -- "$dest" || publish_fail "cannot create output directory: $dest"
     else
-      mv -f -- "$entry" "$dest" || fail 73 "cannot publish output file: $dest"
+      mv -f -- "$entry" "$dest" || publish_fail "cannot publish output file: $dest"
     fi
   done < <(find "$stage" -mindepth 1 -print0)
 }

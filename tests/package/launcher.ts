@@ -354,6 +354,45 @@ const growModule = wasmModule([
   ),
 ]);
 
+// A command that creates the relative symlink `rel -> a.txt` in guest `/`
+// through path_symlink on the preopened directory (fd 3) and exits 0.
+const symlinkModule = wasmModule([
+  section(
+    1,
+    vector([[0x60, 5, I32, I32, I32, I32, I32, 1, I32], [0x60, 0, 0]]),
+  ),
+  section(
+    2,
+    vector([
+      [...name("wasi_snapshot_preview1"), ...name("path_symlink"), 0, 0],
+    ]),
+  ),
+  section(3, vector([[1]])),
+  section(5, vector([[0, 1]])),
+  section(7, vector([[...name("memory"), 2, 0], [...name("_start"), 0, 1]])),
+  section(
+    10,
+    vector([
+      body([], [
+        ...op.i32Const(0),
+        ...op.i32Const(5),
+        ...op.i32Const(3),
+        ...op.i32Const(16),
+        ...op.i32Const(3),
+        ...op.call(0),
+        ...op.drop,
+      ]),
+    ]),
+  ),
+  section(
+    11,
+    vector([
+      [0, ...op.i32Const(0), ...op.end, ...name("a.txt")],
+      [0, ...op.i32Const(16), ...op.end, ...name("rel")],
+    ]),
+  ),
+]);
+
 /** A schema whose constants reference each other in a chain `depth` long. */
 function constantChain(depth: number, id: string): string {
   const lines = [`@0x${id};`];
@@ -1135,6 +1174,79 @@ async function checkGeneratorSemantics(context: Context) {
   const beforeParent = await snapshot(temporary);
   exitCode(await generate(symlinkedParent, nested), 73, "symlinked parent");
   sameSnapshot(beforeParent, await snapshot(temporary), "symlinked parent");
+  // A symlink created by the guest is refused before anything is published.
+  const linkModule = `${temporary}/symlink module/symlink.wasm`;
+  await Deno.mkdir(`${temporary}/symlink module`);
+  await Deno.writeFile(linkModule, symlinkModule);
+  const linkOutput = `${temporary}/symlink output`;
+  await Deno.mkdir(linkOutput);
+  const beforeLink = await snapshot(temporary);
+  const linked = await run([
+    ...launcher,
+    "generator",
+    "--module",
+    linkModule,
+    "--output",
+    linkOutput,
+    "--",
+  ]);
+  assert(
+    linked.code === 73 &&
+      stderrOf(linked).includes("generator produced a symlink"),
+    `guest-created symlink: ${linked.code} ${stderrOf(linked)}`,
+  );
+  sameSnapshot(beforeLink, await snapshot(temporary), "guest-created symlink");
+  // When a move fails part-way, the staged output is kept and named, and every
+  // generated file is in exactly one of the two places.
+  const fakeBin = `${temporary}/fake bin`;
+  await Deno.mkdir(fakeBin);
+  await writeExecutable(
+    `${fakeBin}/mv`,
+    '#!/bin/sh\nfor arg; do case $arg in *seco.capnp.h) echo "mv: simulated failure: $arg" >&2; exit 1;; esac; done\nPATH=${PATH#*:}\nexec mv "$@"\n',
+  );
+  const partial = `${temporary}/partial output`;
+  await Deno.mkdir(partial);
+  const interrupted = await run([
+    "bash",
+    "-c",
+    'PATH="$1:$PATH"; shift; exec "$@"',
+    "_",
+    fakeBin,
+    context.launcherPath,
+    "generator",
+    "--module",
+    module,
+    "--output",
+    partial,
+    "--",
+  ], { input: twoFiles });
+  const kept = /unpublished output kept in (.+)$/m.exec(
+    stderrOf(interrupted),
+  )?.[1];
+  assert(
+    interrupted.code === 73 && kept !== undefined,
+    `failed move: ${interrupted.code} ${stderrOf(interrupted)}`,
+  );
+  const keptTree = await snapshot(kept);
+  const partialTree = await snapshot(partial);
+  for (
+    const file of [
+      "first.capnp.c++",
+      "first.capnp.h",
+      "seco.capnp.c++",
+      "seco.capnp.h",
+    ]
+  ) {
+    assert(
+      keptTree.has(file) !== partialTree.has(file),
+      `${file} is not in exactly one of the output and the kept staging directory`,
+    );
+  }
+  assert(
+    keptTree.has("seco.capnp.h"),
+    "the file whose move failed is missing from the kept staging directory",
+  );
+  await Deno.remove(kept, { recursive: true });
   // Requests that name files outside the root never write outside it, and a
   // partially written run publishes nothing.
   for (const escape of ["../x.capnp", "/../escape"]) {
