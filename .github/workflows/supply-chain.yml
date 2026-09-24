@@ -1,0 +1,85 @@
+# Weekly dependency and vulnerability monitoring. Every scan step calls a mise
+# task, so the same checks run locally (`mise run audit:osv`,
+# `audit:govulncheck`, `audit:advisories`); they need network access to
+# OSV.dev, the Go vulnerability database, and the module proxy. Dependabot
+# (.github/dependabot.yml) proposes the version updates themselves.
+name: Supply chain
+
+on:
+  schedule:
+    # Mondays at 12:41 UTC.
+    - cron: "41 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Every run gets its own group: a scheduled run is never cancelled.
+concurrency:
+  group: supply-chain-${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  vulnerabilities:
+    name: OSV, govulncheck, and advisory pins
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # Only Go and Deno are needed: install_args limits `mise install
+      # --locked` to them, and --locked never rewrites mise.lock. The token is
+      # confined to the two installation steps; the scans run without it.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: 2026.9.1
+          install_args: go deno
+      # osv-scanner is not a project tool: audit:osv runs it ad hoc from a
+      # scratch directory so the project lock is never rewritten. Installing
+      # it here keeps the GitHub API token out of the scan step.
+      - name: Install osv-scanner outside the project lock
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        run: mise --cd "$RUNNER_TEMP" install aqua:google/osv-scanner@2.6.0
+      - name: Scan the Go and Rust manifests with osv-scanner
+        run: mise run audit:osv
+      - name: Run govulncheck over the Go SDK and generator modules
+        run: mise run audit:govulncheck
+      - name: Check the runtime pins and Deno lockfiles against OSV.dev
+        run: mise run audit:advisories
+
+  tool-pins:
+    name: Newer tool releases (informational)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        with:
+          version: 2026.9.1
+          install: false
+          cache: false
+      # Not a mise task: `mise outdated` reads only mise.toml and the tool
+      # registries, and the token stays with mise itself. Dependabot does not
+      # cover mise tool pins, so this is the only signal for them.
+      - name: List newer releases of the pinned tools
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          {
+            echo '### Newer tool releases'
+            echo
+            echo '```'
+            mise outdated
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
