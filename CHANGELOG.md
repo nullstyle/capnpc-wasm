@@ -19,6 +19,21 @@ version that ships them.
 - Tests: `test:cli-parity` runs upstream `capnp-test.sh` and conversion/eval
   matrices on native, the launcher, Wasmtime, wazero, and the Deno host,
   byte-compared with native.
+- Go SDK, breaking before the first tag: `Language` and `Stage` are named types
+  (`Modules.Generators`, `Generators`, and `Outputs` are keyed by `Language`),
+  stages `compile` and `generate` are now `compiler` and the generator's
+  language, and `Diagnostic.Message` is `Diagnostic.Stderr`.
+- Go SDK: `Request.ImportPaths` and `Request.SourcePrefix` with the TypeScript
+  validation and argument order; `WithLimits`/`DefaultLimits` with the
+  TypeScript names and defaults; `WithMaxConcurrentJobs`; `Error` gains
+  `ExitCode`, `Limit`, and `Diagnostics` (every stage so far); sentinels
+  `ErrInvalidRequest` and `ErrLimitExceeded`; the C++ generator runs as
+  `capnpc-c++`; paths of 4,092 to 4,096 bytes compile; generators may create
+  4,096 entries (was 4,095); output-budget breaches name the budget instead of
+  surfacing as opaque exit codes; SDK tests skip outside the checkout.
+- Documentation: `docs/sdk-contract.md` defines the shared SDK contract, with
+  the limit defaults pinned in `tests/fixtures/contract/limits.json`; the Go
+  package consumer compares complete digest maps and the compiler-path fixture.
 
 ## capnp-wasm-compiler-host
 
