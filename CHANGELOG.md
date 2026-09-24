@@ -54,6 +54,9 @@ version that ships them.
   serves it; mise verifies the community-mirror download against them), and
   `mise run mirror:zig` stages, verifies, and records checksums for a
   project-owned mirror of the tarballs.
+- Browsers: `mise run browser:install` verifies every Playwright archive against
+  a recorded sha256 before extracting it (Linux and macOS, x64 and arm64);
+  `--print-digests` prints the entries to record after a Playwright bump.
 
 ## capnp-wasm-compiler-host
 
