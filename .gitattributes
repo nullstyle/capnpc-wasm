@@ -1,2 +1,9 @@
+# Normalize line endings: every text file is committed and checked out with LF
+# (the editorconfig rule, now enforced by git), so scripts, the launcher, and
+# text fixtures survive core.autocrlf=true checkouts and Windows contributors.
+* text=auto eol=lf
+# Binary fixtures and modules must never be converted.
+*.wasm binary
+*.bin binary
 # Unified patches contain a required leading space on empty context lines.
 *.patch -whitespace
