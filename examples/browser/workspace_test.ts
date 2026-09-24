@@ -210,10 +210,10 @@ Deno.test("importFiles expands a ZIP in flat mode and keeps it in folder mode", 
 
 Deno.test("unzipArchive guards declared sizes and entry counts before inflating", () => {
   const big = zipSync({ "big.bin": new Uint8Array(limits.bytes + 1) });
-  throws(() => unzipArchive(big), /expands to more than 8.0 MiB/);
+  throws(() => unzipArchive(big), /over 8.0 MiB/);
   const entries: Record<string, Uint8Array> = {};
   for (let i = 0; i < limits.entries + 1; i++) entries[`f${i}`] = bytes("");
-  throws(() => unzipArchive(zipSync(entries)), /more than 128 files/);
+  throws(() => unzipArchive(zipSync(entries)), /over 128 files/);
   throws(
     () => unzipArchive(zipSync({ "../escape.capnp": bytes("") })),
     /not a relative path/,
@@ -234,6 +234,45 @@ Deno.test("unzipArchive guards declared sizes and entry counts before inflating"
     zipSync({ "a.capnp": bytes("a"), "b/c.capnp": bytes("c") }),
   );
   deepStrictEqual([...noTop.files.keys()], ["a.capnp", "b/c.capnp"]);
+});
+
+Deno.test("archives share one budget with the other picked files", async () => {
+  // Each archive is a few KiB on disk but declares 5 MiB, so only the shared
+  // budget, charged before inflating, stops the second one.
+  const half = zipSync({ "half.bin": new Uint8Array(5 * 1024 * 1024) });
+  const alone = await importFiles([pick("a.zip", half)]);
+  ok(alone && alone.files.get("half.bin")!.length === 5 * 1024 * 1024);
+  await rejects(
+    () => importFiles([pick("a.zip", half), pick("b.zip", half)]),
+    /over 8.0 MiB/,
+  );
+  await rejects(
+    () =>
+      importFiles([
+        pick("big.bin", new Uint8Array(4 * 1024 * 1024)),
+        pick("a.zip", half),
+      ]),
+    /over 8.0 MiB/,
+  );
+  const entries: Record<string, Uint8Array> = {};
+  for (let i = 0; i < 100; i++) entries[`e${i}`] = bytes("");
+  const hundred = zipSync(entries);
+  await rejects(
+    () => importFiles([pick("a.zip", hundred), pick("b.zip", hundred)]),
+    /over 128 files/,
+  );
+  const plain = Array.from(
+    { length: 40 },
+    (_, i) => pick(`p${i}.capnp`, bytes("")),
+  );
+  await rejects(
+    () => importFiles([...plain, pick("a.zip", hundred)]),
+    /over 128 files/,
+  );
+  const remaining = { bytes: 10, entries: 2 };
+  const small = unzipArchive(zipSync({ x: bytes("12345") }), remaining);
+  strictEqual(small.files.size, 1);
+  deepStrictEqual(remaining, { bytes: 5, entries: 1 });
 });
 
 Deno.test("archive and unzipArchive round-trip folders and binary bytes", () => {

@@ -125,13 +125,15 @@ export function compileWorkspace(files, entrypoints, standardIncludes) {
 /**
  * Expand a ZIP archive into workspace files. Directory entries and hidden
  * paths are skipped, and one common top-level folder is stripped the way the
- * folder picker strips it. The entry count and the declared uncompressed sizes
- * are checked against the limits before any entry is inflated, so an archive
- * cannot claim more memory than a workspace may hold.
+ * folder picker strips it. Each entry's declared uncompressed size and its
+ * count are charged to `remaining`, the workspace budget left after the other
+ * picked files, before that entry is inflated, so no selection of archives can
+ * claim more memory than one workspace may hold.
  */
-export function unzipArchive(bytes) {
-  let count = 0;
-  let declared = 0;
+export function unzipArchive(
+  bytes,
+  remaining = { bytes: limits.bytes, entries: limits.entries },
+) {
   let hidden = 0;
   let raw;
   try {
@@ -142,15 +144,18 @@ export function unzipArchive(bytes) {
           hidden++;
           return false;
         }
-        if (++count > limits.entries) {
+        remaining.entries -= 1;
+        if (remaining.entries < 0) {
           throw new Error(
-            `The archive has more than ${limits.entries} files.`,
+            `The archive would put the workspace over ${limits.entries} files.`,
           );
         }
-        declared += entry.originalSize;
-        if (declared > limits.bytes) {
+        remaining.bytes -= entry.originalSize;
+        if (remaining.bytes < 0) {
           throw new Error(
-            `The archive expands to more than ${formatBytes(limits.bytes)}.`,
+            `The archive would put the workspace over ${
+              formatBytes(limits.bytes)
+            }.`,
           );
         }
         return true;
@@ -220,6 +225,10 @@ export async function importFiles(selected, directory = false) {
     );
   }
   const files = new Map();
+  // One budget for plain files and every archive entry, charged before an
+  // archive entry is inflated, so many small archives cannot together claim
+  // more memory than one workspace may hold.
+  const remaining = { bytes: limits.bytes, entries: limits.entries };
   let archives = 0;
   const add = (path, bytes) => {
     if (files.has(path)) {
@@ -233,10 +242,14 @@ export async function importFiles(selected, directory = false) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (!directory && /\.zip$/i.test(path)) {
       archives++;
-      const expanded = unzipArchive(bytes);
+      const expanded = unzipArchive(bytes, remaining);
       hidden += expanded.hidden;
       for (const [entry, contents] of expanded.files) add(entry, contents);
-    } else add(path, bytes);
+    } else {
+      remaining.bytes -= bytes.length;
+      remaining.entries -= 1;
+      add(path, bytes);
+    }
   }
   validateFiles(files);
   return { files, hidden, archives };

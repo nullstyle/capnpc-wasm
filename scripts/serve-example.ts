@@ -66,7 +66,10 @@ export async function serveStudio(request: Request): Promise<Response> {
   if (
     path === "/examples/browser/" || path === "/examples/browser/index.html"
   ) {
-    return Response.redirect(new URL("/", request.url));
+    return new Response(null, {
+      status: 302,
+      headers: { ...securityHeaders, location: new URL("/", request.url).href },
+    });
   }
   if (path === "/") path = "/index.html";
   // Dot-prefixed names cover the build's staging directories as well as any

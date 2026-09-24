@@ -9,6 +9,7 @@
 const site = "dist/studio";
 const staging = `${site}/.staging`;
 const previous = `${site}/.previous`;
+const trashPrefix = ".trash-";
 const modules = [
   "capnp.wasm",
   "capnpc-c++.wasm",
@@ -19,19 +20,45 @@ const modules = [
 const sentinel = "__STUDIO_ASSET_VERSION__";
 const encoder = new TextEncoder();
 
-async function remove(path: string) {
-  await Deno.remove(path, { recursive: true }).catch((error) => {
+/** The entry names of a directory, sorted; none when it does not exist. */
+async function entries(directory: string): Promise<string[]> {
+  const names: string[] = [];
+  try {
+    for await (const item of Deno.readDir(directory)) names.push(item.name);
+  } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) throw error;
-  });
+  }
+  return names.sort();
+}
+
+/**
+ * Remove a file or a whole tree. Every directory is listed in full before any
+ * of its entries is deleted: APFS can skip entries when a directory is
+ * unlinked while it is being read, which makes a recursive Deno.remove fail
+ * with ENOTEMPTY and leave the tree half deleted.
+ */
+async function removeTree(path: string) {
+  let info: Deno.FileInfo;
+  try {
+    info = await Deno.lstat(path);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return;
+    throw error;
+  }
+  if (info.isDirectory) {
+    for (const name of await entries(path)) await removeTree(`${path}/${name}`);
+  }
+  await Deno.remove(path);
 }
 
 async function copyTree(source: string, target: string) {
   await Deno.mkdir(target, { recursive: true });
-  for await (const item of Deno.readDir(source)) {
-    if (item.isDirectory) {
-      await copyTree(`${source}/${item.name}`, `${target}/${item.name}`);
-    } else if (item.isFile) {
-      await Deno.copyFile(`${source}/${item.name}`, `${target}/${item.name}`);
+  for (const name of await entries(source)) {
+    const info = await Deno.lstat(`${source}/${name}`);
+    if (info.isDirectory) {
+      await copyTree(`${source}/${name}`, `${target}/${name}`);
+    } else if (info.isFile) {
+      await Deno.copyFile(`${source}/${name}`, `${target}/${name}`);
     }
   }
 }
@@ -45,12 +72,11 @@ async function copyFile(source: string, target: string) {
 
 async function files(directory: string, prefix = ""): Promise<string[]> {
   const found: string[] = [];
-  for await (const item of Deno.readDir(directory)) {
-    if (item.isDirectory) {
-      found.push(
-        ...await files(`${directory}/${item.name}`, `${prefix}${item.name}/`),
-      );
-    } else if (item.isFile) found.push(`${prefix}${item.name}`);
+  for (const name of await entries(directory)) {
+    const info = await Deno.lstat(`${directory}/${name}`);
+    if (info.isDirectory) {
+      found.push(...await files(`${directory}/${name}`, `${prefix}${name}/`));
+    } else if (info.isFile) found.push(`${prefix}${name}`);
   }
   return found.sort();
 }
@@ -164,11 +190,11 @@ async function stageDependencyLicenses(target: string) {
     const version = identity.slice(split + 1);
     const path = `${cache}/npm/registry.npmjs.org/${name}/${version}`;
     let copied = false;
-    for await (const item of Deno.readDir(path)) {
-      if (item.isFile && /^(license|copying)(\.|$)/i.test(item.name)) {
+    for (const item of await entries(path)) {
+      if (/^(license|copying)(\.|$)/i.test(item)) {
         await Deno.copyFile(
-          `${path}/${item.name}`,
-          `${target}/${name.replaceAll("/", "-")}-${version}-${item.name}`,
+          `${path}/${item}`,
+          `${target}/${name.replaceAll("/", "-")}-${version}-${item}`,
         );
         copied = true;
       }
@@ -244,39 +270,73 @@ async function stage(): Promise<string> {
   return stamp;
 }
 
-/** Move the staged site into place, restoring the old one if a move fails. */
+/**
+ * Move the staged site into place: the live entries go to .previous, the
+ * staged entries come in, and the old site is discarded under a .trash name.
+ * A failure while the staged entries move puts the live entries back. The
+ * rename to .trash comes before any deletion, so a failed cleanup can never
+ * leave .previous half emptied, and recover() can trust whatever it finds.
+ */
 async function publish() {
+  // Non-recursive on purpose: a leftover .previous would mean recover() did
+  // not run, and this must fail rather than mix two sites.
   await Deno.mkdir(previous);
+  const live = (await entries(site)).filter((name) => !name.startsWith("."));
   const moved: string[] = [];
-  for await (const item of Deno.readDir(site)) {
-    if (item.name === ".staging" || item.name === ".previous") continue;
-    await Deno.rename(`${site}/${item.name}`, `${previous}/${item.name}`);
-    moved.push(item.name);
+  for (const name of live) {
+    await Deno.rename(`${site}/${name}`, `${previous}/${name}`);
+    moved.push(name);
   }
   try {
-    for await (const item of Deno.readDir(staging)) {
-      await Deno.rename(`${staging}/${item.name}`, `${site}/${item.name}`);
+    for (const name of await entries(staging)) {
+      await Deno.rename(`${staging}/${name}`, `${site}/${name}`);
     }
   } catch (error) {
     for (const name of moved) {
-      await remove(`${site}/${name}`);
+      await removeTree(`${site}/${name}`);
       await Deno.rename(`${previous}/${name}`, `${site}/${name}`);
     }
     throw error;
   }
-  await remove(previous);
-  await remove(staging);
+  const trash = `${site}/${trashPrefix}${crypto.randomUUID().slice(0, 8)}`;
+  await Deno.rename(previous, trash);
+  await removeTree(trash);
+  await removeTree(staging);
+}
+
+/**
+ * A build killed while publish() was moving directories leaves the only copy
+ * of the old site under .previous. Put it back before anything is removed: an
+ * entry of the same name in the site is a half-moved new copy (or, if the
+ * swap had completed, a new site that this run replaces anyway). Trash left
+ * by an interrupted deletion is only removed.
+ */
+async function recover() {
+  const names = await entries(previous);
+  for (const name of names) {
+    await removeTree(`${site}/${name}`);
+    await Deno.rename(`${previous}/${name}`, `${site}/${name}`);
+  }
+  await removeTree(previous);
+  if (names.length) {
+    console.log(
+      "Restored the previous Schema Studio site left by an interrupted build.",
+    );
+  }
+  for (const name of await entries(site)) {
+    if (name.startsWith(trashPrefix)) await removeTree(`${site}/${name}`);
+  }
 }
 
 if (import.meta.main) {
   await Deno.mkdir(site, { recursive: true });
-  await remove(staging);
-  await remove(previous);
+  await recover();
+  await removeTree(staging);
   let stamp: string;
   try {
     stamp = await stage();
   } catch (error) {
-    await remove(staging);
+    await removeTree(staging);
     throw error;
   }
   await publish();

@@ -53,9 +53,12 @@ function notice(message) {
 // Errors stay until dismissed; the region is always rendered so they are
 // announced.
 function alert(message) {
+  const dismiss = $("#alert-dismiss");
+  // Hiding the focused Dismiss button would drop focus to the body.
+  if (!message && document.activeElement === dismiss) $("#generate").focus();
   $("#alert").textContent = message;
   $("#alert-bar").dataset.open = String(Boolean(message));
-  $("#alert-dismiss").hidden = !message;
+  dismiss.hidden = !message;
 }
 function badge(message, tone = "") {
   $("#output-badge").textContent = message;
@@ -196,9 +199,12 @@ function renderActiveFile() {
 
 function showFile(path) {
   if (path === workspace.activeFile) return;
+  // renderFiles() rebuilds the file buttons; keep focus on the chosen one.
+  const refocus = document.activeElement?.closest("#workspace-files") != null;
   saveEditorState();
   workspace = state.selectFile(workspace, path);
   renderActiveFile();
+  if (refocus) $('#workspace-files [aria-current="true"]')?.focus();
 }
 
 function renderFiles() {
@@ -650,6 +656,18 @@ for (const language of languageOrder) {
   };
   tablist.append(tab);
 }
+// Arrowing parks the tab order on the focused tab; once focus leaves the
+// tablist, only the selected tab stays in it (the APG tabs pattern), so
+// Shift+Tab and Tab re-enter on the selection. Only tabindex changes here:
+// this runs during the mousedown of whatever took focus, and replacing DOM
+// inside that control (as renderTabs() does to the Generate label) makes
+// WebKit drop the click.
+tablist.addEventListener("focusout", (event) => {
+  if (tablist.contains(event.relatedTarget)) return;
+  for (const tab of tablist.children) {
+    tab.tabIndex = tab.dataset.language === session.language ? 0 : -1;
+  }
+});
 $("#output-files").onchange = () => {
   selectedOutput = $("#output-files").value;
   renderOutput();
