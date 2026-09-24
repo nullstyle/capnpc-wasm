@@ -34,10 +34,17 @@ export interface FeatureProfile {
 }
 
 /**
- * The engine baseline. Each feature is part of WebAssembly 2.0 except
- * `exceptions` (the standardized try_table/exnref proposal) and
- * `call-indirect-overlong` (the reference-types encoding of call_indirect's
- * table index, accepted by every engine that has reference types).
+ * The engine baseline: the WebAssembly 2.0 feature set except SIMD and the
+ * passive-segment and table half of bulk memory (`bulk-memory-opt` is the
+ * memory.copy/memory.fill subset), plus `call-indirect-overlong` (the
+ * reference-types encoding of call_indirect's table index, accepted by every
+ * engine that has reference types). The C++ class adds reference types and
+ * the standardized try_table/exnref exceptions. It is a supported-engine
+ * baseline, not the minimum the current modules use: no module uses
+ * `mutable-global` and only the C++ modules use `multi-value`, but every
+ * engine that has the rest has both, and the toolchains may start emitting
+ * them. Anything outside the list (tail calls, GC, memory64, wide arithmetic,
+ * SIMD) fails validation and needs a deliberate baseline change.
  */
 const baseline = [
   "floats",
@@ -92,20 +99,29 @@ export function featureFlag(moduleClass: ModuleClass): string {
 }
 
 /**
- * Absolute path prefixes that identify a build host. `/private/` alone would
- * match `capnp/src/private/` inside the remapped Rust paths, so a prefix
- * counts only where a path starts.
+ * Absolute path prefixes that identify a build host: home directories,
+ * temporary directories, and `/src`, the working directory of a Docker build.
+ * `/private/` alone would match `capnp/src/private/` inside the remapped Rust
+ * paths, so a prefix counts only where a path starts.
  */
 const hostPathPattern =
-  /(?<![\w./-])(?:\/(?:Users|home|root|tmp|var\/folders|private\/tmp|private\/var)\/[^\0\s"'`]*|[A-Za-z]:\\(?:Users|home)\\[^\0\s"'`]*)/g;
+  /(?<![\w./-])(?:\/(?:Users|home|root|tmp|src|var\/folders|private\/tmp|private\/var)\/[^\0\s"'`]*|[A-Za-z]:\\(?:Users|home)\\[^\0\s"'`]*)/g;
 
 /**
- * The WASI SDK's own build directory. Two libc++abi assertion messages in the
- * prebuilt sysroot name their source file this way; the strings are part of
- * the SDK release and identical on every host.
+ * The WASI SDK's own build roots. Two libc++abi assertion messages in the
+ * prebuilt sysroot (private_typeinfo.cpp, fallback_malloc.cpp) keep their
+ * `__FILE__`, because the SDK build maps only debug info
+ * (`-fdebug-prefix-map`, cmake/wasi-sdk-sysroot.cmake in ref/wasi-sdk). The
+ * macOS tarball was built on a GitHub macOS runner and the Linux tarball in
+ * Docker with `--workdir /src` (ci/docker-build.sh), so the two strings are
+ * fixed per platform tarball: the same for everyone who builds with that
+ * tarball, different between the tarballs. Modules are therefore byte-identical
+ * across checkouts for a given SDK platform tarball, not across platforms.
  */
-const sdkBuildPathPrefix =
-  "/Users/runner/work/wasi-sdk/wasi-sdk/src/llvm-project/";
+const sdkBuildPathPrefixes = [
+  "/Users/runner/work/wasi-sdk/wasi-sdk/src/llvm-project/",
+  "/src/src/llvm-project/",
+];
 
 interface Sections {
   custom: string[];
@@ -238,7 +254,9 @@ export async function checkModule(
   const text = new TextDecoder("latin1").decode(bytes);
   const found = new Set<string>();
   for (const match of text.matchAll(hostPathPattern)) {
-    if (!match[0].startsWith(sdkBuildPathPrefix)) found.add(match[0]);
+    if (!sdkBuildPathPrefixes.some((prefix) => match[0].startsWith(prefix))) {
+      found.add(match[0]);
+    }
   }
   for (const literal of [options.root, options.home]) {
     if (literal && text.includes(literal)) found.add(literal);

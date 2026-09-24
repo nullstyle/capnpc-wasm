@@ -68,12 +68,14 @@ version that ships them.
   `test:sdk-go-wazero-latest` (drift against newer wazero), `audit:osv`,
   `audit:govulncheck`, and `audit:advisories` (OSV.dev for the runtime pins and
   the Deno lockfiles).
-- Wasm modules: reproducible across checkouts (C++ `-ffile-prefix-map`, Rust
-  `--remap-path-prefix`); the C++ modules ship without the sysroot's DWARF
-  (`capnp.wasm` 3,003,154 to 1,984,855 bytes) and keep their name section;
-  `scripts/check-wasm-artifacts.ts` and `check:wasm-artifacts` (part of `test`)
-  enforce one feature allow-list per module class, the declared target features,
-  no DWARF or build-host paths, and size budgets.
+- Wasm modules: byte-identical from any checkout path for a given WASI SDK
+  platform tarball (C++ `-ffile-prefix-map`, Rust `--remap-path-prefix` and a
+  staged workspace; the sysroot bakes its own build root into two libc++abi
+  strings, so the macOS and Linux tarballs differ); the C++ modules ship without
+  the sysroot's DWARF (`capnp.wasm` 3,004,843 to 1,986,544 bytes) and keep their
+  name section; `scripts/check-wasm-artifacts.ts` and `check:wasm-artifacts`
+  (part of `test`) enforce one feature allow-list per module class, the declared
+  target features, no DWARF or build-host paths, and size budgets.
 - Compiler port: under WASI `main()` always returns its status (no WASI call
   after `proc_exit` on JavaScript hosts), a missing `/` preopen is reported as
   `*** Uncaught exception ***` naming the preopen with exit 1 instead of an

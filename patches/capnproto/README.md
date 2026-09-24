@@ -42,11 +42,15 @@ exclusions: `thread`, `test-helpers`, `filesystem-disk-win32`).
 
 Every translation unit is compiled with `-ffile-prefix-map=<c++/src>/=`, so
 `__FILE__` and source locations read `kj/io.c++`, the form kj already trims
-diagnostics to, and the module bytes do not depend on the checkout path. The
-shipped modules are linked with `-Wl,--strip-debug`: the DWARF that the SDK
-sysroot's prebuilt libc, libc++, and libunwind carry is dropped, and the `name`
-section stays so engine traps remain symbolized. Copies with the DWARF are kept
-under `build/wasm/unstripped/`.
+diagnostics to, and the module bytes do not depend on the checkout path. They do
+depend on the WASI SDK platform tarball: two libc++abi assertion messages in the
+prebuilt sysroot keep the SDK's own build root (`/Users/runner/work/wasi-sdk/…`
+in the macOS tarball, `/src/…` in the Linux one), so a module is byte-identical
+across checkouts that build with the same platform's tarball, not across
+platforms. The shipped modules are linked with `-Wl,--strip-debug`: the DWARF
+that the SDK sysroot's prebuilt libc, libc++, and libunwind carry is dropped,
+and the `name` section stays so engine traps remain symbolized. Copies with the
+DWARF are kept under `build/wasm/unstripped/`.
 
 ## Runtime profile
 
