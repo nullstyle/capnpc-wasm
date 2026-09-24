@@ -17,14 +17,15 @@ var pathSeeds = []string{
 }
 
 // FuzzValidPath checks the workspace path rule against the standard library:
-// validPath accepts exactly the paths fs.ValidPath accepts, minus ".", paths
-// with backslashes or NUL bytes, and paths over 4096 bytes.
+// validPath accepts exactly the paths fs.ValidPath accepts, minus ".", and
+// paths with backslashes or NUL bytes. Length is bounded separately by the
+// pathBytes limit.
 func FuzzValidPath(f *testing.F) {
 	for _, seed := range pathSeeds {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, name string) {
-		want := fs.ValidPath(name) && name != "." && len(name) <= 4096 &&
+		want := fs.ValidPath(name) && name != "." &&
 			utf8.ValidString(name) && !strings.ContainsAny(name, "\\\x00")
 		if got := validPath(name); got != want {
 			t.Fatalf("validPath(%q) = %v, want %v", name, got, want)
@@ -38,10 +39,11 @@ func FuzzGuestPath(f *testing.F) {
 	for _, seed := range pathSeeds {
 		f.Add(seed)
 	}
+	const maximum = 4096
 	f.Fuzz(func(t *testing.T, name string) {
-		got, errno := guestPath(name)
+		got, errno := guestPath(name, maximum)
 		switch {
-		case len(name) > 4096:
+		case len(name) > maximum:
 			if errno != exsys.ENAMETOOLONG || got != "" {
 				t.Fatalf("guestPath(%d bytes) = (%q, %v), want ENAMETOOLONG", len(name), got, errno)
 			}
@@ -71,7 +73,7 @@ func FuzzGuestPath(f *testing.F) {
 				}
 			}
 		}
-		if again, errno := guestPath(got); errno != 0 || again != got {
+		if again, errno := guestPath(got, maximum); errno != 0 || again != got {
 			t.Fatalf("guestPath(%q) = (%q, %v) is not a fixed point", got, again, errno)
 		}
 	})

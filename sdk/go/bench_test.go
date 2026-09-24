@@ -16,7 +16,7 @@ var engines = []capnpcwasm.Engine{capnpcwasm.EngineAuto, capnpcwasm.EngineCompil
 
 // rpcRequest is the largest standard workload: the pinned rpc.capnp and
 // schema.capnp, which import the C++ annotations.
-func rpcRequest(b testing.TB, generators ...string) capnpcwasm.Request {
+func rpcRequest(b testing.TB, generators ...capnpcwasm.Language) capnpcwasm.Request {
 	src := root(b) + "/ref/capnproto/c++/src/capnp/"
 	return capnpcwasm.Request{
 		Files: map[string][]byte{
@@ -82,7 +82,7 @@ func BenchmarkGenerateCpp(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			request := capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []string{"cpp"}}
+			request := capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []capnpcwasm.Language{"cpp"}}
 			b.ReportAllocs()
 			for b.Loop() {
 				if _, err := c.Generate(context.Background(), request); err != nil {
@@ -96,9 +96,9 @@ func BenchmarkGenerateCpp(b *testing.B) {
 // BenchmarkGenerate runs each generator on the compiled fixture workspace,
 // which every generator supports, to compare the engines per generator.
 func BenchmarkGenerate(b *testing.B) {
-	for _, language := range []string{"cpp", "rust", "go", "zig"} {
+	for _, language := range allLanguages {
 		for _, engine := range engines {
-			b.Run(language+"/"+engine.String(), func(b *testing.B) {
+			b.Run(string(language)+"/"+engine.String(), func(b *testing.B) {
 				c := benchCompiler(b, engine)
 				workspace := fixture(b)
 				workspace.Generators = nil
@@ -106,7 +106,7 @@ func BenchmarkGenerate(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				request := capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []string{language}}
+				request := capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []capnpcwasm.Language{language}}
 				b.ReportAllocs()
 				for b.Loop() {
 					if _, err := c.Generate(context.Background(), request); err != nil {
@@ -125,7 +125,7 @@ func BenchmarkCompileFixture(b *testing.B) {
 		b.Run(engine.String(), func(b *testing.B) {
 			c := benchCompiler(b, engine)
 			request := fixture(b)
-			request.Generators = []string{"cpp"}
+			request.Generators = []capnpcwasm.Language{"cpp"}
 			b.ReportAllocs()
 			for b.Loop() {
 				if _, err := c.Compile(context.Background(), request); err != nil {

@@ -34,13 +34,13 @@ func TestGenerate(t *testing.T) {
 		// Generate call on this instance proves that it does not run the frontend.
 		modules := loadModules(t)
 		modules.Compiler = wasmBytes(t, noopCommand)
-		modules.Generators = map[string][]byte{"rust": modules.Generators["rust"]}
+		modules.Generators = map[capnpcwasm.Language][]byte{"rust": modules.Generators["rust"]}
 		c, err := capnpcwasm.New(t.Context(), modules, testOptions()...)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer c.Close(context.Background())
-		got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []string{"rust"}})
+		got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []capnpcwasm.Language{"rust"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -50,7 +50,7 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("compile once and generate target sets", func(t *testing.T) {
-		for _, languages := range [][]string{{"cpp"}, {"rust", "go"}, {"zig"}, {"cpp", "rust", "go", "zig"}} {
+		for _, languages := range [][]capnpcwasm.Language{{"cpp"}, {"rust", "go"}, {"zig"}, {"cpp", "rust", "go", "zig"}} {
 			got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: languages})
 			if err != nil {
 				t.Fatal(err)
@@ -68,7 +68,7 @@ func TestGenerate(t *testing.T) {
 
 	t.Run("caller ownership and concurrent jobs", func(t *testing.T) {
 		input := bytes.Clone(compiled.Request)
-		got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: input, Generators: []string{"rust"}})
+		got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: input, Generators: []capnpcwasm.Language{"rust"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -81,9 +81,9 @@ func TestGenerate(t *testing.T) {
 		}
 		got.Outputs["rust"]["person_capnp.rs"][0] ^= 1
 		var workers sync.WaitGroup
-		for _, language := range []string{"cpp", "rust", "go", "zig"} {
+		for _, language := range allLanguages {
 			workers.Go(func() {
-				result, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []string{language}})
+				result, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []capnpcwasm.Language{language}})
 				if err != nil {
 					t.Error(err)
 					return
@@ -97,11 +97,11 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("malformed requests preserve guest diagnostics", func(t *testing.T) {
-		for _, language := range []string{"cpp", "rust", "go", "zig"} {
+		for _, language := range allLanguages {
 			for _, input := range [][]byte{{0xff, 0xff, 0xff, 0xff}, compiled.Request[:len(compiled.Request)-1]} {
-				got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: input, Generators: []string{language}})
+				got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: input, Generators: []capnpcwasm.Language{language}})
 				var failure *capnpcwasm.Error
-				if !errors.As(err, &failure) || failure.Stage != "generate" || failure.Language != language || failure.Stderr == "" {
+				if !errors.As(err, &failure) || failure.Stage != capnpcwasm.Stage(language) || failure.Language != language || failure.Stderr == "" {
 					t.Fatalf("missing %s guest diagnostic: %v", language, err)
 				}
 				if !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
@@ -119,15 +119,15 @@ func TestGenerate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: request.Request, Generators: []string{"cpp", "rust", "zig", "go"}})
+		got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: request.Request, Generators: []capnpcwasm.Language{"cpp", "rust", "zig", "go"}})
 		var failure *capnpcwasm.Error
-		if !errors.As(err, &failure) || failure.Stage != "generate" || failure.Language != "go" || failure.Stderr == "" {
+		if !errors.As(err, &failure) || failure.Stage != "go" || failure.Language != "go" || failure.Stderr == "" {
 			t.Fatalf("missing later generator diagnostic: %v", err)
 		}
 		if !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
 			t.Fatal("earlier generator outputs escaped")
 		}
-		got, err = generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []string{"go"}})
+		got, err = generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []capnpcwasm.Language{"go"}})
 		if err != nil || !reflect.DeepEqual(got.Outputs["go"], combined.Outputs["go"]) {
 			t.Fatalf("failed job contaminated next job: %v", err)
 		}
@@ -135,11 +135,11 @@ func TestGenerate(t *testing.T) {
 
 	t.Run("validation", func(t *testing.T) {
 		for _, request := range []capnpcwasm.GenerationRequest{
-			{Generators: []string{"rust"}},
+			{Generators: []capnpcwasm.Language{"rust"}},
 			{Request: compiled.Request},
-			{Request: compiled.Request, Generators: []string{"python"}},
-			{Request: compiled.Request, Generators: []string{"go", "go"}},
-			{Request: make([]byte, (64<<20)+1), Generators: []string{"rust"}},
+			{Request: compiled.Request, Generators: []capnpcwasm.Language{"python"}},
+			{Request: compiled.Request, Generators: []capnpcwasm.Language{"go", "go"}},
+			{Request: make([]byte, (64<<20)+1), Generators: []capnpcwasm.Language{"rust"}},
 		} {
 			assertGenerateValidation(t, generator, request)
 		}
@@ -148,7 +148,7 @@ func TestGenerate(t *testing.T) {
 	t.Run("cancelled request", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		got, err := generator.Generate(ctx, capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []string{"rust"}})
+		got, err := generator.Generate(ctx, capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: []capnpcwasm.Language{"rust"}})
 		if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
 			t.Fatalf("cancellation: %+v, %v", got, err)
 		}
@@ -159,7 +159,7 @@ func assertGenerateValidation(t *testing.T, c *capnpcwasm.Compiler, request capn
 	t.Helper()
 	got, err := c.Generate(t.Context(), request)
 	var failure *capnpcwasm.Error
-	if !errors.As(err, &failure) || failure.Stage != "validate" {
+	if !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageValidate || !errors.Is(err, capnpcwasm.ErrInvalidRequest) {
 		t.Fatalf("expected validation error, got %v", err)
 	}
 	if !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
@@ -173,33 +173,30 @@ func TestGenerateUnavailableModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close(context.Background())
-	assertGenerateValidation(t, c, capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []string{"rust"}})
+	assertGenerateValidation(t, c, capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []capnpcwasm.Language{"rust"}})
 }
 
 func TestGeneratePreservesSuccessfulDiagnostics(t *testing.T) {
-	// Writes 'x' to stderr through WASI fd_write, then returns normally.
-	stderrCommand := wasmBytes(t, "0061736d01000000010c0260047f7f7f7f017f60000002230116776173695f736e617073686f745f70726576696577310866645f77726974650000030201010503010001071302066d656d6f72790200065f737461727400010a0f010d00410241004101410c10001a0b0b0f010041000b09080000000100000078")
 	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{
-		Compiler: wasmBytes(t, noopCommand), Generators: map[string][]byte{"rust": stderrCommand},
+		Compiler: wasmBytes(t, noopCommand), Generators: map[capnpcwasm.Language][]byte{"rust": wasmBytes(t, stderrCommand)},
 	}, testOptions()...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close(context.Background())
-	got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []string{"rust"}})
+	got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []capnpcwasm.Language{"rust"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []capnpcwasm.Diagnostic{{Stage: "generate", Language: "rust", Message: "x"}}
+	want := []capnpcwasm.Diagnostic{{Stage: "rust", Language: "rust", Stderr: "x"}}
 	if !reflect.DeepEqual(got.Diagnostics, want) {
 		t.Fatalf("successful diagnostic lost: %+v", got.Diagnostics)
 	}
 }
 
 func TestGenerateCancellationDuringGuestExecution(t *testing.T) {
-	loop := wasmBytes(t, "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a0901070003400c000b0b")
 	c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{
-		Compiler: wasmBytes(t, noopCommand), Generators: map[string][]byte{"rust": loop},
+		Compiler: wasmBytes(t, noopCommand), Generators: map[capnpcwasm.Language][]byte{"rust": wasmBytes(t, loopCommand)},
 	}, testOptions()...)
 	if err != nil {
 		t.Fatal(err)
@@ -207,9 +204,9 @@ func TestGenerateCancellationDuringGuestExecution(t *testing.T) {
 	defer c.Close(context.Background())
 	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
 	defer cancel()
-	got, err := c.Generate(ctx, capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []string{"rust"}})
+	got, err := c.Generate(ctx, capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []capnpcwasm.Language{"rust"}})
 	var failure *capnpcwasm.Error
-	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &failure) || failure.Stage != "generate" || failure.Language != "rust" || !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &failure) || failure.Stage != "rust" || failure.Language != "rust" || !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
 		t.Fatalf("cancellation: %+v, %v", got, err)
 	}
 }

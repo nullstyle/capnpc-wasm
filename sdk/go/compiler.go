@@ -1,5 +1,8 @@
 // Package capnpcwasm compiles schema workspaces and generates source entirely in
 // memory using the project's WASI command modules and the wazero runtime.
+//
+// The request fields, resource limits, stage names, and error model are shared
+// with the TypeScript SDK; docs/sdk-contract.md in the repository defines them.
 package capnpcwasm
 
 import (
@@ -23,18 +26,134 @@ import (
 	"github.com/tetratelabs/wazero/sys"
 )
 
-const maxBytes = 64 << 20
-const maxFiles = 4096
+// Language names a generator: the key in Modules.Generators, the entries of a
+// request's Generators, the key of Outputs, and the Stage of a generator's
+// diagnostics and errors. The set may grow in later releases; treat unknown
+// values as data rather than exhausting them in a switch.
+type Language string
 
-// ErrClosed reports a call on a closed Compiler, or a job that Close
-// terminated. It is wrapped in *Error; test for it with errors.Is.
-var ErrClosed = errors.New("compiler is closed")
+const (
+	LanguageCpp  Language = "cpp"
+	LanguageRust Language = "rust"
+	LanguageGo   Language = "go"
+	LanguageZig  Language = "zig"
+)
 
-// Modules contains the built compiler and the desired generators. Generator
-// keys are "cpp", "rust", "go", or "zig". No modules are downloaded by the SDK.
+// Stage identifies the step that produced a Diagnostic or an Error. Guest
+// stages are StageCompiler and, for a generator, Stage(language). The
+// remaining stages never run a guest: StageValidate rejects caller input, and
+// StageModules reports a module New could not compile.
+type Stage string
+
+const (
+	StageValidate Stage = "validate"
+	StageModules  Stage = "modules"
+	StageCompiler Stage = "compiler"
+)
+
+// Sentinel errors, matched through errors.Is on the *Error a call returns.
+var (
+	// ErrClosed reports a call on a closed Compiler, or a job that Close
+	// terminated.
+	ErrClosed = errors.New("compiler is closed")
+	// ErrInvalidRequest reports caller input that is rejected before any guest
+	// starts: request fields, options passed to New, and module bytes that are
+	// empty, unknown, or not WASI commands.
+	ErrInvalidRequest = errors.New("invalid request")
+	// ErrLimitExceeded reports a budget from Limits that was exceeded. The
+	// Error's Limit field names the budget. A budget exceeded by caller input
+	// before any guest starts also matches ErrInvalidRequest; a budget a guest
+	// exceeds while it runs matches ErrLimitExceeded only.
+	ErrLimitExceeded = errors.New("resource limit exceeded")
+)
+
+// Limits are the per-job host budgets and the per-instance guest memory
+// ceiling, with the names and defaults of the TypeScript SDK's ResourceLimits.
+// Error.Limit names a field in lower camel case: "workspaceBytes" for
+// WorkspaceBytes. Start from DefaultLimits and change the fields to bound; a
+// zero field disallows the resource, except MemoryPages, which must be between
+// 1 and 65536.
+type Limits struct {
+	// MemoryPages bounds each guest instance's linear memory, in 64 KiB pages.
+	MemoryPages int
+	// WorkspaceBytes bounds the combined contents of Files and IncludeFiles.
+	WorkspaceBytes int
+	// WorkspaceEntries bounds the combined files and implied directories of
+	// Files and IncludeFiles, excluding the mount roots, and separately the
+	// number of Entrypoints and of ImportPaths.
+	WorkspaceEntries int
+	// PathBytes bounds the UTF-8 length of every workspace, entrypoint, import
+	// root, source prefix, and generated output path.
+	PathBytes int
+	// RequestBytes bounds the compiler's CodeGeneratorRequest output and a
+	// request supplied to Generate.
+	RequestBytes int
+	// OutputBytes bounds the file contents each generator retains.
+	OutputBytes int
+	// OutputEntries bounds the files and directories each generator creates
+	// over its lifetime; removing an entry does not refund it.
+	OutputEntries int
+	// StdoutBytes bounds captured stdout per command; the compiler's stdout is
+	// also bounded by RequestBytes.
+	StdoutBytes int
+	// StderrBytes bounds captured stderr per command.
+	StderrBytes int
+}
+
+// DefaultLimits returns the limits a Compiler uses without WithLimits. The
+// values are recorded in tests/fixtures/contract/limits.json, which both SDKs
+// assert.
+func DefaultLimits() Limits {
+	return Limits{
+		MemoryPages:      4096,
+		WorkspaceBytes:   64 << 20,
+		WorkspaceEntries: 4096,
+		PathBytes:        4096,
+		RequestBytes:     64 << 20,
+		OutputBytes:      64 << 20,
+		OutputEntries:    4096,
+		StdoutBytes:      64 << 20,
+		StderrBytes:      1 << 20,
+	}
+}
+
+// limitEntry pairs a limit's contract name with its value.
+type limitEntry struct {
+	name  string
+	value int
+}
+
+func (l Limits) entries() []limitEntry {
+	return []limitEntry{
+		{"memoryPages", l.MemoryPages},
+		{"workspaceBytes", l.WorkspaceBytes},
+		{"workspaceEntries", l.WorkspaceEntries},
+		{"pathBytes", l.PathBytes},
+		{"requestBytes", l.RequestBytes},
+		{"outputBytes", l.OutputBytes},
+		{"outputEntries", l.OutputEntries},
+		{"stdoutBytes", l.StdoutBytes},
+		{"stderrBytes", l.StderrBytes},
+	}
+}
+
+func (l Limits) validate() error {
+	for _, entry := range l.entries() {
+		if entry.value < 0 {
+			return invalid("invalid resource limit: " + entry.name)
+		}
+	}
+	if l.MemoryPages < 1 || l.MemoryPages > 65536 {
+		return invalid("memoryPages must be between 1 and 65536")
+	}
+	return nil
+}
+
+// Modules contains the built compiler and the desired generators. No modules
+// are downloaded by the SDK.
 type Modules struct {
 	Compiler   []byte
-	Generators map[string][]byte
+	Generators map[Language][]byte
 }
 
 // Request is a schema workspace. Paths are canonical relative POSIX paths.
@@ -45,8 +164,16 @@ type Modules struct {
 type Request struct {
 	Files        map[string][]byte
 	IncludeFiles map[string][]byte
+	// ImportPaths lists directories within Files, searched in order for
+	// absolute imports before IncludeFiles. An empty list adds no roots; the
+	// element "" names the /src root itself. Every other entry must be a
+	// directory implied by a path in Files.
+	ImportPaths []string
+	// SourcePrefix names a directory within Files to strip from requested
+	// source names; "" (the default) keeps names relative to /src.
+	SourcePrefix string
 	Entrypoints  []string
-	Generators   []string
+	Generators   []Language
 }
 
 // GenerationRequest runs generators on an existing standard unpacked
@@ -54,53 +181,128 @@ type Request struct {
 // byte slice or generator list while Generate is running.
 type GenerationRequest struct {
 	Request    []byte
-	Generators []string
+	Generators []Language
 }
 
 // Diagnostic preserves a command's stderr without interpreting upstream syntax.
+// Stage is StageCompiler or the generator's language, which Language repeats.
 type Diagnostic struct {
-	Stage    string
-	Language string
-	Message  string
+	Stage    Stage
+	Language Language
+	Stderr   string
 }
 
 // Result is published only after every requested stage succeeds. Request is an
 // unpacked CodeGeneratorRequest. Outputs groups relative paths by language.
+// Diagnostics holds every stage's stderr in execution order.
 type Result struct {
 	Request     []byte
-	Outputs     map[string]map[string][]byte
+	Outputs     map[Language]map[string][]byte
 	Diagnostics []Diagnostic
 }
 
 // GenerationResult is published only after every requested generator succeeds.
 // Outputs groups relative paths by language. All maps and bytes are caller-owned.
 type GenerationResult struct {
-	Outputs     map[string]map[string][]byte
+	Outputs     map[Language]map[string][]byte
 	Diagnostics []Diagnostic
 }
 
-// Error identifies a failed stage and preserves its stderr and underlying error.
-// On any failure Compile and Generate return zero results, so no partial files
-// escape.
+// Error is the error type every call returns. On any failure Compile and
+// Generate return zero results, so no partial files escape. Use errors.Is
+// with ErrInvalidRequest, ErrLimitExceeded, ErrClosed, context.Canceled, and
+// context.DeadlineExceeded, and errors.As to reach the fields.
 type Error struct {
-	Stage    string
-	Language string
-	Stderr   string
-	Err      error
+	// Stage is the step that failed.
+	Stage Stage
+	// Language is the generator when Stage is a generator stage, or the
+	// generator whose module New rejected; otherwise it is empty.
+	Language Language
+	// ExitCode is the failing guest's nonzero exit status. It is 0 for every
+	// other failure: a trap, an exceeded limit, cancellation, rejected input,
+	// or a command that exited 0 without honoring its contract.
+	ExitCode int
+	// Limit names the exceeded budget from Limits, or is empty.
+	Limit string
+	// Diagnostics holds every stage's stderr so far in execution order,
+	// including the failing stage's, exactly as a Result would have.
+	Diagnostics []Diagnostic
+	// Stderr is the failing stage's stderr, when it wrote any.
+	Stderr string
+	// Err is the underlying error; errors.Is on the *Error reaches it.
+	Err error
 }
 
 func (e *Error) Error() string {
-	stage := e.Stage
+	stage := string(e.Stage)
 	if e.Language != "" {
-		stage += " (" + e.Language + ")"
+		if Stage(e.Language) == e.Stage {
+			stage = string(e.Language) + " generator"
+		} else {
+			stage += " (" + string(e.Language) + ")"
+		}
 	}
+	message := fmt.Sprintf("capnpc-wasm %s: %v", stage, e.Err)
 	if e.Stderr != "" {
-		return fmt.Sprintf("capnpc-wasm %s: %v: %s", stage, e.Err, strings.TrimSpace(e.Stderr))
+		message += ": " + strings.TrimSpace(e.Stderr)
 	}
-	return fmt.Sprintf("capnpc-wasm %s: %v", stage, e.Err)
+	return message
 }
 
 func (e *Error) Unwrap() error { return e.Err }
+
+// failure builds the Error for a stage from its underlying error, filling
+// ExitCode and Limit from the error's classification.
+func failure(stage Stage, language Language, stderr string, diagnostics []Diagnostic, err error) *Error {
+	e := &Error{Stage: stage, Language: language, Stderr: stderr, Diagnostics: diagnostics, Err: err}
+	var exit exitStatus
+	if errors.As(err, &exit) {
+		e.ExitCode = int(exit)
+	}
+	var limit *limitError
+	if errors.As(err, &limit) {
+		e.Limit = limit.limit
+	}
+	return e
+}
+
+// invalidError is caller input rejected before any guest starts.
+type invalidError string
+
+func (e invalidError) Error() string { return string(e) }
+
+func (e invalidError) Is(target error) bool { return target == ErrInvalidRequest }
+
+func invalid(message string) error { return invalidError(message) }
+
+// limitError is an exceeded budget. Budgets exceeded by caller input before
+// any guest starts are also invalid requests.
+type limitError struct {
+	limit   string
+	message string
+	invalid bool
+}
+
+func (e *limitError) Error() string { return e.message }
+
+func (e *limitError) Is(target error) bool {
+	return target == ErrLimitExceeded || (e.invalid && target == ErrInvalidRequest)
+}
+
+// inputExceeds reports caller input over a budget: "<subject> exceeds <limit> limit".
+func inputExceeds(subject, limit string) error {
+	return &limitError{limit: limit, message: subject + " exceeds " + limit + " limit", invalid: true}
+}
+
+// guestExceeded reports a budget a running guest exceeded.
+func guestExceeded(limit string) error {
+	return &limitError{limit: limit, message: limit + " resource limit exceeded"}
+}
+
+// exitStatus is a guest's nonzero exit status.
+type exitStatus int
+
+func (e exitStatus) Error() string { return fmt.Sprintf("exited with status %d", int(e)) }
 
 // Compiler owns reusable compiled Wasm modules. Compile and Generate support
 // concurrent calls; each call and generator receives fresh memory, stdio and
@@ -111,7 +313,11 @@ func (e *Error) Unwrap() error { return e.Err }
 type Compiler struct {
 	runtimes   []wazero.Runtime
 	compiler   command
-	generators map[string]command
+	generators map[Language]command
+	limits     Limits
+	// slots bounds the jobs running guests when WithMaxConcurrentJobs is set;
+	// a job holds one slot from admission until it returns.
+	slots chan struct{}
 
 	// mu guards the fields below. It is held only for bookkeeping, never while
 	// a guest runs, so a pending Close cannot block new callers.
@@ -144,24 +350,27 @@ type job struct {
 // interrupted.
 func New(ctx context.Context, modules Modules, opts ...Option) (*Compiler, error) {
 	if len(modules.Compiler) == 0 {
-		return nil, &Error{Stage: "modules", Err: errors.New("compiler module is empty")}
+		return nil, &Error{Stage: StageModules, Err: invalid("compiler module is empty")}
 	}
 	for language, wasm := range modules.Generators {
 		if !supported(language) || len(wasm) == 0 {
-			return nil, &Error{Stage: "modules", Language: language, Err: errors.New("unknown generator or empty module")}
+			return nil, &Error{Stage: StageModules, Language: language, Err: invalid("unknown generator or empty module")}
 		}
 	}
 	settings, err := resolve(opts)
 	if err != nil {
-		return nil, &Error{Stage: "validate", Err: err}
+		return nil, &Error{Stage: StageValidate, Err: err}
 	}
 	if _, err := mount(wazero.NewFSConfig(), nil, "/"); err != nil {
-		return nil, &Error{Stage: "modules", Err: err}
+		return nil, &Error{Stage: StageModules, Err: err}
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, &Error{Stage: "modules", Err: err}
+		return nil, &Error{Stage: StageModules, Err: err}
 	}
-	c := &Compiler{generators: map[string]command{}, jobs: map[*job]struct{}{}, idle: make(chan struct{})}
+	c := &Compiler{generators: map[Language]command{}, limits: settings.limits, jobs: map[*job]struct{}{}, idle: make(chan struct{})}
+	if settings.maxJobs > 0 {
+		c.slots = make(chan struct{}, settings.maxJobs)
+	}
 	ok := false
 	defer func() {
 		if !ok {
@@ -170,7 +379,7 @@ func New(ctx context.Context, modules Modules, opts ...Option) (*Compiler, error
 	}()
 
 	type unit struct {
-		language string
+		language Language
 		wasm     []byte
 		runtime  wazero.Runtime
 		module   wazero.CompiledModule
@@ -184,11 +393,11 @@ func New(ctx context.Context, modules Modules, opts ...Option) (*Compiler, error
 	for _, u := range units {
 		engine := settings.engineFor(u.language)
 		if runtimes[engine] == nil {
-			r := wazero.NewRuntimeWithConfig(ctx, runtimeConfig(engine, settings.cache))
+			r := wazero.NewRuntimeWithConfig(ctx, runtimeConfig(engine, settings.cache, settings.limits.MemoryPages))
 			c.runtimes = append(c.runtimes, r)
 			runtimes[engine] = r
 			if _, err := wasi_snapshot_preview1.Instantiate(ctx, r); err != nil {
-				return nil, &Error{Stage: "modules", Err: err}
+				return nil, &Error{Stage: StageModules, Err: err}
 			}
 		}
 		u.runtime = runtimes[engine]
@@ -202,11 +411,11 @@ func New(ctx context.Context, modules Modules, opts ...Option) (*Compiler, error
 	}
 	compilations.Wait()
 	if err := ctx.Err(); err != nil {
-		return nil, &Error{Stage: "modules", Err: err}
+		return nil, &Error{Stage: StageModules, Err: err}
 	}
 	for _, u := range units {
 		if u.err != nil {
-			return nil, &Error{Stage: "modules", Language: u.language, Err: u.err}
+			return nil, &Error{Stage: StageModules, Language: u.language, Err: u.err}
 		}
 		if u.language == "" {
 			c.compiler = command{runtime: u.runtime, module: u.module}
@@ -218,7 +427,7 @@ func New(ctx context.Context, modules Modules, opts ...Option) (*Compiler, error
 	return c, nil
 }
 
-func runtimeConfig(engine Engine, cache wazero.CompilationCache) wazero.RuntimeConfig {
+func runtimeConfig(engine Engine, cache wazero.CompilationCache, memoryPages int) wazero.RuntimeConfig {
 	// NewRuntimeConfig selects the compiler where the platform supports it and
 	// the interpreter elsewhere; unlike NewRuntimeConfigCompiler it never panics.
 	config := wazero.NewRuntimeConfig()
@@ -227,7 +436,7 @@ func runtimeConfig(engine Engine, cache wazero.CompilationCache) wazero.RuntimeC
 	}
 	config = config.
 		WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling).
-		WithMemoryLimitPages(4096).
+		WithMemoryLimitPages(uint32(memoryPages)).
 		WithCloseOnContextDone(true).
 		// The C++ modules carry about 1 MB of sysroot DWARF that wazero would
 		// otherwise walk on every guest exit to decorate the exit error.
@@ -238,14 +447,24 @@ func runtimeConfig(engine Engine, cache wazero.CompilationCache) wazero.RuntimeC
 	return config
 }
 
+// moduleError is a module the engine rejected or that is not a WASI command;
+// both are invalid caller input.
+type moduleError struct{ err error }
+
+func (e *moduleError) Error() string { return e.err.Error() }
+
+func (e *moduleError) Unwrap() error { return e.err }
+
+func (e *moduleError) Is(target error) bool { return target == ErrInvalidRequest }
+
 func compileCommand(ctx context.Context, runtime wazero.Runtime, wasm []byte) (wazero.CompiledModule, error) {
 	module, err := runtime.CompileModule(ctx, wasm)
 	if err != nil {
-		return nil, err
+		return nil, &moduleError{fmt.Errorf("the engine rejected the Wasm module: %w", err)}
 	}
 	if err := validateCommand(module); err != nil {
 		_ = module.Close(ctx)
-		return nil, err
+		return nil, &moduleError{err}
 	}
 	return module, nil
 }
@@ -305,19 +524,25 @@ func (c *Compiler) closeRuntimes() error {
 	return c.releaseErr
 }
 
-// begin registers a job. The returned context ends with the caller's context
-// or when Close terminates the job.
+// begin registers a job and, when jobs are bounded, waits for a slot. The
+// returned context ends with the caller's context or when Close terminates
+// the job, including while it waits.
 func (c *Compiler) begin(ctx context.Context) (context.Context, func(), error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.closed {
+		c.mu.Unlock()
 		return nil, nil, ErrClosed
 	}
 	ctx, cancel := context.WithCancelCause(ctx)
 	j := &job{cancel: cancel}
 	c.jobs[j] = struct{}{}
-	return ctx, func() {
+	c.mu.Unlock()
+	admitted := false
+	done := func() {
 		cancel(nil)
+		if admitted {
+			<-c.slots
+		}
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		delete(c.jobs, j)
@@ -327,7 +552,18 @@ func (c *Compiler) begin(ctx context.Context) (context.Context, func(), error) {
 			// waiting, so the last job releases the runtimes.
 			go func() { _ = c.closeRuntimes() }()
 		}
-	}, nil
+	}
+	if c.slots != nil {
+		select {
+		case c.slots <- struct{}{}:
+			admitted = true
+		case <-ctx.Done():
+			err := jobErr(ctx)
+			done()
+			return nil, nil, err
+		}
+	}
+	return ctx, done, nil
 }
 
 // Compile compiles a workspace and runs the selected generators in order.
@@ -335,22 +571,23 @@ func (c *Compiler) begin(ctx context.Context) (context.Context, func(), error) {
 func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error) {
 	ctx, done, err := c.begin(ctx)
 	if err != nil {
-		return Result{}, &Error{Stage: "validate", Err: err}
+		return Result{}, &Error{Stage: StageValidate, Err: err}
 	}
 	defer done()
 	if err := jobErr(ctx); err != nil {
-		return Result{}, &Error{Stage: "validate", Err: err}
+		return Result{}, &Error{Stage: StageValidate, Err: err}
 	}
 	if err := c.validate(request); err != nil {
-		return Result{}, &Error{Stage: "validate", Err: err}
+		return Result{}, failure(StageValidate, "", "", nil, err)
 	}
-	source := newMemoryFS(request.Files, true)
-	include := newMemoryFS(request.IncludeFiles, true)
-	root := newMemoryFS(nil, false)
+	source := newMemoryFS(request.Files, true, c.limits)
+	include := newMemoryFS(request.IncludeFiles, true, c.limits)
+	root := newMemoryFS(nil, false, c.limits)
 	root.Mkdir("src", 0755)
 	root.Mkdir("include", 0755)
-	// Some libc openat calls start from the root descriptor instead of the
-	// longest matching preopen. Mirror the same read-only nodes there too.
+	// The compiler opens /src/<path> and /include/<path> through the root
+	// descriptor rather than the longest matching preopen. Mirror the same
+	// read-only nodes there too.
 	for name, node := range source.nodes {
 		if name != "." {
 			root.nodes["src/"+name] = node
@@ -370,29 +607,46 @@ func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error)
 		fs, err = mount(fs, include, "/include")
 	}
 	if err != nil {
-		return Result{}, &Error{Stage: "compile", Err: err}
+		return Result{}, &Error{Stage: StageCompiler, Err: err}
 	}
-	args := []string{"capnp", "compile", "--no-standard-import", "-I/include", "--src-prefix=/src", "-o-"}
+	args := []string{"capnp", "compile", "--no-standard-import"}
+	for _, root := range request.ImportPaths {
+		if root == "" {
+			args = append(args, "-I/src")
+		} else {
+			args = append(args, "-I/src/"+root)
+		}
+	}
+	args = append(args, "-I/include", "--src-prefix=/src")
+	if request.SourcePrefix != "" {
+		args = append(args, "--src-prefix=/src/"+request.SourcePrefix)
+	}
+	args = append(args, "-o-")
 	for _, entry := range request.Entrypoints {
 		args = append(args, "/src/"+entry)
 	}
-	binary, stderr, err := c.run(ctx, c.compiler, fs, args, nil)
+	// The compiler's stdout is the request, so the smaller of the two budgets
+	// bounds it and names the failure.
+	stdoutBytes, stdoutLimit := c.limits.StdoutBytes, "stdoutBytes"
+	if c.limits.RequestBytes < c.limits.StdoutBytes {
+		stdoutBytes, stdoutLimit = c.limits.RequestBytes, "requestBytes"
+	}
+	binary, stderr, err := c.run(ctx, c.compiler, fs, nil, args, nil, stdoutBytes, stdoutLimit)
+	var diagnostics []Diagnostic
+	if stderr != "" {
+		diagnostics = append(diagnostics, Diagnostic{Stage: StageCompiler, Stderr: stderr})
+	}
 	if err == nil && len(binary) == 0 {
 		err = errors.New("compiler emitted an empty CodeGeneratorRequest")
 	}
 	if err != nil {
-		return Result{}, &Error{Stage: "compile", Stderr: stderr, Err: err}
+		return Result{}, failure(StageCompiler, "", stderr, diagnostics, err)
 	}
-	generated, err := c.runGenerators(ctx, binary, request.Generators)
+	generated, err := c.runGenerators(ctx, binary, request.Generators, diagnostics)
 	if err != nil {
 		return Result{}, err
 	}
-	result := Result{Request: binary, Outputs: generated.Outputs}
-	if stderr != "" {
-		result.Diagnostics = append(result.Diagnostics, Diagnostic{Stage: "compile", Message: stderr})
-	}
-	result.Diagnostics = append(result.Diagnostics, generated.Diagnostics...)
-	return result, nil
+	return Result{Request: binary, Outputs: generated.Outputs, Diagnostics: generated.Diagnostics}, nil
 }
 
 // Generate runs the selected generators on an existing unpacked
@@ -402,45 +656,68 @@ func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error)
 func (c *Compiler) Generate(ctx context.Context, request GenerationRequest) (GenerationResult, error) {
 	ctx, done, err := c.begin(ctx)
 	if err != nil {
-		return GenerationResult{}, &Error{Stage: "validate", Err: err}
+		return GenerationResult{}, &Error{Stage: StageValidate, Err: err}
 	}
 	defer done()
 	if err := jobErr(ctx); err != nil {
-		return GenerationResult{}, &Error{Stage: "validate", Err: err}
+		return GenerationResult{}, &Error{Stage: StageValidate, Err: err}
 	}
-	if len(request.Request) == 0 || len(request.Request) > maxBytes {
-		return GenerationResult{}, &Error{Stage: "validate", Err: errors.New("CodeGeneratorRequest must contain between 1 byte and 64 MiB")}
+	if err := c.validateGenerate(request); err != nil {
+		return GenerationResult{}, failure(StageValidate, "", "", nil, err)
 	}
-	if len(request.Generators) == 0 {
-		return GenerationResult{}, &Error{Stage: "validate", Err: errors.New("at least one generator is required")}
-	}
-	if err := c.validateGenerators(request.Generators); err != nil {
-		return GenerationResult{}, &Error{Stage: "validate", Err: err}
-	}
-	return c.runGenerators(ctx, bytes.Clone(request.Request), request.Generators)
+	return c.runGenerators(ctx, bytes.Clone(request.Request), request.Generators, nil)
 }
 
-func (c *Compiler) runGenerators(ctx context.Context, binary []byte, languages []string) (GenerationResult, error) {
-	result := GenerationResult{Outputs: map[string]map[string][]byte{}}
+func (c *Compiler) validateGenerate(request GenerationRequest) error {
+	if err := c.validateGenerators(request.Generators); err != nil {
+		return err
+	}
+	if len(request.Generators) == 0 {
+		return invalid("at least one generator is required")
+	}
+	if len(request.Request) == 0 {
+		return invalid("request must contain unpacked CodeGeneratorRequest bytes")
+	}
+	if len(request.Request) > c.limits.RequestBytes {
+		return inputExceeds("request", "requestBytes")
+	}
+	return nil
+}
+
+// runGenerators runs each generator in order, appending to the diagnostics
+// collected by earlier stages. A failure carries every diagnostic so far.
+func (c *Compiler) runGenerators(ctx context.Context, binary []byte, languages []Language, diagnostics []Diagnostic) (GenerationResult, error) {
+	result := GenerationResult{Outputs: map[Language]map[string][]byte{}}
 	for _, language := range languages {
-		output := newMemoryFS(nil, false)
+		stage := Stage(language)
+		output := newMemoryFS(nil, false, c.limits)
 		fs, err := mount(wazero.NewFSConfig(), output, "/")
 		if err != nil {
-			return GenerationResult{}, &Error{Stage: "generate", Language: language, Err: err}
+			return GenerationResult{}, failure(stage, language, "", diagnostics, err)
 		}
-		stdout, stderr, err := c.run(ctx, c.generators[language], fs, []string{"capnpc-" + language}, binary)
+		stdout, stderr, err := c.run(ctx, c.generators[language], fs, output, []string{argv0(language)}, binary, c.limits.StdoutBytes, "stdoutBytes")
+		if stderr != "" {
+			diagnostics = append(diagnostics, Diagnostic{Stage: stage, Language: language, Stderr: stderr})
+		}
 		if err == nil && len(stdout) != 0 {
 			err = errors.New("generator unexpectedly wrote to stdout")
 		}
 		if err != nil {
-			return GenerationResult{}, &Error{Stage: "generate", Language: language, Stderr: stderr, Err: err}
+			return GenerationResult{}, failure(stage, language, stderr, diagnostics, err)
 		}
 		result.Outputs[language] = output.snapshot()
-		if stderr != "" {
-			result.Diagnostics = append(result.Diagnostics, Diagnostic{Stage: "generate", Language: language, Message: stderr})
-		}
 	}
+	result.Diagnostics = diagnostics
 	return result, nil
+}
+
+// argv0 is the command name a generator sees, matching the native tool and
+// the TypeScript SDK.
+func argv0(language Language) string {
+	if language == LanguageCpp {
+		return "capnpc-c++"
+	}
+	return "capnpc-" + string(language)
 }
 
 // mount adds a guest mount through wazero's experimental filesystem
@@ -456,9 +733,13 @@ func mount(config wazero.FSConfig, fs *memoryFS, guest string) (wazero.FSConfig,
 	return mounts.WithSysFSMount(fs, guest), nil
 }
 
-func (c *Compiler) run(ctx context.Context, cmd command, filesystem wazero.FSConfig, args []string, input []byte) ([]byte, string, error) {
-	stdout := limitedBuffer{limit: maxBytes}
-	stderr := limitedBuffer{limit: 1 << 20}
+// run executes one command and classifies its outcome, in this precedence:
+// the job's cancellation, a budget the guest exceeded (in output, a limit it
+// hit first, then stdout and stderr), a nonzero exit status, or a trap. The
+// output filesystem is nil for the compiler.
+func (c *Compiler) run(ctx context.Context, cmd command, filesystem wazero.FSConfig, output *memoryFS, args []string, input []byte, stdoutBytes int, stdoutLimit string) ([]byte, string, error) {
+	stdout := limitedBuffer{limit: stdoutBytes}
+	stderr := limitedBuffer{limit: c.limits.StderrBytes}
 	config := wazero.NewModuleConfig().WithName("").WithArgs(args...).
 		WithStdin(bytes.NewReader(input)).WithStdout(&stdout).WithStderr(&stderr).
 		WithFSConfig(filesystem).WithRandSource(rand.Reader).
@@ -469,13 +750,22 @@ func (c *Compiler) run(ctx context.Context, cmd command, filesystem wazero.FSCon
 		defer instance.Close(context.Background())
 	}
 	var exit *sys.ExitError
-	if errors.As(err, &exit) && exit.ExitCode() == 0 {
-		err = nil
+	if errors.As(err, &exit) {
+		if code := exit.ExitCode(); code == 0 {
+			err = nil
+		} else {
+			err = exitStatus(code)
+		}
 	}
-	if ctxErr := jobErr(ctx); ctxErr != nil {
-		err = ctxErr
-	} else if stdout.exceeded || stderr.exceeded {
-		err = errors.New("command stdio exceeded its size limit")
+	switch {
+	case jobErr(ctx) != nil:
+		err = jobErr(ctx)
+	case output != nil && output.limit != "":
+		err = guestExceeded(output.limit)
+	case stdout.exceeded:
+		err = guestExceeded(stdoutLimit)
+	case stderr.exceeded:
+		err = guestExceeded("stderrBytes")
 	}
 	return stdout.Bytes(), stderr.String(), err
 }
@@ -505,71 +795,144 @@ func sleep(ctx context.Context, ns int64) {
 	}
 }
 
+// validate performs every check on a request before any guest starts, in the
+// order and with the messages of the TypeScript SDK's validateCompile.
 func (c *Compiler) validate(request Request) error {
-	if len(request.Entrypoints) == 0 {
-		return errors.New("at least one entrypoint is required")
+	if err := c.validateGenerators(request.Generators); err != nil {
+		return err
 	}
-	total := 0
-	count := 0
-	for _, files := range []map[string][]byte{request.Files, request.IncludeFiles} {
-		nodes := map[string]bool{}
-		for name, data := range files {
-			if !validPath(name) {
-				return fmt.Errorf("invalid file path %q", name)
+	if len(request.ImportPaths) > c.limits.WorkspaceEntries {
+		return inputExceeds("import root count", "workspaceEntries")
+	}
+	for _, root := range append([]string{request.SourcePrefix}, request.ImportPaths...) {
+		if root != "" {
+			if err := c.checkPath(root); err != nil {
+				return err
 			}
-			nodes[name] = true
-			for i := 0; i < len(name); i++ {
-				if name[i] == '/' {
-					parent := name[:i]
-					if _, exists := files[parent]; exists {
-						return fmt.Errorf("file/directory collision at %q", parent)
+		}
+	}
+	if duplicated(request.ImportPaths) {
+		return invalid("duplicate importPaths")
+	}
+	if len(request.Entrypoints) == 0 {
+		return invalid("at least one entrypoint is required")
+	}
+	if len(request.Entrypoints) > c.limits.WorkspaceEntries {
+		return inputExceeds("entrypoint count", "workspaceEntries")
+	}
+	for _, entry := range request.Entrypoints {
+		if err := c.checkPath(entry); err != nil {
+			return err
+		}
+	}
+	if duplicated(request.Entrypoints) {
+		return invalid("duplicate entrypoints")
+	}
+
+	sourceDirectories := map[string]bool{}
+	total := 0
+	entries := 0
+	for mount, files := range []map[string][]byte{request.Files, request.IncludeFiles} {
+		// Each mount counts its own files and implied directories, in a fixed
+		// order so a workspace over two budgets always reports the same one.
+		nodes := map[string]bool{}
+		for _, name := range sortedKeys(files) {
+			if err := c.checkPath(name); err != nil {
+				return err
+			}
+			for i := 0; i <= len(name); i++ {
+				if i < len(name) && name[i] != '/' {
+					continue
+				}
+				if node := name[:i]; !nodes[node] {
+					nodes[node] = true
+					entries++
+					if entries > c.limits.WorkspaceEntries {
+						return inputExceeds("workspace", "workspaceEntries")
 					}
-					nodes[parent] = true
 				}
 			}
-			if len(nodes) > maxFiles-count {
-				return errors.New("workspace exceeds 4096 files and directories")
-			}
-			if len(data) > maxBytes-total {
-				return errors.New("workspace exceeds 64 MiB")
+			data := files[name]
+			if len(data) > c.limits.WorkspaceBytes-total {
+				return inputExceeds("workspace", "workspaceBytes")
 			}
 			total += len(data)
 		}
-		count += len(nodes)
+		for _, name := range sortedKeys(files) {
+			for i := 0; i < len(name); i++ {
+				if name[i] == '/' {
+					if _, exists := files[name[:i]]; exists {
+						return invalid("file/directory collision: " + name)
+					}
+				}
+			}
+		}
+		if mount == 0 {
+			for node := range nodes {
+				if _, isFile := files[node]; !isFile {
+					sourceDirectories[node] = true
+				}
+			}
+		}
 	}
-	if count > maxFiles {
-		return errors.New("workspace exceeds 4096 files and directories")
-	}
-	entries := map[string]bool{}
 	for _, entry := range request.Entrypoints {
-		if !validPath(entry) || entries[entry] {
-			return fmt.Errorf("invalid or duplicate entrypoint %q", entry)
-		}
 		if _, exists := request.Files[entry]; !exists {
-			return fmt.Errorf("entrypoint %q is not in Files", entry)
+			return invalid("entrypoint is not in files: " + entry)
 		}
-		entries[entry] = true
 	}
-	return c.validateGenerators(request.Generators)
-}
-
-func (c *Compiler) validateGenerators(languages []string) error {
-	seen := map[string]bool{}
-	for _, language := range languages {
-		if !supported(language) || c.generators[language].module == nil || seen[language] {
-			return fmt.Errorf("unavailable or duplicate generator %q", language)
+	// Import roots and the source prefix name directories the guest will open;
+	// reject them here rather than as a compiler exit or a kj exception.
+	for _, root := range request.ImportPaths {
+		if root != "" && !sourceDirectories[root] {
+			return invalid("importPath is not a directory in files: " + root)
 		}
-		seen[language] = true
+	}
+	if request.SourcePrefix != "" && !sourceDirectories[request.SourcePrefix] {
+		return invalid("sourcePrefix is not a directory in files: " + request.SourcePrefix)
 	}
 	return nil
 }
 
-func supported(language string) bool {
-	return language == "cpp" || language == "rust" || language == "go" || language == "zig"
+// checkPath rejects a path over PathBytes or outside the canonical relative
+// POSIX form, with the TypeScript SDK's messages.
+func (c *Compiler) checkPath(name string) error {
+	if len(name) > c.limits.PathBytes {
+		return inputExceeds("path", "pathBytes")
+	}
+	if !validPath(name) {
+		return invalid("expected a canonical relative POSIX path: " + name)
+	}
+	return nil
 }
 
+func (c *Compiler) validateGenerators(languages []Language) error {
+	if len(languages) > 4 {
+		return invalid("too many generators")
+	}
+	if duplicated(languages) {
+		return invalid("duplicate generators")
+	}
+	for _, language := range languages {
+		if !supported(language) || c.generators[language].module == nil {
+			return invalid("generator was not supplied: " + string(language))
+		}
+	}
+	return nil
+}
+
+func supported(language Language) bool {
+	switch language {
+	case LanguageCpp, LanguageRust, LanguageGo, LanguageZig:
+		return true
+	}
+	return false
+}
+
+// validPath reports whether name is a canonical relative POSIX path: valid
+// UTF-8 without backslashes or NUL bytes, and no empty, ".", or ".."
+// components. Length is bounded separately by PathBytes.
 func validPath(name string) bool {
-	if len(name) > 4096 || !utf8.ValidString(name) || strings.ContainsAny(name, "\\\x00") {
+	if !utf8.ValidString(name) || strings.ContainsAny(name, "\\\x00") {
 		return false
 	}
 	for _, part := range strings.Split(name, "/") {
@@ -580,12 +943,23 @@ func validPath(name string) bool {
 	return true
 }
 
-func sortedKeys[V any](values map[string]V) []string {
-	keys := make([]string, 0, len(values))
+func duplicated[T comparable](values []T) bool {
+	seen := map[T]bool{}
+	for _, value := range values {
+		if seen[value] {
+			return true
+		}
+		seen[value] = true
+	}
+	return false
+}
+
+func sortedKeys[K ~string, V any](values map[K]V) []K {
+	keys := make([]K, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)
 	}
-	sort.Strings(keys)
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 	return keys
 }
 
@@ -643,8 +1017,11 @@ func (e Engine) String() string {
 type Option func(*settings)
 
 type settings struct {
-	engine Engine
-	cache  wazero.CompilationCache
+	engine    Engine
+	cache     wazero.CompilationCache
+	limits    Limits
+	maxJobs   int
+	boundJobs bool
 }
 
 // WithEngine selects the execution engine. The default is EngineAuto.
@@ -659,27 +1036,48 @@ func WithCompilationCache(cache wazero.CompilationCache) Option {
 	return func(s *settings) { s.cache = cache }
 }
 
+// WithLimits replaces DefaultLimits for every job of the Compiler. Every field
+// must be nonnegative and MemoryPages between 1 and 65536; otherwise New
+// fails with an Error at StageValidate that matches ErrInvalidRequest.
+func WithLimits(limits Limits) Option {
+	return func(s *settings) { s.limits = limits }
+}
+
+// WithMaxConcurrentJobs bounds the Compile and Generate calls that run guests
+// at once. Further calls wait for a slot until their context ends or Close
+// terminates them; n must be at least 1. Without this option jobs are
+// unbounded.
+func WithMaxConcurrentJobs(n int) Option {
+	return func(s *settings) { s.maxJobs, s.boundJobs = n, true }
+}
+
 func resolve(opts []Option) (settings, error) {
-	var s settings
+	s := settings{limits: DefaultLimits()}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&s)
 		}
 	}
 	if s.engine < EngineAuto || s.engine > EngineInterpreter {
-		return s, fmt.Errorf("unknown engine %v", s.engine)
+		return s, invalid(fmt.Sprintf("unknown engine %v", s.engine))
+	}
+	if err := s.limits.validate(); err != nil {
+		return s, err
+	}
+	if s.boundJobs && s.maxJobs < 1 {
+		return s, invalid("maxConcurrentJobs must be positive")
 	}
 	return s, nil
 }
 
 // engineFor resolves the engine that runs one module. The compiler module has
 // an empty language.
-func (s settings) engineFor(language string) Engine {
+func (s settings) engineFor(language Language) Engine {
 	switch s.engine {
 	case EngineCompiler, EngineInterpreter:
 		return s.engine
 	}
-	if language == "" || language == "cpp" {
+	if language == "" || language == LanguageCpp {
 		return EngineInterpreter
 	}
 	return EngineCompiler

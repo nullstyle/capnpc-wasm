@@ -7,7 +7,7 @@ import (
 )
 
 func bookkeepingOnly() *Compiler {
-	return &Compiler{generators: map[string]command{}, jobs: map[*job]struct{}{}, idle: make(chan struct{})}
+	return &Compiler{generators: map[Language]command{}, limits: DefaultLimits(), jobs: map[*job]struct{}{}, idle: make(chan struct{})}
 }
 
 // TestJobRegisteredBeforeExpiredClose pins the interleaving that the public
@@ -55,6 +55,38 @@ func TestJobKeepsItsOwnCancellation(t *testing.T) {
 		t.Fatalf("job cancelled by its caller reports %v, want context.Canceled", err)
 	}
 	done()
+	if err := c.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestBoundedJobsWaitForASlot pins the admission order with one slot: the
+// second job registers but does not run until the first releases the slot,
+// and a job whose context ends while waiting reports its own error.
+func TestBoundedJobsWaitForASlot(t *testing.T) {
+	c := bookkeepingOnly()
+	c.slots = make(chan struct{}, 1)
+	_, first, err := c.begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := c.begin(waiting); !errors.Is(err, context.Canceled) || errors.Is(err, ErrClosed) {
+		t.Fatalf("job cancelled while waiting for a slot: %v", err)
+	}
+	if c.ActiveJobs() != 1 || c.RunningJobs() != 1 {
+		t.Fatalf("active %d running %d after the waiting job left, want 1 and 1", c.ActiveJobs(), c.RunningJobs())
+	}
+	first()
+	if c.RunningJobs() != 0 {
+		t.Fatalf("slot not released: %d running", c.RunningJobs())
+	}
+	_, second, err := c.begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second()
 	if err := c.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}

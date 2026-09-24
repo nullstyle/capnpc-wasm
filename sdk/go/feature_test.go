@@ -19,7 +19,7 @@ func TestSchemaFeatures(t *testing.T) {
 		Scenarios []struct {
 			Name        string
 			Entrypoints []string
-			Generators  []string
+			Generators  []capnpcwasm.Language
 		}
 	}
 	if err := json.Unmarshal(read(t, fixtures+"/manifest.json"), &manifest); err != nil {
@@ -78,18 +78,16 @@ func TestSchemaFeatures(t *testing.T) {
 				}
 			})
 			for _, language := range request.Generators {
-				t.Run(language+" generated source", func(t *testing.T) {
-					dir := work + "/native-" + language
+				t.Run(string(language)+" generated source", func(t *testing.T) {
+					dir := work + "/native-" + string(language)
 					if err := os.Mkdir(dir, 0755); err != nil {
 						t.Fatal(err)
 					}
-					tool := "capnpc-" + language
 					count := len(request.Entrypoints)
 					if language == "cpp" {
-						tool = "capnpc-c++"
 						count *= 2
 					}
-					if stdout := command(t, tool, dir, nativeRequest); len(stdout) != 0 {
+					if stdout := command(t, capnpcwasm.Argv0(language), dir, nativeRequest); len(stdout) != 0 {
 						t.Fatal("unexpected native generator stdout")
 					}
 					want := outputFiles(t, dir)

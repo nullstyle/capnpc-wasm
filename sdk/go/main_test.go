@@ -2,7 +2,9 @@ package capnpcwasm_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync"
@@ -62,7 +64,7 @@ func sharedCompiler(t testing.TB) *capnpcwasm.Compiler {
 		shared.compiler, shared.err = capnpcwasm.New(context.Background(), modules, testOptions()...)
 	})
 	if shared.err != nil {
-		t.Fatalf("shared compiler: %v", shared.err)
+		unavailable(t, shared.err)
 	}
 	return shared.compiler
 }
@@ -76,25 +78,53 @@ func root(t testing.TB) string {
 	return root
 }
 
+// inRepository reports whether the package is the repository checkout rather
+// than a downloaded module. The checkout builds the Wasm commands, the native
+// oracle, and the shared fixtures that most tests read.
+func inRepository() bool {
+	_, err := os.Stat("../../mise.toml")
+	return err == nil
+}
+
+// unavailable fails a test that needs a repository artifact inside the
+// checkout, where `mise run build` provides it, and skips it elsewhere, so
+// `go test` of a downloaded module runs only the self-contained tests.
+func unavailable(t testing.TB, err error) {
+	t.Helper()
+	if !inRepository() && errors.Is(err, fs.ErrNotExist) {
+		t.Skipf("skipped outside the repository checkout: %v", err)
+	}
+	t.Fatalf("%v (run mise run build before SDK tests)", err)
+}
+
 func read(t testing.TB, path string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("%s: %v (run mise run build before SDK tests)", path, err)
+		unavailable(t, err)
 	}
 	return data
 }
 
+// modulesDir is the directory holding the built command modules:
+// CAPNPC_WASM_TEST_MODULES, or the repository's build output.
+func modulesDir() (string, error) {
+	if dir := os.Getenv("CAPNPC_WASM_TEST_MODULES"); dir != "" {
+		return dir, nil
+	}
+	return filepath.Abs("../../build/wasm/bin")
+}
+
 func readModules() (capnpcwasm.Modules, error) {
-	dir, err := filepath.Abs("../../build/wasm/bin")
+	dir, err := modulesDir()
 	if err != nil {
 		return capnpcwasm.Modules{}, err
 	}
-	modules := capnpcwasm.Modules{Generators: map[string][]byte{}}
-	for language, file := range map[string]string{"": "capnp.wasm", "cpp": "capnpc-c++.wasm", "rust": "capnpc-rust.wasm", "go": "capnpc-go.wasm", "zig": "capnpc-zig.wasm"} {
+	modules := capnpcwasm.Modules{Generators: map[capnpcwasm.Language][]byte{}}
+	for language, file := range map[capnpcwasm.Language]string{"": "capnp.wasm", "cpp": "capnpc-c++.wasm", "rust": "capnpc-rust.wasm", "go": "capnpc-go.wasm", "zig": "capnpc-zig.wasm"} {
 		data, err := os.ReadFile(dir + "/" + file)
 		if err != nil {
-			return capnpcwasm.Modules{}, fmt.Errorf("%w (run mise run build before SDK tests)", err)
+			return capnpcwasm.Modules{}, err
 		}
 		if language == "" {
 			modules.Compiler = data
@@ -109,9 +139,20 @@ func loadModules(t testing.TB) capnpcwasm.Modules {
 	t.Helper()
 	modules, err := readModules()
 	if err != nil {
-		t.Fatal(err)
+		unavailable(t, err)
 	}
 	return modules
+}
+
+// native returns the path of a built native tool, or skips outside the
+// repository checkout.
+func native(t testing.TB, name string) string {
+	t.Helper()
+	path := root(t) + "/build/native/bin/" + name
+	if _, err := os.Stat(path); err != nil {
+		unavailable(t, err)
+	}
+	return path
 }
 
 // workDir creates a directory under build/test for native comparisons. It is

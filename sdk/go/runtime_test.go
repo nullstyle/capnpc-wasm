@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"reflect"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +20,21 @@ const (
 	loopCommand = "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a0901070003400c000b0b"
 	// Traps at once: (func (export "_start") unreachable).
 	trapCommand = "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a05010300000b"
+	// Exits with status 1 through proc_exit.
+	exitCommand = "0061736d0100000001080260017f0060000002240116776173695f736e617073686f745f70726576696577310970726f635f657869740000030201010503010001071302066d656d6f72790200065f737461727400010a08010600410110000b"
+	// Declares two pages of memory and returns at once.
+	twoPageCommand = "0061736d01000000010401600000030201000503010002071302066d656d6f72790200065f737461727400000a040102000b"
+	// Writes 'x' to fd 1 (stdout) through WASI fd_write, then returns normally.
+	stdoutCommand = "0061736d01000000010c0260047f7f7f7f017f60000002230116776173695f736e617073686f745f70726576696577310866645f77726974650000030201010503010001071302066d656d6f72790200065f737461727400010a0f010d00410141004101410c10001a0b0b0f010041000b09080000000100000078"
+	// Writes 'x' to fd 2 (stderr) through WASI fd_write, then returns normally.
+	stderrCommand = "0061736d01000000010c0260047f7f7f7f017f60000002230116776173695f736e617073686f745f70726576696577310866645f77726974650000030201010503010001071302066d656d6f72790200065f737461727400010a0f010d00410241004101410c10001a0b0b0f010041000b09080000000100000078"
+	// Writes 'x' to stdout and then 'w' to stderr, then returns normally.
+	stdoutStderrCommand = "0061736d01000000010c0260047f7f7f7f017f60000002230116776173695f736e617073686f745f70726576696577310866645f77726974650000030201010503010001071302066d656d6f72790200065f737461727400010a1a011800410141004101412010001a410241104101412010001a0b0b1d020041000b090800000001000000780041100b09180000000100000077"
+	// Writes the NUL-separated argv it receives to stderr, then returns.
+	argsCommand = "0061736d0100000001120360027f7f017f60047f7f7f7f017f600000026d0316776173695f736e617073686f745f70726576696577310e617267735f73697a65735f676574000016776173695f736e617073686f745f707265766965773108617267735f676574000016776173695f736e617073686f745f70726576696577310866645f77726974650001030201020503010001071302066d656d6f72790200065f737461727400030a3f013d01017f4100410410001a4110410028020041046c6a21004110200010011a41082000360200410c410428020036020041024108410141e0d40310021a0b"
+	// Creates the empty file "out" in its root through path_open, ignoring the
+	// result, then returns normally.
+	createCommand = "0061736d0100000001110260097f7f7f7f7f7e7e7f7f017f60000002240116776173695f736e617073686f745f707265766965773109706174685f6f70656e0000030201010503010001071302066d656d6f72790200065f737461727400010a1a0118004103410041004103410142c20042004100411010001a0b0b09010041000b036f7574"
 	// Writes its first 64 KiB page to fd 1 1025 times: 64 MiB plus one page.
 	stdoutFloodCommand = "0061736d01000000010c0260047f7f7f7f017f60000002230116776173695f736e617073686f745f70726576696577310866645f77726974650000030201010503010002071302066d656d6f72790200065f737461727400010a3c013a01017f41808004410036020041848004418080043602004181082100034041014180800441014188800410001a200041016b210020000d000b0b"
 	// Writes its first 64 KiB page to fd 2 17 times: 1 MiB plus one page.
@@ -46,17 +60,17 @@ func compileOnly() capnpcwasm.Request {
 }
 
 func generateRust() capnpcwasm.GenerationRequest {
-	return capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []string{"rust"}}
+	return capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []capnpcwasm.Language{"rust"}}
 }
 
 // newCompiler builds a Compiler from hex-encoded guests and closes it with the test.
-func newCompiler(t *testing.T, compiler string, generators map[string]string) *capnpcwasm.Compiler {
+func newCompiler(t *testing.T, compiler string, generators map[string]string, opts ...capnpcwasm.Option) *capnpcwasm.Compiler {
 	t.Helper()
-	modules := capnpcwasm.Modules{Compiler: wasmBytes(t, compiler), Generators: map[string][]byte{}}
+	modules := capnpcwasm.Modules{Compiler: wasmBytes(t, compiler), Generators: map[capnpcwasm.Language][]byte{}}
 	for language, guest := range generators {
-		modules.Generators[language] = wasmBytes(t, guest)
+		modules.Generators[capnpcwasm.Language(language)] = wasmBytes(t, guest)
 	}
-	c, err := capnpcwasm.New(t.Context(), modules, testOptions()...)
+	c, err := capnpcwasm.New(t.Context(), modules, testOptions(opts...)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +94,7 @@ func assertClosed(t *testing.T, c *capnpcwasm.Compiler) {
 	start := time.Now()
 	got, err := c.Compile(t.Context(), compileOnly())
 	var failure *capnpcwasm.Error
-	if !errors.Is(err, capnpcwasm.ErrClosed) || !errors.As(err, &failure) || failure.Stage != "validate" || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
+	if !errors.Is(err, capnpcwasm.ErrClosed) || errors.Is(err, capnpcwasm.ErrInvalidRequest) || !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageValidate || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 		t.Fatalf("closed compiler accepted Compile: %+v, %v", got, err)
 	}
 	generated, err := c.Generate(t.Context(), generateRust())
@@ -96,10 +110,7 @@ func TestStdioLimits(t *testing.T) {
 	t.Run("stdout over 64 MiB", func(t *testing.T) {
 		c := newCompiler(t, stdoutFloodCommand, nil)
 		got, err := c.Compile(t.Context(), compileOnly())
-		var failure *capnpcwasm.Error
-		if !errors.As(err, &failure) || failure.Stage != "compile" || !strings.Contains(failure.Err.Error(), "stdio exceeded") {
-			t.Fatalf("stdout flood accepted: %v", err)
-		}
+		assertGuestLimit(t, err, capnpcwasm.StageCompiler, "", "stdoutBytes")
 		if !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 			t.Fatal("stdout flood returned a result")
 		}
@@ -107,10 +118,7 @@ func TestStdioLimits(t *testing.T) {
 	t.Run("stderr over 1 MiB", func(t *testing.T) {
 		c := newCompiler(t, noopCommand, map[string]string{"rust": stderrFloodCommand})
 		got, err := c.Generate(t.Context(), generateRust())
-		var failure *capnpcwasm.Error
-		if !errors.As(err, &failure) || failure.Stage != "generate" || failure.Language != "rust" || !strings.Contains(failure.Err.Error(), "stdio exceeded") {
-			t.Fatalf("stderr flood accepted: %v", err)
-		}
+		failure := assertGuestLimit(t, err, "rust", "rust", "stderrBytes")
 		if !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
 			t.Fatal("stderr flood returned a result")
 		}
@@ -126,9 +134,9 @@ func TestMemoryCeiling(t *testing.T) {
 		t.Fatalf("memory.grow did not honor the 4096-page ceiling: %v", err)
 	}
 	// The trap control proves that a failed guest check would surface.
-	got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []string{"go"}})
+	got, err := c.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: []byte{1}, Generators: []capnpcwasm.Language{"go"}})
 	var failure *capnpcwasm.Error
-	if !errors.As(err, &failure) || failure.Stage != "generate" || failure.Language != "go" || !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
+	if !errors.As(err, &failure) || failure.Stage != "go" || failure.Language != "go" || !reflect.DeepEqual(got, capnpcwasm.GenerationResult{}) {
 		t.Fatalf("guest trap not reported: %+v, %v", got, err)
 	}
 }
@@ -142,7 +150,7 @@ func TestSleepingGuestHonorsDeadline(t *testing.T) {
 	elapsed := time.Since(start)
 	t.Logf("50 ms deadline against a 3 s poll_oneoff sleep returned after %v", elapsed)
 	var failure *capnpcwasm.Error
-	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &failure) || failure.Stage != "compile" || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageCompiler || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 		t.Fatalf("sleeping guest: %+v, %v", got, err)
 	}
 	if elapsed > promptly {
@@ -180,7 +188,7 @@ func TestCloseTerminatesActiveCallsAtItsDeadline(t *testing.T) {
 
 	result := <-results
 	var failure *capnpcwasm.Error
-	if !errors.Is(result.err, capnpcwasm.ErrClosed) || !errors.As(result.err, &failure) || failure.Stage != "compile" || !reflect.DeepEqual(result.got, capnpcwasm.Result{}) {
+	if !errors.Is(result.err, capnpcwasm.ErrClosed) || !errors.As(result.err, &failure) || failure.Stage != capnpcwasm.StageCompiler || !reflect.DeepEqual(result.got, capnpcwasm.Result{}) {
 		t.Fatalf("terminated job returned %+v, %v", result.got, result.err)
 	}
 	if result.elapsed > 2*promptly {
@@ -256,7 +264,7 @@ func TestCloseRacesWithCalls(t *testing.T) {
 					return
 				}
 				var failure *capnpcwasm.Error
-				if !errors.As(err, &failure) || failure.Stage != "compile" {
+				if !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageCompiler {
 					t.Errorf("unexpected job result: %v", err)
 					return
 				}
@@ -281,7 +289,7 @@ func TestNewHonorsContext(t *testing.T) {
 	elapsed := time.Since(start)
 	t.Logf("New with an expired context returned after %v", elapsed)
 	var failure *capnpcwasm.Error
-	if c != nil || !errors.Is(err, context.Canceled) || !errors.As(err, &failure) || failure.Stage != "modules" {
+	if c != nil || !errors.Is(err, context.Canceled) || !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageModules {
 		t.Fatalf("New with an expired context: %v, %v", c, err)
 	}
 	if elapsed > promptly {
@@ -292,7 +300,7 @@ func TestNewHonorsContext(t *testing.T) {
 func TestEngineOptions(t *testing.T) {
 	for _, engine := range []capnpcwasm.Engine{capnpcwasm.EngineAuto, capnpcwasm.EngineCompiler, capnpcwasm.EngineInterpreter} {
 		t.Run(engine.String(), func(t *testing.T) {
-			c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: wasmBytes(t, loopCommand), Generators: map[string][]byte{"rust": wasmBytes(t, trapCommand)}}, capnpcwasm.WithEngine(engine))
+			c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: wasmBytes(t, loopCommand), Generators: map[capnpcwasm.Language][]byte{"rust": wasmBytes(t, trapCommand)}}, capnpcwasm.WithEngine(engine))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -307,7 +315,7 @@ func TestEngineOptions(t *testing.T) {
 				t.Fatalf("termination on the %v engine took %v", engine, elapsed)
 			}
 			var failure *capnpcwasm.Error
-			if _, err := c.Generate(t.Context(), generateRust()); !errors.As(err, &failure) || failure.Stage != "generate" {
+			if _, err := c.Generate(t.Context(), generateRust()); !errors.As(err, &failure) || failure.Stage != "rust" {
 				t.Fatalf("trap on the %v engine: %v", engine, err)
 			}
 		})
@@ -315,7 +323,7 @@ func TestEngineOptions(t *testing.T) {
 	t.Run("invalid", func(t *testing.T) {
 		c, err := capnpcwasm.New(t.Context(), capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand)}, capnpcwasm.WithEngine(capnpcwasm.Engine(42)))
 		var failure *capnpcwasm.Error
-		if c != nil || !errors.As(err, &failure) || failure.Stage != "validate" {
+		if c != nil || !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageValidate || !errors.Is(err, capnpcwasm.ErrInvalidRequest) {
 			t.Fatalf("invalid engine accepted: %v, %v", c, err)
 		}
 	})
@@ -326,7 +334,7 @@ func TestCompilationCache(t *testing.T) {
 	defer cache.Close(context.Background())
 	modules := loadModules(t)
 	request := fixture(t)
-	var outputs []map[string]map[string][]byte
+	var outputs []map[capnpcwasm.Language]map[string][]byte
 	var elapsed []time.Duration
 	for range 2 {
 		start := time.Now()
@@ -370,7 +378,7 @@ func TestCloseWithExpiredContextTerminatesActiveCall(t *testing.T) {
 	}
 	err = <-results
 	var failure *capnpcwasm.Error
-	if !errors.Is(err, capnpcwasm.ErrClosed) || errors.Is(err, context.Canceled) || !errors.As(err, &failure) || failure.Stage != "compile" {
+	if !errors.Is(err, capnpcwasm.ErrClosed) || errors.Is(err, context.Canceled) || !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageCompiler {
 		t.Fatalf("terminated job returned %v, want ErrClosed", err)
 	}
 	if err := c.Close(context.Background()); err != nil {

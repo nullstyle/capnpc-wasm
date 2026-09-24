@@ -17,6 +17,8 @@ import (
 	capnpcwasm "github.com/nullstyle/capnpc-wasm/sdk/go"
 )
 
+var allLanguages = []capnpcwasm.Language{"cpp", "rust", "go", "zig"}
+
 func fixture(t testing.TB) capnpcwasm.Request {
 	r := root(t)
 	return capnpcwasm.Request{
@@ -29,13 +31,13 @@ func fixture(t testing.TB) capnpcwasm.Request {
 			"go.capnp":        read(t, r+"/ref/go-capnp/std/go.capnp"),
 		},
 		Entrypoints: []string{"person.capnp", "types/common.capnp"},
-		Generators:  []string{"cpp", "rust", "go", "zig"},
+		Generators:  []capnpcwasm.Language{"cpp", "rust", "go", "zig"},
 	}
 }
 
 func command(t *testing.T, name, cwd string, input []byte, args ...string) []byte {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), root(t)+"/build/native/bin/"+name, args...)
+	cmd := exec.CommandContext(t.Context(), native(t, name), args...)
 	cmd.Dir = cwd
 	cmd.Stdin = bytes.NewReader(input)
 	var stderr bytes.Buffer
@@ -90,15 +92,12 @@ func TestCompiler(t *testing.T) {
 		}
 		work := workDir(t, "go-sdk-")
 		for _, language := range request.Generators {
-			dir := work + "/" + language
+			dir := work + "/" + string(language)
 			if err := os.Mkdir(dir, 0755); err != nil {
 				t.Fatal(err)
 			}
-			tool := "capnpc-" + language
-			if language == "cpp" {
-				tool = "capnpc-c++"
-			}
-			command(t, tool, dir, nativeRequest)
+			// The SDK runs each generator under the native tool's name.
+			command(t, capnpcwasm.Argv0(language), dir, nativeRequest)
 			want := outputFiles(t, dir)
 			if !reflect.DeepEqual(actual.Outputs[language], want) {
 				t.Errorf("%s source differs from native", language)
@@ -150,7 +149,7 @@ func TestCompiler(t *testing.T) {
 		req.Files["person.capnp"] = []byte("invalid schema")
 		got, err := c.Compile(t.Context(), req)
 		var failure *capnpcwasm.Error
-		if !errors.As(err, &failure) || failure.Stage != "compile" || failure.Stderr == "" {
+		if !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageCompiler || failure.Stderr == "" {
 			t.Fatalf("missing diagnostic: %v", err)
 		}
 		if !reflect.DeepEqual(got, capnpcwasm.Result{}) {
@@ -160,11 +159,11 @@ func TestCompiler(t *testing.T) {
 
 	t.Run("later generator failure discards all outputs", func(t *testing.T) {
 		req := fixture(t)
-		req.Generators = []string{"cpp", "rust", "zig", "go"}
+		req.Generators = []capnpcwasm.Language{"cpp", "rust", "zig", "go"}
 		req.Files["person.capnp"] = bytes.Replace(req.Files["person.capnp"], []byte(`$Go.package("fixture");`), nil, 1)
 		got, err := c.Compile(t.Context(), req)
 		var failure *capnpcwasm.Error
-		if !errors.As(err, &failure) || failure.Stage != "generate" || failure.Language != "go" || failure.Stderr == "" {
+		if !errors.As(err, &failure) || failure.Stage != "go" || failure.Language != "go" || failure.Stderr == "" {
 			t.Fatalf("missing generator diagnostic: %v", err)
 		}
 		if !reflect.DeepEqual(got, capnpcwasm.Result{}) {
@@ -187,8 +186,8 @@ func TestCompiler(t *testing.T) {
 			func(r *capnpcwasm.Request) { r.Entrypoints = nil },
 			func(r *capnpcwasm.Request) { r.Entrypoints = []string{"missing.capnp"} },
 			func(r *capnpcwasm.Request) { r.Entrypoints = []string{"person.capnp", "person.capnp"} },
-			func(r *capnpcwasm.Request) { r.Generators = []string{"python"} },
-			func(r *capnpcwasm.Request) { r.Generators = []string{"go", "go"} },
+			func(r *capnpcwasm.Request) { r.Generators = []capnpcwasm.Language{"python"} },
+			func(r *capnpcwasm.Request) { r.Generators = []capnpcwasm.Language{"go", "go"} },
 			func(r *capnpcwasm.Request) { r.Files["types"] = []byte{} },
 		} {
 			req := fixture(t)
@@ -201,17 +200,19 @@ func TestCompiler(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		got, err := c.Compile(ctx, request)
-		if !errors.Is(err, context.Canceled) || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
+		if !errors.Is(err, context.Canceled) || errors.Is(err, capnpcwasm.ErrInvalidRequest) || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 			t.Fatalf("cancellation: %+v, %v", got, err)
 		}
 	})
 }
 
+// assertValidation checks the contract for rejected caller input: an Error at
+// StageValidate that matches ErrInvalidRequest, and no result.
 func assertValidation(t *testing.T, c *capnpcwasm.Compiler, request capnpcwasm.Request) {
 	t.Helper()
 	got, err := c.Compile(t.Context(), request)
 	var failure *capnpcwasm.Error
-	if !errors.As(err, &failure) || failure.Stage != "validate" {
+	if !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageValidate || !errors.Is(err, capnpcwasm.ErrInvalidRequest) {
 		t.Fatalf("expected validation error, got %v", err)
 	}
 	if !reflect.DeepEqual(got, capnpcwasm.Result{}) {
@@ -237,7 +238,7 @@ func TestCancellationDuringGuestExecution(t *testing.T) {
 
 const noopCommand = "0061736d01000000010401600000030201000503010001071302066d656d6f72790200065f737461727400000a040102000b"
 
-func wasmBytes(t *testing.T, encoded string) []byte {
+func wasmBytes(t testing.TB, encoded string) []byte {
 	t.Helper()
 	data, err := hex.DecodeString(encoded)
 	if err != nil {
@@ -255,17 +256,17 @@ func TestCommandContractValidation(t *testing.T) {
 		{"start with result", "0061736d010000000105016000017f030201000503010001071302066d656d6f72790200065f737461727400000a0601040041000b"},
 	} {
 		t.Run(guest.name, func(t *testing.T) {
-			for _, language := range []string{"", "rust"} {
+			for _, language := range []capnpcwasm.Language{"", "rust"} {
 				modules := capnpcwasm.Modules{Compiler: wasmBytes(t, guest.encoded)}
 				if language != "" {
-					modules = capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand), Generators: map[string][]byte{language: wasmBytes(t, guest.encoded)}}
+					modules = capnpcwasm.Modules{Compiler: wasmBytes(t, noopCommand), Generators: map[capnpcwasm.Language][]byte{language: wasmBytes(t, guest.encoded)}}
 				}
 				c, err := capnpcwasm.New(t.Context(), modules, testOptions()...)
 				if c != nil {
 					_ = c.Close(context.Background())
 				}
 				var failure *capnpcwasm.Error
-				if c != nil || !errors.As(err, &failure) || failure.Stage != "modules" || failure.Language != language {
+				if c != nil || !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageModules || failure.Language != language || !errors.Is(err, capnpcwasm.ErrInvalidRequest) {
 					t.Fatalf("invalid %q command accepted: %v, %v", language, c, err)
 				}
 			}
@@ -281,7 +282,7 @@ func TestEmptyCompilerOutputFails(t *testing.T) {
 	defer c.Close(context.Background())
 	got, err := c.Compile(t.Context(), capnpcwasm.Request{Files: map[string][]byte{"test.capnp": {}}, Entrypoints: []string{"test.capnp"}})
 	var failure *capnpcwasm.Error
-	if !errors.As(err, &failure) || failure.Stage != "compile" || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
+	if !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageCompiler || failure.ExitCode != 0 || !reflect.DeepEqual(got, capnpcwasm.Result{}) {
 		t.Fatalf("empty compiler output accepted: %+v, %v", got, err)
 	}
 }
@@ -290,12 +291,12 @@ func TestModuleValidation(t *testing.T) {
 	for _, modules := range []capnpcwasm.Modules{
 		{},
 		{Compiler: []byte("not wasm")},
-		{Compiler: []byte("not wasm"), Generators: map[string][]byte{"python": {1}}},
-		{Compiler: []byte("not wasm"), Generators: map[string][]byte{"rust": nil}},
+		{Compiler: []byte("not wasm"), Generators: map[capnpcwasm.Language][]byte{"python": {1}}},
+		{Compiler: []byte("not wasm"), Generators: map[capnpcwasm.Language][]byte{"rust": nil}},
 	} {
 		c, err := capnpcwasm.New(t.Context(), modules, testOptions()...)
 		var failure *capnpcwasm.Error
-		if c != nil || !errors.As(err, &failure) || failure.Stage != "modules" {
+		if c != nil || !errors.As(err, &failure) || failure.Stage != capnpcwasm.StageModules || !errors.Is(err, capnpcwasm.ErrInvalidRequest) {
 			t.Fatalf("invalid modules accepted: %v, %v", c, err)
 		}
 	}

@@ -15,13 +15,27 @@ import (
 // This filesystem implements the operations used by the pinned command guests.
 // It has no host filesystem backing, links, devices, or external resources.
 // Each instance belongs to one single-threaded guest; jobs never share nodes.
+//
+// A writable instance enforces the output budgets from Limits and records the
+// first budget a guest exceeds in limit, so the host can name it after the
+// guest stops, whatever exit status the guest chose. wazero's experimental
+// filesystem interface defines no ENOSPC or EFBIG (unknown values reach the
+// guest as EIO), so an exceeded byte or entry budget is ERANGE and an output
+// path over PathBytes is ENAMETOOLONG.
 type memoryFS struct {
 	exsys.UnimplementedFS
 	nodes    map[string]*memoryNode
 	readOnly bool
-	used     int64
-	nextIno  uint64
-	dev      uint64
+	limits   Limits
+	// used is the lifetime byte charge: bytes stay charged after unlink,
+	// truncation, and rename so retained descriptors cannot exceed the budget.
+	used int64
+	// created is the lifetime count of entries a guest created, excluding the
+	// root; removing an entry does not refund it.
+	created int
+	limit   string
+	nextIno uint64
+	dev     uint64
 }
 
 var nextDevice atomic.Uint64
@@ -33,8 +47,12 @@ type memoryNode struct {
 	dev  uint64
 }
 
-func newMemoryFS(files map[string][]byte, readOnly bool) *memoryFS {
-	m := &memoryFS{nodes: map[string]*memoryNode{}, nextIno: 1, dev: nextDevice.Add(1)}
+// longestMountPrefix is the longest guest prefix the SDK prepends to a caller
+// path: the compiler opens "/include/<path>" through the root descriptor.
+const longestMountPrefix = len("/include/")
+
+func newMemoryFS(files map[string][]byte, readOnly bool, limits Limits) *memoryFS {
+	m := &memoryFS{nodes: map[string]*memoryNode{}, limits: limits, nextIno: 1, dev: nextDevice.Add(1)}
 	m.add(".", fs.ModeDir|0755, nil)
 	for _, name := range sortedKeys(files) {
 		parts := strings.Split(name, "/")
@@ -58,10 +76,56 @@ func (m *memoryFS) add(name string, mode fs.FileMode, data []byte) *memoryNode {
 	return n
 }
 
-// Guest paths may contain dot components and redundant separators. Resolve
-// these only inside this mount and reject attempts to ascend above its root.
-func guestPath(name string) (string, exsys.Errno) {
-	if len(name) > 4096 {
+// exceeded records the first budget a guest exceeds and returns the errno the
+// guest observes for it.
+func (m *memoryFS) exceeded(limit string, errno exsys.Errno) exsys.Errno {
+	if m.limit == "" {
+		m.limit = limit
+	}
+	return errno
+}
+
+// chargeEntry charges a new name against the path and entry budgets.
+func (m *memoryFS) chargeEntry(name string) exsys.Errno {
+	if len(name) > m.limits.PathBytes {
+		return m.exceeded("pathBytes", exsys.ENAMETOOLONG)
+	}
+	if m.created >= m.limits.OutputEntries {
+		return m.exceeded("outputEntries", exsys.ERANGE)
+	}
+	m.created++
+	return 0
+}
+
+// create adds an entry a guest asked for, within the budgets.
+func (m *memoryFS) create(name string, mode fs.FileMode) (*memoryNode, exsys.Errno) {
+	if errno := m.chargeEntry(name); errno != 0 {
+		return nil, errno
+	}
+	return m.add(name, mode, nil), 0
+}
+
+// resolve canonicalizes a guest path inside this mount. Guest paths may
+// contain dot components, redundant separators, and a leading slash, because
+// the compiler opens absolute paths through the root descriptor. Lookups are
+// bounded at PathBytes plus the longest mount prefix; nothing longer can name
+// a node. A trailing slash requires a directory, as on POSIX.
+func (m *memoryFS) resolve(name string) (string, bool, exsys.Errno) {
+	resolved, errno := guestPath(name, m.limits.PathBytes+longestMountPrefix)
+	if errno != 0 {
+		return "", false, errno
+	}
+	trailingSlash := strings.HasSuffix(name, "/") && resolved != "."
+	if node := m.nodes[resolved]; trailingSlash && node != nil && !node.mode.IsDir() {
+		return "", true, exsys.ENOTDIR
+	}
+	return resolved, trailingSlash, 0
+}
+
+// guestPath resolves dot components and redundant separators inside the mount
+// and rejects attempts to ascend above its root.
+func guestPath(name string, maximum int) (string, exsys.Errno) {
+	if len(name) > maximum {
 		return "", exsys.ENAMETOOLONG
 	}
 	if strings.ContainsAny(name, "\\\x00") {
@@ -98,7 +162,7 @@ func (m *memoryFS) parent(name string) exsys.Errno {
 }
 
 func (m *memoryFS) OpenFile(name string, flag exsys.Oflag, perm fs.FileMode) (exsys.File, exsys.Errno) {
-	name, errno := guestPath(name)
+	name, trailingSlash, errno := m.resolve(name)
 	if errno != 0 {
 		return nil, errno
 	}
@@ -111,16 +175,20 @@ func (m *memoryFS) OpenFile(name string, flag exsys.Oflag, perm fs.FileMode) (ex
 		if flag&exsys.O_CREAT == 0 {
 			return nil, exsys.ENOENT
 		}
+		if trailingSlash || flag&exsys.O_DIRECTORY != 0 {
+			// Creation names a regular file; a trailing slash or O_DIRECTORY
+			// asks for a directory, which open cannot create.
+			if trailingSlash {
+				return nil, exsys.EISDIR
+			}
+			return nil, exsys.ENOTDIR
+		}
 		if errno := m.parent(name); errno != 0 {
 			return nil, errno
 		}
-		if len(m.nodes) >= maxFiles {
-			return nil, exsys.ERANGE
+		if n, errno = m.create(name, perm.Perm()); errno != 0 {
+			return nil, errno
 		}
-		if flag&exsys.O_DIRECTORY != 0 {
-			return nil, exsys.ENOTDIR
-		}
-		n = m.add(name, perm.Perm(), nil)
 	} else if flag&(exsys.O_CREAT|exsys.O_EXCL) == exsys.O_CREAT|exsys.O_EXCL {
 		return nil, exsys.EEXIST
 	}
@@ -140,7 +208,7 @@ func (m *memoryFS) OpenFile(name string, flag exsys.Oflag, perm fs.FileMode) (ex
 }
 
 func (m *memoryFS) Stat(name string) (sys.Stat_t, exsys.Errno) {
-	name, errno := guestPath(name)
+	name, _, errno := m.resolve(name)
 	if errno != 0 {
 		return sys.Stat_t{}, errno
 	}
@@ -157,8 +225,7 @@ func (m *memoryFS) Readlink(name string) (string, exsys.Errno) {
 	if name == "" {
 		return "", exsys.ENOENT
 	}
-	trailingSlash := strings.HasSuffix(name, "/")
-	name, errno := guestPath(name)
+	name, trailingSlash, errno := m.resolve(name)
 	if errno != 0 {
 		return "", errno
 	}
@@ -181,7 +248,9 @@ func (m *memoryFS) Mkdir(name string, perm fs.FileMode) exsys.Errno {
 	if m.readOnly {
 		return exsys.EROFS
 	}
-	name, errno := guestPath(name)
+	// An existing name is EEXIST whatever its type, as Linux reports for
+	// mkdir("file/"), so the trailing-slash rule does not apply here.
+	name, errno := guestPath(name, m.limits.PathBytes+longestMountPrefix)
 	if errno != 0 {
 		return errno
 	}
@@ -191,18 +260,15 @@ func (m *memoryFS) Mkdir(name string, perm fs.FileMode) exsys.Errno {
 	if errno := m.parent(name); errno != 0 {
 		return errno
 	}
-	if len(m.nodes) >= maxFiles {
-		return exsys.ERANGE
-	}
-	m.add(name, fs.ModeDir|perm.Perm(), nil)
-	return 0
+	_, errno = m.create(name, fs.ModeDir|perm.Perm())
+	return errno
 }
 
 func (m *memoryFS) Unlink(name string) exsys.Errno {
 	if m.readOnly {
 		return exsys.EROFS
 	}
-	name, errno := guestPath(name)
+	name, _, errno := m.resolve(name)
 	if errno != 0 {
 		return errno
 	}
@@ -222,11 +288,11 @@ func (m *memoryFS) Rename(from, to string) exsys.Errno {
 	if m.readOnly {
 		return exsys.EROFS
 	}
-	from, errno := guestPath(from)
+	from, _, errno := m.resolve(from)
 	if errno != 0 {
 		return errno
 	}
-	to, errno = guestPath(to)
+	to, _, errno = m.resolve(to)
 	if errno != 0 {
 		return errno
 	}
@@ -243,10 +309,18 @@ func (m *memoryFS) Rename(from, to string) exsys.Errno {
 	if old := m.nodes[to]; old != nil && old.mode.IsDir() {
 		return exsys.EISDIR
 	}
-	if from != to {
-		delete(m.nodes, from)
-		m.nodes[to] = n
+	if from == to {
+		return 0
 	}
+	if m.nodes[to] == nil {
+		// A new name is a new entry; replacing an existing name is not. The
+		// replaced file's bytes stay charged, like an unlinked file's.
+		if errno := m.chargeEntry(to); errno != 0 {
+			return errno
+		}
+	}
+	delete(m.nodes, from)
+	m.nodes[to] = n
 	return 0
 }
 
@@ -332,8 +406,12 @@ func (f *memoryFile) Pwrite(buf []byte, offset int64) (int, exsys.Errno) {
 	if f.closed || !f.writable {
 		return 0, exsys.EBADF
 	}
-	if offset < 0 || offset > maxBytes || int64(len(buf)) > maxBytes-offset {
-		return 0, exsys.ERANGE
+	budget := int64(f.fs.limits.OutputBytes)
+	if offset < 0 || offset > budget || int64(len(buf)) > budget-offset {
+		if offset < 0 {
+			return 0, exsys.EINVAL
+		}
+		return 0, f.fs.exceeded("outputBytes", exsys.ERANGE)
 	}
 	end := offset + int64(len(buf))
 	if end > int64(len(f.node.data)) {
@@ -355,8 +433,8 @@ func (f *memoryFile) Truncate(size int64) exsys.Errno {
 		return exsys.EINVAL
 	}
 	delta := size - int64(len(f.node.data))
-	if delta > maxBytes-f.fs.used {
-		return exsys.ERANGE
+	if delta > int64(f.fs.limits.OutputBytes)-f.fs.used {
+		return f.fs.exceeded("outputBytes", exsys.ERANGE)
 	}
 	if delta > 0 {
 		f.node.data = append(f.node.data, make([]byte, delta)...)
@@ -390,7 +468,7 @@ func (f *memoryFile) Seek(offset int64, whence int) (int64, exsys.Errno) {
 	default:
 		return 0, exsys.EINVAL
 	}
-	if offset < 0 || offset > maxBytes {
+	if offset < 0 || offset > int64(f.fs.limits.OutputBytes) {
 		return 0, exsys.EINVAL
 	}
 	f.offset = offset
