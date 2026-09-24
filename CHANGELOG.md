@@ -61,6 +61,13 @@ version that ships them.
   release asset, sha256 and attestation in `mise.lock`; `deno-worker` on PATH
   beside the pinned `deno`), and `test:deno-worker` reads the required version
   from `sdk/typescript/environment.ts`, where wave 1 moved it.
+- Verification tasks for the scheduled workflows: `check:lock-urls`
+  (reachability of every locked download, with the Zig community mirrors as the
+  fallback), `test:browser-soak` and `test:deno-worker-soak` (repeated
+  cancellation and recovery), `test:sdk-go-floor` (the go.mod floor toolchain),
+  `test:sdk-go-wazero-latest` (drift against newer wazero), `audit:osv`,
+  `audit:govulncheck`, and `audit:advisories` (OSV.dev for the runtime pins and
+  the Deno lockfiles).
 
 ## capnp-wasm-compiler-host
 

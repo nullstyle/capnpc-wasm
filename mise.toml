@@ -419,3 +419,113 @@ run = "deno test --config examples/browser/deno.json --frozen examples/browser/"
 [tasks."mirror:zig"]
 description = "Stage, verify, or record checksums for a project-owned mirror of the pinned Zig toolchain: stage | verify <base-url> | lock [--write]"
 run = "deno run --allow-read --allow-write=build,mise.lock --allow-net scripts/mirror-zig.ts"
+
+# Scheduled verification (.github/workflows/nightly.yml and supply-chain.yml).
+# The tasks also run locally; they need network access.
+[tasks."check:lock-urls"]
+description = "HEAD-request every download URL recorded in mise.lock; a pruned ziglang.org build passes with a warning while a community mirror serves it"
+run = "bash scripts/check-lock-urls.sh"
+
+[tasks."test:browser-soak"]
+description = "Repeat the browser suite (each round: parity, diagnostics, and 20 cancellation-and-recovery cycles per engine); CAPNP_SOAK_ROUNDS rounds, default 5"
+depends = ["build:native", "build:sdk"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+rounds="${CAPNP_SOAK_ROUNDS:-5}"
+for ((round = 1; round <= rounds; round++)); do
+  echo "browser soak round $round of $rounds"
+  deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/run.ts "$@"
+done
+'''
+
+[tasks."test:deno-worker-soak"]
+description = "Repeat the SDK tests on the locked Deno worker runtime (termination on timeout and abort, restart, dispose); CAPNP_SOAK_ROUNDS rounds, default 5"
+depends = ["deno-worker:install", "build:wasm", "build:rust", "build:go", "build:zig"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+deno_bin="$(mise where deno-worker)/deno-worker"
+rounds="${CAPNP_SOAK_ROUNDS:-5}"
+for ((round = 1; round <= rounds; round++)); do
+  echo "worker soak round $round of $rounds on $("$deno_bin" --version | head -n 1)"
+  "$deno_bin" test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/
+done
+'''
+
+[tasks."test:sdk-go-floor"]
+description = "Run the Go SDK vet and tests with the go.mod floor toolchain (downloaded through the module proxy; GOTOOLCHAIN is otherwise local)"
+depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+floor="$(sed -n 's/^go \([0-9][0-9.]*\)$/\1/p' sdk/go/go.mod | head -n 1)"
+[[ -n "$floor" ]] || { echo "no go directive in sdk/go/go.mod" >&2; exit 1; }
+export GOTOOLCHAIN="go$floor"
+go -C sdk/go version
+go -C sdk/go vet -stdmethods=false ./...
+go -C sdk/go test -count=1 -mod=readonly ./...
+'''
+
+[tasks."test:sdk-go-wazero-latest"]
+description = "Drift signal, not a gate: build and test the Go SDK against the newest tagged wazero (when newer than the pin) and wazero main, then restore go.mod and go.sum"
+depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+cd sdk/go
+restore() { git checkout -- go.mod go.sum; }
+trap restore EXIT
+module=github.com/tetratelabs/wazero
+pinned="$(go list -m -f '{% raw %}{{.Version}}{% endraw %}' "$module")"
+newest="$(go list -m -u -f '{% raw %}{{with .Update}}{{.Version}}{{end}}{% endraw %}' "$module")"
+status=0
+for target in "$newest" main; do
+  if [[ -z "$target" ]]; then
+    echo "no tagged wazero release is newer than the pin $pinned"
+    continue
+  fi
+  go get "$module@$target"
+  resolved="$(go list -m -f '{% raw %}{{.Version}}{% endraw %}' "$module")"
+  if [[ "$resolved" == "$pinned" ]]; then
+    echo "wazero@$target resolves to the pin $pinned; nothing new to test"
+    restore
+    continue
+  fi
+  echo "testing the Go SDK against wazero $resolved ($target)"
+  if go test -count=1 ./...; then
+    echo "PASS wazero $resolved ($target)"
+  else
+    echo "FAIL wazero $resolved ($target)"
+    status=1
+  fi
+  restore
+done
+exit "$status"
+'''
+
+[tasks."audit:osv"]
+description = "Scan the Go and Rust manifests with osv-scanner (network; the scanner is installed ad hoc, outside the project lock)"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+# An install from the project root would rewrite mise.lock, so the scanner
+# runs from a scratch directory that has no project configuration.
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+mise --cd "$scratch" exec aqua:google/osv-scanner@2.6.0 -- osv-scanner scan source --format table \
+  -L "$PWD/sdk/go/go.mod" -L "$PWD/generators/go/go.mod" \
+  -L "$PWD/tests/hosts/wazero/go.mod" -L "$PWD/tests/consumers/go/go.mod" \
+  -L "$PWD/generators/rust/Cargo.lock" -L "$PWD/tests/consumers/rust/Cargo.lock"
+'''
+
+[tasks."audit:govulncheck"]
+description = "Run govulncheck over the Go SDK and the Go generator module (network: the vulnerability database and the module proxy)"
+run = [
+  "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -C sdk/go ./...",
+  "go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 -C generators/go capnproto.org/go/capnp/v3/capnpc-go",
+]
+
+[tasks."audit:advisories"]
+description = "Query OSV.dev for advisories against the runtime pins and the npm packages in the Deno lockfiles (network)"
+run = "deno run --allow-read --allow-net=api.osv.dev scripts/check-advisories.ts"
