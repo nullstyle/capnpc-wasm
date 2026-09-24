@@ -66,11 +66,20 @@ guest() {
     *) printf '%s' "$1" ;;
   esac
 }
+# capnp-test.sh derives --src-prefix from the first /src/ in its own path, which
+# can lie above the staged root; an ancestor of the root can only be guest /.
+prefix() {
+  p=\${1%/}
+  case $root/ in
+    "$p"/*) printf / ;;
+    *) guest "$1" ;;
+  esac
+}
 args=()
 for arg in "$@"; do
   case $arg in
     -I*) arg=-I$(guest "\${arg#-I}") ;;
-    --src-prefix=*) arg=--src-prefix=$(guest "\${arg#--src-prefix=}") ;;
+    --src-prefix=*) arg=--src-prefix=$(prefix "\${arg#--src-prefix=}") ;;
     *) arg=$(guest "$arg") ;;
   esac
   args+=("$arg")
@@ -307,10 +316,13 @@ suite.test(
         : item.regularFile
         ? { stdinFile: item.input }
         : { stdin: inputs.get(item.input)! };
-    const expected = new Map<string, Uint8Array>();
+    assert(
+      new Set(cases.map((item) => item.label)).size === cases.length,
+      "case labels are not unique",
+    );
+    const expected: Uint8Array[] = [];
     for (const item of cases) {
-      expected.set(
-        item.label,
+      expected.push(
         await mustSucceed([`${nativeBin}/capnp`, ...item.args], {
           ...stdinOf(item),
           label: `native ${item.label}`,
@@ -321,7 +333,7 @@ suite.test(
     await Promise.all(
       hosts.filter((host) => host.name !== "native").map(async (host) => {
         const started = performance.now();
-        for (const item of cases) {
+        for (const [index, item] of cases.entries()) {
           const label = `${host.name}: ${item.label}`;
           try {
             const result = await run(
@@ -329,7 +341,7 @@ suite.test(
               stdinOf(item),
             );
             expectSuccess(result, label);
-            assertBytesEqual(result.stdout, expected.get(item.label)!, label);
+            assertBytesEqual(result.stdout, expected[index], label);
           } catch (error) {
             failures.push(error instanceof Error ? error.message : `${error}`);
           }
@@ -342,5 +354,34 @@ suite.test(
       }),
     );
     assert(failures.length === 0, failures.join("\n\n"));
+  },
+);
+
+suite.test(
+  "capnp-test.sh maps --src-prefix when the checkout path contains /src/",
+  async () => {
+    const { work } = await stage();
+    // The script derives --src-prefix from the first /src/ in its own path. An
+    // extra src component above the staged root reproduces a checkout under a
+    // path such as ~/src/capnp-wasm, where that prefix is an ancestor of the
+    // root rather than a path inside it.
+    const nested = `${work}/nested/src/nest/src`;
+    await copyTree(`${root}/ref/capnproto/c++/src/capnp`, `${nested}/capnp`);
+    const wasmtime = wasmHosts.find((host) => host.name === "wasmtime");
+    assert(wasmtime, "no wasmtime host");
+    const host: CliHost = {
+      name: "wasmtime-nested",
+      command: guestCommand(wasmtime, "capnp", nested),
+      guestPaths: true,
+    };
+    const wrapper = `${work}/wrappers/${host.name}`;
+    await Deno.writeTextFile(wrapper, wrapperScript(host, nested));
+    await Deno.chmod(wrapper, 0o755);
+    const result = await run(["sh", `${nested}/capnp/compiler/capnp-test.sh`], {
+      cwd: work,
+      env: { CAPNP: wrapper },
+      timeoutMs: 600_000,
+    });
+    expectSuccess(result, "capnp-test.sh with an ancestor --src-prefix");
   },
 );
