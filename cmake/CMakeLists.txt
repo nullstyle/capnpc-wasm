@@ -11,6 +11,8 @@ set(CAPNP_SOURCE_DIR "" CACHE PATH "Patched disposable Cap'n Proto source checko
 if(NOT EXISTS "${CAPNP_SOURCE_DIR}/c++/src/capnp/compiler/capnp.c++")
   message(FATAL_ERROR "CAPNP_SOURCE_DIR must contain the patched upstream source")
 endif()
+set(CAPNP_UNSTRIPPED_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/unstripped" CACHE PATH
+  "Directory for the module copies that keep the sysroot's DWARF sections")
 set(src "${CAPNP_SOURCE_DIR}/c++/src")
 file(STRINGS "${CAPNP_SOURCE_DIR}/c++/CMakeLists.txt" capnp_version_definition
   REGEX "^set\\(VERSION " LIMIT_COUNT 1)
@@ -62,21 +64,30 @@ target_link_libraries(capnpc PUBLIC capnp)
 add_library(capnp_json STATIC "${src}/capnp/compat/json.c++" "${src}/capnp/compat/json.capnp.c++")
 target_link_libraries(capnp_json PUBLIC capnp)
 
-add_executable(capnp_tool "${src}/capnp/compiler/module-loader.c++" "${src}/capnp/compiler/capnp.c++")
-target_link_libraries(capnp_tool PRIVATE capnpc capnp_json)
-target_compile_definitions(capnp_tool PRIVATE CAPNP_INCLUDE_DIR="/include")
-set_target_properties(capnp_tool PROPERTIES OUTPUT_NAME capnp SUFFIX .wasm)
+function(capnp_add_tool target name libraries)
+  # Links one set of objects twice. The shipped module drops the DWARF sections
+  # that the SDK sysroot's prebuilt libraries carry (its name section stays,
+  # so traps are symbolized); the copy under CAPNP_UNSTRIPPED_OUTPUT_DIRECTORY
+  # keeps them for debugging. ARGN lists the sources.
+  add_library(${target}_objects OBJECT ${ARGN})
+  target_link_libraries(${target}_objects PRIVATE ${libraries})
+  foreach(executable IN ITEMS ${target} ${target}_unstripped)
+    add_executable(${executable} $<TARGET_OBJECTS:${target}_objects>)
+    target_link_libraries(${executable} PRIVATE ${libraries})
+    set_target_properties(${executable} PROPERTIES OUTPUT_NAME ${name} SUFFIX .wasm)
+  endforeach()
+  target_link_options(${target} PRIVATE -Wl,--strip-debug)
+  set_target_properties(${target}_unstripped PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CAPNP_UNSTRIPPED_OUTPUT_DIRECTORY}")
+endfunction()
 
-add_executable(capnpc_cpp "${src}/capnp/compiler/capnpc-c++.c++")
-target_link_libraries(capnpc_cpp PRIVATE capnp)
-set_target_properties(capnpc_cpp PROPERTIES OUTPUT_NAME capnpc-c++ SUFFIX .wasm)
-
-add_executable(capnpc_capnp "${src}/capnp/compiler/capnpc-capnp.c++")
-target_link_libraries(capnpc_capnp PRIVATE capnp)
-set_target_properties(capnpc_capnp PROPERTIES OUTPUT_NAME capnpc-capnp SUFFIX .wasm)
-
+capnp_add_tool(capnp_tool capnp "capnpc;capnp_json"
+  "${src}/capnp/compiler/module-loader.c++" "${src}/capnp/compiler/capnp.c++")
+target_compile_definitions(capnp_tool_objects PRIVATE CAPNP_INCLUDE_DIR="/include")
+capnp_add_tool(capnpc_cpp capnpc-c++ capnp "${src}/capnp/compiler/capnpc-c++.c++")
+capnp_add_tool(capnpc_capnp capnpc-capnp capnp "${src}/capnp/compiler/capnpc-capnp.c++")
 foreach(tool capnp_tool capnpc_cpp capnpc_capnp)
-  target_compile_definitions(${tool} PRIVATE "VERSION=\"${capnp_version}\"")
+  target_compile_definitions(${tool}_objects PRIVATE "VERSION=\"${capnp_version}\"")
 endforeach()
 
 install(TARGETS capnp_tool capnpc_cpp capnpc_capnp RUNTIME DESTINATION .)
