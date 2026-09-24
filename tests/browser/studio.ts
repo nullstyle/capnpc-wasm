@@ -136,6 +136,16 @@ const foreign = await rawRequest("studio.example");
 assert(foreign.startsWith("http/1.1 421"), `foreign Host served: ${foreign}`);
 const local = await rawRequest(`127.0.0.1:${server.addr.port}`);
 assert(local.startsWith("http/1.1 200"), `loopback Host refused: ${local}`);
+const legacy = await rawRequest(
+  `127.0.0.1:${server.addr.port}`,
+  "/examples/browser/",
+);
+assert(
+  legacy.startsWith("http/1.1 302") &&
+    legacy.includes(`location: http://127.0.0.1:${server.addr.port}/`) &&
+    legacy.includes("x-frame-options: deny"),
+  `legacy redirect lacks the security headers: ${legacy}`,
+);
 for (const [name, value] of Object.entries(securityHeaders)) {
   assert(
     local.includes(`${name}: ${value.toLowerCase()}`),
@@ -343,6 +353,20 @@ try {
             "true",
         `${engine}: arrow key did not move focus without selecting`,
       );
+      // Leaving the tablist and coming back lands on the selected tab, not on
+      // the tab the arrow keys last visited.
+      await page.keyboard.press("Shift+Tab");
+      assert(
+        await activeId(page) === "resize" &&
+          await page.locator("#tab-cpp").getAttribute("tabindex") === "0" &&
+          await page.locator("#tab-rust").getAttribute("tabindex") === "-1",
+        `${engine}: leaving the tablist kept the arrowed tab in the tab order`,
+      );
+      await page.keyboard.press("Tab");
+      assert(
+        await activeId(page) === "tab-cpp",
+        `${engine}: re-entering the tablist skipped the selected tab`,
+      );
       await page.keyboard.press("End");
       assert(await activeId(page) === "tab-zig", `${engine}: End key`);
       await page.keyboard.press("ArrowRight");
@@ -409,6 +433,54 @@ try {
         }`,
       );
       await page.locator("#tab-cpp").click();
+
+      // Dismissing an error from the keyboard moves focus to Generate instead
+      // of losing it with the hidden button.
+      await page.locator("#files-input").setInputFiles([{
+        name: ".DS_Store",
+        mimeType: "application/octet-stream",
+        buffer: Buffer.from([0, 0, 1]),
+      }]);
+      await page.waitForFunction(() =>
+        document.querySelector("#alert-bar")?.getAttribute("data-open") ===
+          "true"
+      );
+      await page.locator("#alert-dismiss").focus();
+      await page.keyboard.press("Enter");
+      assert(
+        await activeId(page) === "generate" &&
+          await page.locator("#alert-bar").getAttribute("data-open") ===
+            "false",
+        `${engine}: dismissing the alert dropped focus`,
+      );
+
+      // Activating a file from the keyboard keeps focus on that file's
+      // button after the sidebar is rebuilt.
+      const focusedFile = () =>
+        page.evaluate(() => ({
+          label: document.activeElement?.getAttribute("aria-label"),
+          current: document.activeElement?.getAttribute("aria-current"),
+        }));
+      await page.getByRole("button", {
+        name: "Edit types/common.capnp",
+        exact: true,
+      }).focus();
+      await page.keyboard.press("Enter");
+      const activated = await focusedFile();
+      assert(
+        activated.label === "Edit types/common.capnp" &&
+          activated.current === "true",
+        `${engine}: activating a file dropped focus: ${
+          JSON.stringify(activated)
+        }`,
+      );
+      await page.getByRole("button", { name: "Edit chat.capnp", exact: true })
+        .focus();
+      await page.keyboard.press("Enter");
+      assert(
+        (await focusedFile()).label === "Edit chat.capnp",
+        `${engine}: returning to the first file dropped focus`,
+      );
 
       // Edits keep the undo history when files are added, and a new schema
       // carries the annotations every generator needs.
