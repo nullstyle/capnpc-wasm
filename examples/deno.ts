@@ -1,4 +1,5 @@
 // Run from the root: mise exec -- deno run --allow-read=dist examples/deno.ts
+// @deno-types="../dist/typescript/mod.d.ts"
 import { createCompiler } from "../dist/typescript/mod.js";
 
 const compiler = await createCompiler({
