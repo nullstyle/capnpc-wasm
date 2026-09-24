@@ -189,6 +189,10 @@ statuses:
 `capnp-wasm --help` prints this contract and `capnp-wasm --version` prints the
 package version and the packaged Wasmtime version, both with exit 0.
 
+`mise run test:cli-parity` runs upstream `capnp-test.sh` plus conversion and
+eval matrices through the launcher, raw Wasmtime, wazero, and the Deno host,
+byte-compared with the native compiler.
+
 `mise run release:tools` prepares
 `dist/releases/capnp-wasm-tools-0.1.0-rc.3/capnp-wasm-tools-0.1.0-rc.3.tgz`.
 This smaller archive includes the compiler, standard include schemas, launcher,

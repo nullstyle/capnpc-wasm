@@ -206,6 +206,7 @@ depends = [
   "test:sdk-go",
   # The Deno example imports dist/, so the type check of examples/deno.ts lives here.
   "example:deno",
+  "test:cli-parity",
 ]
 
 [tasks."test:zig-unit"]
@@ -376,3 +377,8 @@ run = [
 description = "Run the Go SDK concurrency, cancellation, and Close tests under the race detector"
 depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig"]
 run = "go -C sdk/go test -race -count=1 -mod=readonly -run 'TestCompiler|TestGenerate|TestCancellation|TestClose|TestSleeping|TestFilesystem|TestNew|TestEngine|TestStdio|TestMemory|TestCompilationCache' ./..."
+
+[tasks."test:cli-parity"]
+description = "Compare the non-compile CLI (upstream capnp-test.sh, conversions, eval) with native on the launcher, Wasmtime, wazero, and the Deno host"
+depends = ["build:native", "build:wasm", "build:wazero"]
+run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/cli_parity_test.ts"
