@@ -158,7 +158,11 @@ Per reference:
   sizing) still apply.
 - `wasi-sdk`: the gitlink documents the installed SDK release, whose version is
   the `[tools.wasi-sdk]` pin in `mise.toml`; bump both together, rerun
-  `mise run test`, and update `patches/capnproto/README.md`.
+  `mise run test`, and update `patches/capnproto/README.md`. Refresh
+  `third_party/wasi-sdk-34/` with the steps in
+  [its README](third_party/wasi-sdk-34/README.md) (new nested commits, texts,
+  digests, directory name); `scripts/package-assets.ts` fails until the manifest
+  matches the pin and gitlinks.
 - `WASI`: documentation only.
 - Playwright engines are not a gitlink: bump `playwright` in
   `tests/browser/deno.json` and `deno.lock`, run `mise run browser:install`,

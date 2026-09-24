@@ -54,6 +54,11 @@ release status; update it instead of restating status here.
 - Test harnesses under `tests/hosts/` stay separate from the SDKs.
 - Generated files and build trees go under `build/`, distributable output under
   `dist/`, caches under `.cache/`, ad-hoc probes under `build/scratch/`.
+- Shipped Wasm modules meet the contract in `scripts/check-wasm-artifacts.ts`
+  (feature allow-list per class, no DWARF or build-host paths, size budget);
+  build scripts check every module they link and `check:wasm-artifacts` checks
+  `dist/wasm`. Third-party notice texts that no reference or toolchain ships
+  live under `third_party/`, pinned to the reference gitlinks.
 - Maintain these instructions when a convention changes.
 
 ## Verification by area
@@ -68,7 +73,8 @@ the Deno 2.6.8 lane) took 9 minutes on ubuntu-24.04 and 10 minutes on macos-15
 a local cold build is comparable. For quick iteration, run one suite task, or
 `mise run --skip-deps test:<suite>` to rerun it without rebuilding.
 
-- C++ port or Wasm feature profile: `mise run test`.
+- C++ port, Wasm feature profile, or `scripts/check-wasm-artifacts.ts`:
+  `mise run test` (includes `check:wasm-artifacts`).
 - Rust, Go, or Zig generators: `mise run test`; generated-code consumers
   exercise the pinned runtimes as well as comparing source output.
 - TypeScript runtime or bundle: `mise run test`, then `mise run test:browser`

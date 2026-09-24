@@ -311,23 +311,24 @@ For CMake cross builds, use
 
 ## Layout and references
 
-| Path           | Contents                                                                                  |
-| -------------- | ----------------------------------------------------------------------------------------- |
-| `ref/`         | Upstream Git submodules and their [source map](ref/README.md)                             |
-| `scripts/`     | Project setup, build, packaging, and verification scripts                                 |
-| `cmake/`       | Minimal synchronous C++ command build for WASI                                            |
-| `patches/`     | Documented upstream porting changes                                                       |
-| `generators/`  | Language command builds, wrappers, pinned dependency manifests, and the Zig sync manifest |
-| `sdk/`         | TypeScript worker/in-memory SDK and Go wazero SDK                                         |
-| `bin/`         | The Wasmtime launcher packaged into the compiler-only and full archives                   |
-| `examples/`    | Schema Studio and the Deno SDK example                                                    |
-| `tests/`       | Schema fixtures, native oracle, conformance suites, and development host runners          |
-| `docs/`        | Current documents, release evidence, and history; start at the [index](docs/README.md)    |
-| `.github/`     | The CI workflow (clean-checkout checks on Linux and macOS, browser job on Linux)          |
-| `release.json` | Package name, version, private flag, and license shared by the three archive flavors      |
-| `build/`       | Ignored build trees, scratch source copies, and generated files                           |
-| `dist/`        | Ignored SDK bundles, command modules, standard schemas, and prepared release archives     |
-| `.cache/`      | Ignored project caches                                                                    |
+| Path           | Contents                                                                                                                                |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `ref/`         | Upstream Git submodules and their [source map](ref/README.md)                                                                           |
+| `scripts/`     | Project setup, build, packaging, and verification scripts                                                                               |
+| `cmake/`       | Minimal synchronous C++ command build for WASI                                                                                          |
+| `patches/`     | Documented upstream porting changes                                                                                                     |
+| `generators/`  | Language command builds, wrappers, pinned dependency manifests, and the Zig sync manifest                                               |
+| `sdk/`         | TypeScript worker/in-memory SDK and Go wazero SDK                                                                                       |
+| `bin/`         | The Wasmtime launcher packaged into the compiler-only and full archives                                                                 |
+| `examples/`    | Schema Studio and the Deno SDK example                                                                                                  |
+| `tests/`       | Schema fixtures, native oracle, conformance suites, and development host runners                                                        |
+| `docs/`        | Current documents, release evidence, and history; start at the [index](docs/README.md)                                                  |
+| `third_party/` | Vendored license texts for linked components whose sources are not checked out (WASI SDK 34 runtimes), pinned to the reference gitlinks |
+| `.github/`     | The CI workflow (clean-checkout checks on Linux and macOS, browser job on Linux)                                                        |
+| `release.json` | Package name, version, private flag, and license shared by the three archive flavors                                                    |
+| `build/`       | Ignored build trees, scratch source copies, and generated files                                                                         |
+| `dist/`        | Ignored SDK bundles, command modules, standard schemas, and prepared release archives                                                   |
+| `.cache/`      | Ignored project caches                                                                                                                  |
 
 `mise run refs:sync` initializes only the top-level references at the commits
 recorded by this repository, and additionally fetches the older audited
