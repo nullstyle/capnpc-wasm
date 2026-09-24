@@ -1,4 +1,10 @@
+// Verifies the compiler-host archive: the candidate is prepared into
+// build/test/compiler-host (never dist/releases), checked for
+// reproducibility and asset integrity, extracted into a fresh directory under
+// build/test, and exercised by an external Deno consumer with a fresh cache,
+// the packaged README example, and a link check over the packaged documents.
 import { packageFiles, sha256, verifyRelease } from "./verify-release.ts";
+import { archiveStem, flavorNamed, readMetadata } from "./release.ts";
 import { compilerPathFixture } from "../tests/package/compiler-path-fixture.ts";
 
 // Optional executable override verifies a supported older Deno without changing
@@ -8,9 +14,11 @@ if (Deno.args.length > 1) {
   throw new Error("usage: test-compiler-host-package.ts [deno]");
 }
 const repository = Deno.cwd();
-const metadata = JSON.parse(await Deno.readTextFile("release.json"));
-const stem = `capnp-wasm-compiler-host-${metadata.version}`;
-const directory = `${repository}/dist/releases/${stem}`;
+const metadata = await readMetadata();
+const flavor = flavorNamed("capnp-wasm-compiler-host");
+const out = "build/test/compiler-host";
+const stem = archiveStem(flavor, metadata.version);
+const directory = `${repository}/${out}/${stem}`;
 const archive = `${directory}/${stem}.tgz`;
 async function command(
   args: string[],
@@ -75,10 +83,14 @@ const prepare = [
   Deno.execPath(),
   "run",
   "--allow-read",
-  "--allow-write=dist",
+  "--allow-write=build",
   "--allow-run=git",
   "scripts/release.ts",
-  "--compiler-host",
+  flavor.flag!,
+  "--out",
+  out,
+  "--allow-dirty",
+  "--allow-existing-tag",
 ];
 await command(prepare);
 const archiveHash = await sha256(await Deno.readFile(archive));
@@ -99,8 +111,12 @@ for (
     "wasm/capnp.wasm",
     "include/capnp/schema.capnp",
     "include/capnp/stream.capnp",
+    "docs/typescript.md",
+    "README.md",
     "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
     "licenses/capnpc-wasm-LICENSE",
+    "licenses/browser_wasi_shim-LICENSE-MIT",
     "provenance/sources.json",
     "verify-release.ts",
   ]
@@ -112,27 +128,88 @@ for (
 if (
   manifest.files.some((file) =>
     file.path.startsWith("sdk/") || file.path.startsWith("wasm/capnpc-") ||
-    file.path.startsWith("bin/") || file.path.startsWith("runtime/")
+    file.path.startsWith("bin/") || file.path.startsWith("runtime/") ||
+    file.path === "licenses/zig-LICENSE" || file.path === "licenses/go-LICENSE"
   )
 ) throw new Error("compiler-host package contains unrelated tools or SDKs");
-const checksums = await Deno.readTextFile(`${directory}/SHA256SUMS`);
 const manifestHash = await sha256(
   await Deno.readFile(`${directory}/package/manifest.json`),
 );
+const manifestAssetHash = await sha256(
+  await Deno.readFile(`${directory}/${stem}.manifest.json`),
+);
+const sbomHash = await sha256(
+  await Deno.readFile(`${directory}/${stem}.spdx.json`),
+);
 if (
-  checksums !==
-    `${archiveHash}  ${stem}.tgz\n${manifestHash}  package/manifest.json\n`
+  manifestAssetHash !== manifestHash ||
+  await Deno.readTextFile(`${directory}/SHA256SUMS`) !==
+    `${archiveHash}  ${stem}.tgz\n${manifestHash}  ${stem}.manifest.json\n${sbomHash}  ${stem}.spdx.json\n`
 ) {
-  throw new Error("compiler-host checksum receipt does not match");
+  throw new Error("compiler-host checksum receipt does not match the assets");
 }
+await Deno.mkdir("build/test", { recursive: true });
 const temporary = await Deno.realPath(
-  await Deno.makeTempDir({ prefix: "capnp-compiler-host-" }),
+  await Deno.makeTempDir({
+    dir: `${repository}/build/test`,
+    prefix: "capnp-compiler-host-",
+  }),
 );
 try {
   const consumer = `${temporary}/external consumer with spaces`;
   await Deno.mkdir(consumer);
   await command(["cmake", "-E", "tar", "xzf", archive], consumer);
   const extracted = `${consumer}/package`;
+  await verifyRelease(extracted);
+  await command([
+    Deno.execPath(),
+    "run",
+    "--allow-read",
+    "scripts/verify-release.ts",
+    "--sums",
+    `${directory}/SHA256SUMS`,
+    "--expect-manifest-sha256",
+    manifestHash,
+    "--expect-commit",
+    manifest.source.commit,
+    extracted,
+  ]);
+  // Packaged documents: every relative link resolves inside the package, and
+  // the README example runs from the package root as written.
+  await command([
+    Deno.execPath(),
+    "run",
+    "--allow-read",
+    `${repository}/scripts/check-links.ts`,
+  ], extracted);
+  const readme = await Deno.readTextFile(`${extracted}/README.md`);
+  if (
+    !readme.includes(`# ${manifest.name} ${manifest.version}`) ||
+    !readme.includes(manifest.source.commit) || readme.includes("{{")
+  ) throw new Error("packaged README is not the rendered template");
+  const example = /^```ts example\n([\s\S]*?)^```$/m.exec(readme)?.[1];
+  if (!example) throw new Error("packaged README has no ts example block");
+  await Deno.writeTextFile(`${extracted}/readme-example.ts`, example);
+  const exampleOutput = await command(
+    [
+      deno,
+      "run",
+      "--check",
+      "--no-config",
+      "--cached-only",
+      "--no-prompt",
+      "--allow-read=.",
+      "readme-example.ts",
+    ],
+    extracted,
+    { DENO_DIR: `${temporary}/fresh-deno-cache` },
+  );
+  if (!/^CodeGeneratorRequest: [1-9]\d* bytes$/.test(exampleOutput)) {
+    throw new Error(
+      `README example printed unexpected output: ${exampleOutput}`,
+    );
+  }
+  await Deno.remove(`${extracted}/readme-example.ts`);
   await verifyRelease(extracted);
   const modulePath = `${extracted}/wasm/capnp.wasm`;
   const original = await Deno.readFile(modulePath);
@@ -259,7 +336,6 @@ try {
       "Deno worker counter stopped within the engine termination grace",
     );
   }
-  await Deno.mkdir("build/test", { recursive: true });
   const receiptPath = `build/test/compiler-host-package-${result.deno}.json`;
   await Deno.writeTextFile(
     receiptPath,
@@ -270,10 +346,16 @@ try {
         source: manifest.source,
         archiveSha256: archiveHash,
         manifestSha256: manifestHash,
+        sbomSha256: sbomHash,
         files: await packageFiles(installed),
         checks: [
+          "candidate prepared under build/test, not dist/releases",
           "reproducible archive and stale staging cleanup",
           "complete extraction inventory and identity",
+          "manifest asset and SBOM listed in SHA256SUMS; verifier --sums, --expect-manifest-sha256, and --expect-commit",
+          "flavor-specific license texts and THIRD_PARTY_NOTICES.md",
+          "packaged documents link only inside the package or to the repository at the producer commit",
+          "packaged README TypeScript example ran with --check",
           "modified, missing and unexpected file rejection and restored verification",
           "fresh external consumer cache with no private repository access",
           ...result.checks,
