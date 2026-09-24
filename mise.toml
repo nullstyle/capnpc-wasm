@@ -18,7 +18,13 @@ cmake = "4.4.3"
 ninja = "1.13.2"
 go = "1.27.1"
 deno = "2.9.6"
-# Match ref/capnp-zig/mise.toml when updating that reference.
+# Match ref/capnp-zig/mise.toml when updating that reference. This development
+# build is no longer on ziglang.org: mise installs it from the Zig community
+# mirrors, verifies the ZSF minisign signature, and checks the sha256 that
+# mise.lock records for all four platforms. Those checksums come from
+# signature-verified downloads (`mise run mirror:zig -- lock --write` records
+# them; `mise lock` cannot for a pruned build), and `mise run mirror:zig -- stage`
+# prepares a project-owned mirror of the exact tarballs.
 zig = "0.17.0-dev.1683+5ceec001b"
 wasm-tools = "1.258.0"
 wasmtime = "48.0.1"
@@ -386,3 +392,7 @@ run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars
 [tasks."test:studio-unit"]
 description = "Run the Schema Studio state and workspace unit tests on the pinned Deno (no browser, no build)"
 run = "deno test --config examples/browser/deno.json --frozen examples/browser/"
+
+[tasks."mirror:zig"]
+description = "Stage, verify, or record checksums for a project-owned mirror of the pinned Zig toolchain: stage | verify <base-url> | lock [--write]"
+run = "deno run --allow-read --allow-write=build,mise.lock --allow-net scripts/mirror-zig.ts"

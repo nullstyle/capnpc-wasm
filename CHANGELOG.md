@@ -49,6 +49,11 @@ version that ships them.
   sidebar, and the page has an `h1`; the pure `state.js` module has Deno unit
   tests (`test:studio-unit`), and the browser driver adds keyboard, axe-core
   (4.13.0), cancellation, and asset-failure coverage.
+- Toolchain: `mise.lock` records the sha256 and minisign provenance of the
+  pinned Zig development build for all four platforms (ziglang.org no longer
+  serves it; mise verifies the community-mirror download against them), and
+  `mise run mirror:zig` stages, verifies, and records checksums for a
+  project-owned mirror of the tarballs.
 
 ## capnp-wasm-compiler-host
 
