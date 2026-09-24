@@ -82,22 +82,31 @@ guest's own validation.
 
 ### Packaged launcher (`bin/capnp-wasm`)
 
-- Runs `wasmtime run -W exceptions=y -S cwd=/ --dir <root>::/ <module>` with
-  exactly one host directory mapped as guest `/`: the `--workspace` for the
-  compiler, the `--output` directory for a generator. That mapping is a
-  read-write capability, not a read-only mount, and `/` is accepted as a root
-  (`GAP1-02`); a generator writes straight into `--output`, so a failed run can
-  leave partial output (`GAP1-01`). Wasmtime gives the guest no network and does
-  not pass the host environment through (`GAP1-05`). `CAPNP_WASM_WASMTIME`,
-  which selects the runtime executable, is trusted.
-- There is no time or memory ceiling beyond the 4 GiB wasm32 address space
-  (`SEC-02`). Confinement rests on Wasmtime's preopen handling, with no
-  regression tests for symlink or traversal escapes in this repository
-  (`SEC-07`); a workspace symlink pointing outside the workspace fails with an
-  uncaught exception (`GAP1-V2`). Package-root resolution follows the invocation
-  path and honors `CDPATH` (`SEC-06`, `GAP1-V1`).
-- Use a disposable workspace and a fresh output directory per run, and copy
-  outputs into place only after exit 0.
+- Runs
+  `wasmtime run -W exceptions=y -W max-wasm-stack=8388608
+  -W max-memory-size=268435456 -W timeout=300s -D max-backtrace=16 -S cwd=/
+  --dir <root>::/ --argv0 <tool> <module>`
+  with exactly one host directory mapped as guest `/`. The compiler's root is a
+  fresh write-protected copy of `--workspace` (`/` is refused, `$HOME` warns,
+  the copy is bounded); a generator's root is an empty staging directory whose
+  files move into `--output` only after exit 0, refusing directory conflicts,
+  read-only files, and symlinks at any destination or parent. Wasmtime gives the
+  guest no network and the guest environment is empty (`CAPNPC_ZIG_*` produces a
+  warning). `CAPNP_WASM_WASMTIME` and `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`,
+  which select and accept the runtime, are trusted; `CAPNP_WASM_TIMEOUT`,
+  `CAPNP_WASM_MAX_MEMORY`, and `CAPNP_WASM_MAX_WORKSPACE` are validated.
+- Memory, stack, and time are bounded by Wasmtime options; a timeout or stack
+  exhaustion exits 134 with a bounded backtrace that names only the module
+  basename, and memory exhaustion surfaces as the guest's own error. Confinement
+  rests on Wasmtime's preopen handling and is covered by regression tests for
+  symlink, `..`, and traversal escapes in both modes
+  (`tests/package/launcher.ts`); escaping workspace symlinks are reported by a
+  launcher warning before the guest fails on them. Package-root resolution
+  ignores `CDPATH` and follows symlinks.
+- Running as root removes the copy's permission-based read-only guarantee; a
+  process killed with SIGKILL can leave a hidden `.capnp-wasm.*` staging
+  directory next to `--output` or a `capnp-wasm.*` workspace copy under
+  `$TMPDIR`.
 
 ### Development runners (`tests/hosts/`)
 
@@ -155,23 +164,24 @@ independent check.
 - Pin the archive digests from the published releases table, run
   `verify-release.ts` before use, and load module bytes only from that verified
   package.
-- Generate into fresh directories and publish only after success. With the
-  launcher, treat the workspace as writable by the guest.
+- Generate into fresh directories and publish only after success. The launcher
+  copies the workspace and publishes generator output only after exit 0; SDK
+  callers keep this discipline themselves.
 - In browsers, keep the worker script URL alive for restarts and serve the
   application with a Content-Security-Policy that allows worker creation and
   Wasm compilation only from your origin.
 
 ## Known gaps
 
-| Area                                    | Gap                                                                                 | Audit ids                               |
-| --------------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------- |
-| TypeScript memory bounds                | Read-side WASI imports and open descriptors can exceed `memoryPages`                | `SEC-01`, `TS-03`, `TS-V1`              |
-| Execution deadlines                     | Only Deno 2.6.8 stops a terminated worker; WebKit and Bun never do; no direct bound | `SEC-03`, `TS-13`, `GAP2-V1`, `GAP2-02` |
-| Worker restart                          | Every failed job replaces the worker                                                | `TS-01`, `GAP2-V2`                      |
-| Go deadlines and shutdown               | Sleeping guests ignore deadlines; `Close` and `New` ignore contexts                 | `GO-01`, `GO-02`, `GO-V2`               |
-| Launcher output and inputs              | Non-transactional output; read-write workspace; `/` accepted                        | `GAP1-01`, `GAP1-02`                    |
-| Launcher ceilings and confinement tests | No time or memory ceiling; no escape regression tests; symlink handling             | `SEC-02`, `SEC-07`, `GAP1-V2`           |
-| Launcher invocation                     | `CDPATH` and symlinked invocation affect package-root resolution                    | `SEC-06`, `GAP1-V1`                     |
-| Release trust                           | Unsigned, hand-built assets; CI token and download hardening                        | `SEC-04`, `SEC-08`                      |
-| Names and diagnostics                   | Control characters pass through; host filesystems differ                            | `SEC-05`, `GAP3-07`                     |
-| Studio                                  | No Content-Security-Policy from the example server                                  | `SEC-10`                                |
+| Area                                    | Gap                                                                                    | Audit ids                               |
+| --------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------- |
+| TypeScript memory bounds                | Read-side WASI imports and open descriptors can exceed `memoryPages`                   | `SEC-01`, `TS-03`, `TS-V1`              |
+| Execution deadlines                     | Only Deno 2.6.8 stops a terminated worker; WebKit and Bun never do; no direct bound    | `SEC-03`, `TS-13`, `GAP2-V1`, `GAP2-02` |
+| Worker restart                          | Every failed job replaces the worker                                                   | `TS-01`, `GAP2-V2`                      |
+| Go deadlines and shutdown               | Sleeping guests ignore deadlines; `Close` and `New` ignore contexts                    | `GO-01`, `GO-02`, `GO-V2`               |
+| Launcher output and inputs              | Resolved: staged output and a read-only workspace copy; `/` refused                    | `GAP1-01`, `GAP1-02` (fixed)            |
+| Launcher ceilings and confinement tests | Resolved: 256 MiB, 8 MiB stack, 300 s bounds; escape regression tests; symlink warning | `SEC-02`, `SEC-07`, `GAP1-V2` (fixed)   |
+| Launcher invocation                     | Resolved: `CDPATH`-safe, symlink-resolving, executable with `package.json` `bin`       | `SEC-06`, `GAP1-V1` (fixed)             |
+| Release trust                           | Unsigned, hand-built assets; CI token and download hardening                           | `SEC-04`, `SEC-08`                      |
+| Names and diagnostics                   | Control characters pass through; host filesystems differ                               | `SEC-05`, `GAP3-07`                     |
+| Studio                                  | No Content-Security-Policy from the example server                                     | `SEC-10`                                |

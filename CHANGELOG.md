@@ -12,6 +12,13 @@ version that ships them.
   requirements, published-release digests, security policy, threat model,
   contributor guide, architecture overview, and a dated release-readiness gate
   table; historical sprint and audit records moved to `docs/history/`.
+- Launcher: executable with `bin` entry, symlink/CDPATH-safe self-location, 256
+  MiB/8 MiB/300 s guest bounds with env overrides, Wasmtime patch-release
+  acceptance, `--help`/`--version`, exit-code contract, `argv[0]` `capnp`,
+  read-only workspace copy, staged generator output.
+- Tests: `test:cli-parity` runs upstream `capnp-test.sh` and conversion/eval
+  matrices on native, the launcher, Wasmtime, wazero, and the Deno host,
+  byte-compared with native.
 
 ## capnp-wasm-compiler-host
 

@@ -40,17 +40,18 @@ deno run --allow-read ./package/verify-release.ts ./package
 mkdir -p "$PWD/work/input/include" "$PWD/work/output"
 cp -R package/include/. "$PWD/work/input/include/"
 cp example.capnp "$PWD/work/input/"
-bash package/bin/capnp-wasm compiler --workspace "$PWD/work/input" -- \
+package/bin/capnp-wasm compiler --workspace "$PWD/work/input" -- \
   compile --no-standard-import -I/include --src-prefix=/ -o- /example.capnp \
   > "$PWD/work/request.bin"
 ```
 
-The launcher requires Wasmtime 48.0.1 (recorded in
-`package/runtime/wasmtime-version`) on `PATH` or in `CAPNP_WASM_WASMTIME`.
-`request.bin` is a standard unpacked `CodeGeneratorRequest`; feed it to a
-generator built against your own runtime pin with `capnp-wasm generator`, as the
-[launcher contract](docs/releases.md#repository-toolchain-launcher) shows. Deno
-and browser applications use the
+The launcher requires Wasmtime 48.0.1 or a newer 48.0.x patch release (recorded
+in `package/runtime/wasmtime-version`) on `PATH` or in `CAPNP_WASM_WASMTIME`; it
+runs the compiler against a read-only copy of the workspace with memory and time
+bounds. `request.bin` is a standard unpacked `CodeGeneratorRequest`; feed it to
+a generator built against your own runtime pin with `capnp-wasm generator`, as
+the [launcher contract](docs/releases.md#repository-toolchain-launcher) shows.
+Deno and browser applications use the
 [compiler-host archive](docs/releases.md#compiler-and-typescript-host-package)
 instead: it bundles the compiler with the TypeScript SDK and needs no Wasmtime.
 
@@ -203,19 +204,19 @@ Evidence as of 2026-09-22. "Tested" means a check runs on every push to `main`;
 the supported set beyond that is a pending decision recorded in
 [release readiness](docs/release-readiness.md).
 
-| Host or runtime                                                                      | Status                                                                                 | Evidence                                                         |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Linux x64 (ubuntu-24.04 with `g++-14` and `pkg-config`)                              | Tested: build, tests, packaging                                                        | CI job `check`                                                   |
-| macOS arm64 (macos-15 with Xcode Command Line Tools)                                 | Tested: build, tests, packaging                                                        | CI job `check`                                                   |
-| Linux arm64, macOS x64                                                               | Lockfile platforms only; untested                                                      | None                                                             |
-| Windows                                                                              | Untested; no support claimed                                                           | None                                                             |
-| Wasmtime 48.0.1                                                                      | Tested; the packaged launcher accepts exactly this version                             | `test:package`, `test:launcher`, `tests/toolchain_test.ts`       |
-| wazero `v1.12.1-0.20260908083515-451613caac44`, compiler engine with experimental EH | Tested                                                                                 | `sdk/go` tests, `test:package`, `tests/toolchain_test.ts`        |
-| Deno 2.9.6, direct execution                                                         | Tested                                                                                 | `mise run test` (`test:sdk-ts`)                                  |
-| Deno 2.6.8, worker execution                                                         | Tested; the only Deno version `createWorkerCompiler` accepts                           | CI step "Verify supported Deno worker execution and termination" |
-| Chromium 153.0.8010.12 (r1243), Firefox 155.0 (r1543), WebKit 26.6 (r2359) on Linux  | Tested: offline SDK parity, cancellation, Schema Studio                                | CI job `browsers`                                                |
-| Browsers on macOS                                                                    | Untested in CI; a local run is recorded in [browser evidence](tests/browser/README.md) | None                                                             |
-| Node, Bun, other browser versions                                                    | Untested; no support claimed                                                           | None                                                             |
+| Host or runtime                                                                      | Status                                                                                                                                                  | Evidence                                                         |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Linux x64 (ubuntu-24.04 with `g++-14` and `pkg-config`)                              | Tested: build, tests, packaging                                                                                                                         | CI job `check`                                                   |
+| macOS arm64 (macos-15 with Xcode Command Line Tools)                                 | Tested: build, tests, packaging                                                                                                                         | CI job `check`                                                   |
+| Linux arm64, macOS x64                                                               | Lockfile platforms only; untested                                                                                                                       | None                                                             |
+| Windows                                                                              | Untested; no support claimed                                                                                                                            | None                                                             |
+| Wasmtime 48.0.1                                                                      | Tested; the packaged launcher accepts this version, newer 48.0.x patch releases (warning), or one version named by `CAPNP_WASM_WASMTIME_ACCEPT_VERSION` | `test:package`, `test:launcher`, `tests/toolchain_test.ts`       |
+| wazero `v1.12.1-0.20260908083515-451613caac44`, compiler engine with experimental EH | Tested                                                                                                                                                  | `sdk/go` tests, `test:package`, `tests/toolchain_test.ts`        |
+| Deno 2.9.6, direct execution                                                         | Tested                                                                                                                                                  | `mise run test` (`test:sdk-ts`)                                  |
+| Deno 2.6.8, worker execution                                                         | Tested; the only Deno version `createWorkerCompiler` accepts                                                                                            | CI step "Verify supported Deno worker execution and termination" |
+| Chromium 153.0.8010.12 (r1243), Firefox 155.0 (r1543), WebKit 26.6 (r2359) on Linux  | Tested: offline SDK parity, cancellation, Schema Studio                                                                                                 | CI job `browsers`                                                |
+| Browsers on macOS                                                                    | Untested in CI; a local run is recorded in [browser evidence](tests/browser/README.md)                                                                  | None                                                             |
+| Node, Bun, other browser versions                                                    | Untested; no support claimed                                                                                                                            | None                                                             |
 
 ## Generated code runtime requirements
 
