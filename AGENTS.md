@@ -56,9 +56,9 @@ release status; update it instead of restating status here.
 `mise run check` runs `lint` (static checks with no build), `doctor`, and `test`
 (the parity, Zig, SDK, and feature-corpus suites, one `test:<suite>` task each,
 building only what it reads). `test:browser`, `test:studio`, `test:package`,
-`test:launcher`, and the Deno 2.6.8 worker lane are separate and run only when
-named. The CI clean-checkout job (setup, `check`, `test:package`, and the Deno
-2.6.8 lane) took 9 minutes on ubuntu-24.04 and 10 minutes on macos-15 in
+`test:launcher`, and `test:deno-worker` are separate and run only when named.
+The CI clean-checkout job (setup, `check`, `test:package`, and the Deno 2.6.8
+lane) took 9 minutes on ubuntu-24.04 and 10 minutes on macos-15 in
 [run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070);
 a local cold build is comparable. For quick iteration, run one suite task, or
 `mise run --skip-deps test:<suite>` to rerun it without rebuilding.
@@ -69,9 +69,8 @@ a local cold build is comparable. For quick iteration, run one suite task, or
 - TypeScript runtime or bundle: `mise run test`, then `mise run test:browser`
   (after `mise run browser:install` once), and the Deno 2.6.8 worker lane in
   [CONTRIBUTING.md](CONTRIBUTING.md#reproducing-the-ci-lanes)
-  (`mise run test:deno-worker` once available).
-- Go SDK: `mise exec -- go -C sdk/go test -count=1 -mod=readonly ./...` and
-  `mise exec -- go -C sdk/go vet -stdmethods=false ./...`.
+  (`mise run test:deno-worker`).
+- Go SDK: `mise run test:sdk-go` (`lint` runs the vet).
 - Schema Studio (`examples/browser/`, `scripts/build-studio.ts`,
   `scripts/serve-example.ts`): `mise run test:studio`.
 - Release scripts, `bin/capnp-wasm`, or packaged docs: `mise run test:package`
@@ -127,12 +126,18 @@ finish with `mise run ci` before a rebase or hand-off.
 
 ## Zig synchronization
 
-- `generators/zig/sync.json` records the native capnp-zig commit, the digest of
-  the exported source tree, and the hashes of 36 mirrored fixtures.
-  `scripts/build-zig.sh` runs `check:zig-sync` on every build; drift fails it.
-- Bump `ref/capnp-zig` with the checklist in `CONTRIBUTING.md`: gitlink,
-  `check-zig-sync.ts --record-native`, re-copied fixtures, and the Zig pin in
-  `mise.toml` and `mise.lock`.
+- The `ref/capnp-zig` gitlink is the source of truth. `generators/zig/sync.json`
+  only maps the 36 mirrored fixtures to their native paths and records no
+  hashes. `mise run check:zig-sync` (part of every `build:zig`) compares the
+  prepared sources and the mirrored fixtures with the gitlink; drift fails it.
+- Bump `ref/capnp-zig` with the checklist in `CONTRIBUTING.md`: stage the
+  gitlink, refresh the mirrors from it and review the diff, then align the Zig
+  pin in `mise.toml` and `mise.lock`:
+
+  ```sh
+  mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \
+    scripts/check-zig-sync.ts --update-fixtures
+  ```
 - `generators/zig/historical-reference` pins the audited revision `08a3e3d` that
   the wire tests use as an oracle; `refs:sync` fetches it. It stays fixed across
   bumps.
@@ -145,4 +150,4 @@ finish with `mise run ci` before a rebase or hand-off.
   `mise run test` on the pinned Deno does not cover worker cancellation. Run the
   CI lane locally with the commands in
   [CONTRIBUTING.md](CONTRIBUTING.md#reproducing-the-ci-lanes)
-  (`mise run test:deno-worker` once available).
+  (`mise run test:deno-worker`).

@@ -8,7 +8,11 @@
 > exists: every Zig patch has since been incorporated into capnp-zig, and the
 > generator builds from the pristine pinned reference. Current behavior is
 > documented in the [Zig generator guide](../../generators/zig/README.md) and
-> the [synchronization history](../../patches/capnp-zig/README.md).
+> the [synchronization history](../../patches/capnp-zig/README.md). Note added
+> 2026-09-23: the pristine oracle binary `build/native/bin/capnpc-zig-upstream`
+> cited under "Scope and method" is no longer produced (`scripts/build-zig.sh`
+> removes stale copies); `build/native/bin/capnpc-zig` is built from the
+> pristine pinned reference and needs no separate oracle.
 
 Status: complete. Audit window closed 2026-09-08 against capnpc-wasm `main` at
 `1e095b4`. Detailed evidence lived in three sub-reports under an untracked

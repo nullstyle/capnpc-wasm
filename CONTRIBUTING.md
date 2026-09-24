@@ -55,17 +55,19 @@ Clean checkout (ubuntu-24.04 and macos-15):
 mise run setup
 mise run check
 mise run test:package
-mise --cd "$(mktemp -d)" install deno@2.6.8
-mise exec deno@2.6.8 -- deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/sdk_test.ts
-mise exec -- deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts "$(mise where deno@2.6.8)/bin/deno"
-git diff --exit-code
+mise run test:deno-worker
+test -z "$(git status --porcelain)"
 ```
+
+`mise install` and `mise uninstall` run from the project root rewrite
+`mise.lock`, so `deno-worker:install`, which `test:deno-worker` depends on,
+installs the worker Deno with `--cd` from a scratch directory.
 
 Browsers (ubuntu-24.04):
 
 ```sh
 mise exec -- deno run --config tests/browser/deno.json --frozen --allow-read --allow-env --allow-sys --allow-run --allow-net tests/browser/playwright.ts install-deps chromium firefox webkit
-mise exec -- deno test --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-env --allow-sys tests/browser/playwright_test.ts
+mise run test:browser-bootstrap
 mise run browser:install chromium firefox webkit
 mise run test:browser chromium firefox webkit
 mise run test:studio chromium firefox webkit
@@ -95,7 +97,10 @@ For every reference under `ref/`:
 
 1. `git -C ref/<name> fetch origin` and `git -C ref/<name> checkout <commit>`,
    then review the upstream changes between the old and new commits.
-2. `git add ref/<name>` records the gitlink; `mise run refs:status` shows it.
+2. `git add ref/<name>` stages the gitlink; `mise run refs:status` shows it. The
+   build scripts and `doctor` read the recorded revision from the index
+   (`scripts/lib/refs.sh`) and require the checkout to be clean at it, so stage
+   the bump before building.
 3. Run the area's verification from the table above, then `mise run check`.
 4. When generated code or its runtime requirement changes, update the runtime
    tables in [README.md](README.md#generated-code-runtime-requirements) and
@@ -118,25 +123,26 @@ Per reference:
   (`mise exec -- cargo update --manifest-path <Cargo.toml>`), and rebuild with
   `mise run build:rust`, which uses `--locked` and fails on a stale lockfile.
 - `go-capnp`: `generators/go/go.mod` and `tests/consumers/go/go.mod` replace the
-  module with the checkout, so their `require` lines name only the upstream base
-  tag (`v3.1.0-alpha.2` today). Change that version only when the new commit
-  follows a newer upstream tag, then run `mise exec -- go -C <dir> mod tidy` in
-  both directories so `go.sum` matches; builds use `-mod=readonly`.
+  module with the `ref/go-capnp` checkout, which `build:go` and `doctor` require
+  to be clean at the staged gitlink, so their `require` lines name only the
+  upstream base tag (`v3.1.0-alpha.2` today). Change that version only when the
+  new commit follows a newer upstream tag, then run
+  `mise exec -- go -C <dir> mod tidy` in both directories so `go.sum` matches;
+  builds use `-mod=readonly`.
 - `capnp-zig`, in this order: (a) if `ref/capnp-zig/mise.toml` changed its `zig`
-  line, bump the tool pin as above; (b) run `mise run build:zig`, which fails in
-  `check-zig-sync.ts` because the exported tree no longer matches
-  `generators/zig/sync.json`; (c) record the new manifest from the clean
-  checkout:
+  line, bump the tool pin as above; (b) with the new gitlink staged, run
+  `mise run build:zig`, which exports the tree at the gitlink and fails in
+  `check-zig-sync.ts` for every mirrored fixture that differs from its native
+  file; (c) refresh the mirrors from the gitlink and review the diff:
 
   ```sh
-  mise exec -- deno run --allow-read --allow-write=generators/zig/sync.json \
-    --allow-run=git scripts/check-zig-sync.ts --record-native ref/capnp-zig
+  mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \
+    scripts/check-zig-sync.ts --update-fixtures
   ```
 
-  Record mode verifies the mirrored fixtures against the native commit and stops
-  at the first `Fixture differs from native: <path>`. Copy that fixture from the
-  `native` path listed in `sync.json` to its mirrored `path`, and record again
-  until it succeeds; (d) run `mise run test` (the reflection, generator API, RPC
+  `generators/zig/sync.json` only maps native fixture paths to their mirrors
+  (add an entry for a new fixture); every expectation comes from the reference
+  commit itself; (d) run `mise run test` (the reflection, generator API, RPC
   codegen, wire, feature corpus, SDK, and browser suites all consume Zig
   output), and `mise run test:browser`; (e) leave
   `generators/zig/historical-reference` unchanged; it pins the wire suite's

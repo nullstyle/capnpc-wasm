@@ -78,13 +78,12 @@ The nightly gate is measured in a different repository. The machine-readable
 ledger is [nightly-confidence.json](release-evidence/nightly-confidence.json).
 It records the workflow (`nullstyle/capnp-zig`, `.github/workflows/nightly.yml`,
 `schedule` event, 09:17 UTC), the pinned native revision
-`0fb8df40126ea166f95016963c465b03db22819e` (the `ref/capnp-zig` gitlink and
-`sync.json` `nativeCommit`), the accepted Wasm revision `94ba6b2`, the rules,
-and one audited cycle. Its last audited scheduled date is 2026-09-09 and its
-consecutive count is 1; it has not been updated since commit `b8d8e3f`. This
-repository has no scheduled workflow of its own, and the daily follow-up the
-ledger names (05:00 America/Anchorage) is a manual step that was last performed
-on 2026-09-09.
+`0fb8df40126ea166f95016963c465b03db22819e` (the `ref/capnp-zig` gitlink), the
+accepted Wasm revision `94ba6b2`, the rules, and one audited cycle. Its last
+audited scheduled date is 2026-09-09 and its consecutive count is 1; it has not
+been updated since commit `b8d8e3f`. This repository has no scheduled workflow
+of its own, and the daily follow-up the ledger names (05:00 America/Anchorage)
+is a manual step that was last performed on 2026-09-09.
 
 Ledger rules, copied from the JSON: every job must succeed; execution receipts
 for every discovered fuzz target are audited against the exact source revision
