@@ -189,7 +189,7 @@ statuses:
 | 134   | Wasmtime trap: timeout (`wasm trap: interrupt`), stack exhaustion, or a guest fault; the module's basename and a bounded backtrace are printed on stderr            |
 | 1     | Wasmtime could not load or instantiate a module whose magic bytes were valid                                                                                        |
 | 128+N | The launcher was stopped by signal N after forwarding it to the guest and removing its staging directory                                                            |
-| other | A failing launcher command of its own (for example `mkdir` or `chmod` on the staging copy) exits with that command's status, usually 1, and its message             |
+| other | Any other failure of one of the launcher's own commands exits with that command's status, usually 1, after its message                                              |
 
 `capnp-wasm --help` prints this contract and `capnp-wasm --version` prints the
 package version and the packaged Wasmtime version, both with exit 0.
