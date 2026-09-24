@@ -1,3 +1,4 @@
+import { wasiImportNames } from "./runtime.ts";
 import type { Language, Modules } from "./types.ts";
 
 const languages: readonly Language[] = ["cpp", "rust", "go", "zig"];
@@ -161,6 +162,22 @@ export async function compileBounded(
         `unsupported module import: ${entry.module}.${entry.name} (${entry.kind})`,
       );
     }
+    if (!wasiImportNames.has(entry.name)) {
+      throw new TypeError(
+        `unsupported WASI import: wasi_snapshot_preview1.${entry.name}`,
+      );
+    }
+  }
+  const exports = WebAssembly.Module.exports(compiled);
+  if (
+    !exports.some((entry) =>
+      entry.name === "memory" && entry.kind === "memory"
+    ) ||
+    !exports.some((entry) =>
+      entry.name === "_start" && entry.kind === "function"
+    )
+  ) {
+    throw new TypeError("WASI command must export memory and _start");
   }
   return compiled;
 }

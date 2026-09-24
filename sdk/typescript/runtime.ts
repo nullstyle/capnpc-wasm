@@ -38,15 +38,32 @@ export class CommandError extends Error {
   }
 }
 
+/** The WASI preview1 functions the pinned shim implements, by import name. */
+export const wasiImportNames: ReadonlySet<string> = new Set(
+  Object.keys(new WASI([], [], [], { debug: false }).wasiImport),
+);
+
 function checkName(name: string): void {
   if (!name || name === "." || name === ".." || /[\\/\0]/.test(name)) {
     throw new Error(`invalid filesystem entry name: ${JSON.stringify(name)}`);
   }
 }
 
+/**
+ * A file over bytes the caller already owns privately. Read-only files are
+ * never resized or written by a guest, so sharing the buffer is safe and
+ * saves a copy per staged file.
+ */
+function privateFile(data: Uint8Array, readonly: boolean): File {
+  const file = new File(new ArrayBuffer(0), { readonly });
+  file.data = data;
+  return file;
+}
+
 function stageFiles(
   files: Record<string, Uint8Array>,
   readonly: boolean,
+  copy: boolean,
 ): Directory {
   const root = new Directory(new Map());
   // The compiler is always given /src and /include, including workspaces that
@@ -79,7 +96,10 @@ function stageFiles(
       throw new Error(`file and directory paths overlap: ${path}`);
     }
     // File copies a typed array, keeping the caller's input out of guest memory.
-    directory.contents.set(name, new File(data, { readonly }));
+    directory.contents.set(
+      name,
+      copy ? new File(data, { readonly }) : privateFile(data, readonly),
+    );
   }
   return root;
 }
@@ -179,7 +199,11 @@ function protectFiles(wasi: WASI, readonly: boolean): void {
   };
 }
 
-/** Execute a pinned WASI command in a fresh memory filesystem. */
+/**
+ * Execute a pinned WASI command in a fresh memory filesystem. `stdin` and
+ * `files` are copied into the filesystem unless `copy` is false, which callers
+ * pass only for buffers they already own privately.
+ */
 export async function runCommand(
   module: WebAssembly.Module,
   args: string[],
@@ -187,8 +211,9 @@ export async function runCommand(
   files: Record<string, Uint8Array>,
   readonly: boolean,
   limits: ResourceLimits = defaultLimits,
+  copy = true,
 ): Promise<CommandResult> {
-  const root = stageFiles(files, readonly);
+  const root = stageFiles(files, readonly, copy);
   if (!readonly) boundFilesystem(root, limits);
   const requestBound = readonly && limits.requestBytes < limits.stdoutBytes;
   const output = boundedStream(
@@ -198,7 +223,9 @@ export async function runCommand(
   const errors = boundedStream(limits.stderrBytes, "stderrBytes");
   const argv = [...args];
   const wasi = new WASI(argv, [], [
-    new OpenFile(new File(stdin, { readonly: true })),
+    new OpenFile(
+      copy ? new File(stdin, { readonly: true }) : privateFile(stdin, true),
+    ),
     output.descriptor,
     errors.descriptor,
     new PreopenDirectory("/", root.contents),

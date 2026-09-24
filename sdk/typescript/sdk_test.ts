@@ -1596,3 +1596,48 @@ Deno.test("SDK runs capnp id with host randomness", async () => {
     `capnp id produced ${JSON.stringify(ids)}`,
   );
 });
+
+Deno.test("SDK rejects unknown WASI imports and missing command exports at factory time", async () => {
+  const header = [0, 97, 115, 109, 1, 0, 0, 0];
+  const unknownImport = new Uint8Array([
+    ...header,
+    ...section(1, [1, 0x60, 0, 0]),
+    ...section(2, [
+      1,
+      ...name("wasi_snapshot_preview1"),
+      ...name("nope"),
+      0,
+      0,
+    ]),
+    ...section(3, [1, 0]),
+    ...section(5, [1, 0, 1]),
+    ...section(7, [2, ...name("memory"), 2, 0, ...name("_start"), 0, 1]),
+    ...section(10, [1, 2, 0, 0x0b]),
+  ]);
+  await rejectsWith(
+    () => createCompiler({ compiler: unknownImport, generators: {} }),
+    TypeError,
+    "unsupported WASI import: wasi_snapshot_preview1.nope",
+  );
+  for (
+    const exports of [
+      [1, ...name("memory"), 2, 0],
+      [1, ...name("_start"), 0, 0],
+      [2, ...name("memory"), 2, 0, ...name("start"), 0, 0],
+    ]
+  ) {
+    const incomplete = new Uint8Array([
+      ...header,
+      ...section(1, [1, 0x60, 0, 0]),
+      ...section(3, [1, 0]),
+      ...section(5, [1, 0, 1]),
+      ...section(7, exports),
+      ...section(10, [1, 2, 0, 0x0b]),
+    ]);
+    await rejectsWith(
+      () => createCompiler({ compiler: incomplete, generators: {} }),
+      TypeError,
+      "WASI command must export memory and _start",
+    );
+  }
+});
