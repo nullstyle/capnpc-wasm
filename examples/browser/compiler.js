@@ -99,13 +99,13 @@ export function studioCompiler(assetBase) {
     const [standard, compiler, worker, ...modules] = await Promise.all([
       standardIncludes(signal),
       asset("wasm/capnp.wasm", signal),
-      asset("typescript/worker.js", signal),
+      workerURL ? undefined : asset("typescript/worker.js", signal),
       ...wanted.map((target) => asset(`wasm/${commands[target]}.wasm`, signal)),
     ]);
     signal.throwIfAborted();
     if (!workerURL) {
       // A blob URL keeps restarts after cancellation independent of the
-      // network; the blob owns its copy of the script.
+      // network; the blob owns the only copy of the script.
       workerURL = URL.createObjectURL(
         new Blob([worker], { type: "text/javascript" }),
       );
@@ -126,10 +126,14 @@ export function studioCompiler(assetBase) {
     client?.dispose();
     client = next;
     owned = new Set(wanted);
-    // The client keeps private copies of every module for restarts; drop
-    // Studio's so each module's bytes are held once on this thread.
-    cache.delete("wasm/capnp.wasm");
-    for (const target of wanted) cache.delete(`wasm/${commands[target]}.wasm`);
+    // The client keeps private copies of its modules for restarts. Studio
+    // keeps its own only while the client could still grow to another
+    // language, which needs every module again; once all are loaded the
+    // copies go, and each module's bytes are held once on this thread.
+    if (owned.size === Object.keys(languages).length) {
+      cache.delete("wasm/capnp.wasm");
+      for (const target of owned) cache.delete(`wasm/${commands[target]}.wasm`);
+    }
     return next;
   }
 

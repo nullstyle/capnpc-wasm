@@ -299,6 +299,13 @@ try {
           `${engine}: ${path} differs from native`,
         );
       }
+      // Every language is loaded now: switching between them neither fetches
+      // a module again nor rebuilds the worker (the races check counts
+      // workers; here the network is the witness).
+      const moduleRequests = () =>
+        requested.filter((path) => /\.wasm\?v=/.test(path)).length;
+      const loadedModules = moduleRequests();
+      assert(loadedModules === 5, `${engine}: expected five module fetches`);
       for (const language of ["rust", "go", "zig", "cpp"]) {
         await page.locator(`#tab-${language}`).click();
         assert(
@@ -306,6 +313,10 @@ try {
           `${engine}: missing ${language} file browser`,
         );
       }
+      assert(
+        moduleRequests() === loadedModules,
+        `${engine}: switching loaded languages fetched modules again`,
+      );
       const onePromise = page.waitForEvent("download");
       await page.locator("#download-file").click();
       const one = await onePromise;
@@ -344,21 +355,58 @@ try {
           await page.locator("#output-badge").textContent() === "Up to date",
         `${engine}: Enter did not select the focused tab`,
       );
+      // A regeneration with everything loaded takes milliseconds, so the
+      // page itself samples focus when the busy flag flips on and off.
       await page.locator("#generate").focus();
+      await page.evaluate(() => {
+        type Sample = { active: string; disabled: string | null };
+        const record: { during?: Sample; after?: Sample } = {};
+        (globalThis as { focusRecord?: typeof record }).focusRecord = record;
+        const sample = (): Sample => ({
+          active: document.activeElement?.id ?? "",
+          disabled: document.querySelector("#generate")!.getAttribute(
+            "aria-disabled",
+          ),
+        });
+        new MutationObserver(() => {
+          const busy = document.body.dataset.busy;
+          if (busy === "true" && !record.during) record.during = sample();
+          if (busy === "false" && record.during && !record.after) {
+            record.after = sample();
+          }
+        }).observe(document.body, {
+          attributes: true,
+          attributeFilter: ["data-busy"],
+        });
+      });
       await page.keyboard.press("Enter");
-      await page.waitForFunction(() => document.body.dataset.busy === "true");
-      assert(
-        await activeId(page) === "generate" &&
-          await page.locator("#generate").getAttribute("aria-disabled") ===
-            "true",
-        `${engine}: focus left Generate during the run`,
+      await page.waitForFunction(() =>
+        (globalThis as { focusRecord?: { after?: unknown } }).focusRecord
+          ?.after !== undefined
       );
       await idle(page);
+      const focusRecord = await page.evaluate(() =>
+        (globalThis as {
+          focusRecord?: {
+            during?: { active: string; disabled: string | null };
+            after?: { active: string; disabled: string | null };
+          };
+        }).focusRecord
+      );
       assert(
-        await activeId(page) === "generate" &&
-          await page.locator("#generate").getAttribute("aria-disabled") ===
-            "false",
-        `${engine}: focus left Generate after the run`,
+        focusRecord?.during?.active === "generate" &&
+          focusRecord.during.disabled === "true",
+        `${engine}: focus left Generate during the run: ${
+          JSON.stringify(focusRecord)
+        }`,
+      );
+      assert(
+        focusRecord.after?.active === "generate" &&
+          focusRecord.after.disabled === "false" &&
+          await activeId(page) === "generate",
+        `${engine}: focus left Generate after the run: ${
+          JSON.stringify(focusRecord)
+        }`,
       );
       await page.locator("#tab-cpp").click();
 

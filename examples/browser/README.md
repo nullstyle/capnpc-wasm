@@ -92,8 +92,11 @@ only serves static files; schemas and compilation results are processed locally.
 The compiler and initially selected generator load first. Other generators load
 on demand: one worker holds the compiler and every generator requested so far,
 and it is replaced only when a new language is needed, so switching between
-loaded languages never rebuilds a worker. Module bytes are held once on the main
-thread, inside the SDK client. Runtime assets and the editor do not use a CDN.
+loaded languages never rebuilds a worker or fetches a module again. Studio keeps
+its copy of a module only while the worker could still grow (growing needs every
+module again); once all four languages are loaded the copies are released and
+each module's bytes are held once, inside the SDK client. Runtime assets and the
+editor do not use a CDN.
 
 `index.html` carries its Content-Security-Policy in a meta tag, so any static
 host applies it: scripts from the origin only (plus a hash for the one inline
