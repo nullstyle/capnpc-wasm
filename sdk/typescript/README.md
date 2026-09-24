@@ -48,9 +48,10 @@ try {
 ```
 
 The worker URL is resolved once, when the client is created: a relative string
-resolves against `location.href` in browsers, and Deno needs an absolute URL (or
-a `URL` object). Engines that expose `Symbol.dispose` can also manage the client
-with `using`.
+resolves against the document base URL in browsers (`document.baseURI`, so a
+`<base href>` applies; otherwise `location.href`), and Deno needs an absolute
+URL (or a `URL` object). Engines that expose `Symbol.dispose` can also manage
+the client with `using`.
 
 See [Schema Studio](../../examples/browser/README.md) for a complete browser
 workbench with multi-file editing, language selection, and ZIP downloads, and

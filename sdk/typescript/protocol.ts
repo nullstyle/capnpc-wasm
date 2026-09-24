@@ -10,10 +10,8 @@
  */
 import {
   CompileError,
-  type CompileRequest,
   type CompilerOptions,
   type Diagnostic,
-  type GenerationRequest,
   type Language,
   type Modules,
 } from "./types.ts";
@@ -25,16 +23,35 @@ export interface InitMessage {
   options: CompilerOptions;
 }
 
+/**
+ * A compile job after the client validated it and made private byte copies:
+ * the worker trusts these records and stages them without copying again.
+ */
+export interface WireCompileJob {
+  files: Record<string, Uint8Array>;
+  includeFiles: Record<string, Uint8Array>;
+  importPaths: string[];
+  sourcePrefix: string;
+  entrypoints: string[];
+  generators: Language[];
+}
+
+export interface WireGenerateJob {
+  /** A private copy of the caller's request bytes. */
+  request: Uint8Array;
+  generators: Language[];
+}
+
 export interface CompileMessage {
   kind: "compile";
   id: number;
-  request: CompileRequest;
+  request: WireCompileJob;
 }
 
 export interface GenerateMessage {
   kind: "generate";
   id: number;
-  request: GenerationRequest;
+  request: WireGenerateJob;
 }
 
 export type WorkerRequest = InitMessage | CompileMessage | GenerateMessage;
@@ -121,8 +138,8 @@ export function encodeError(cause: unknown): WireError {
   return { kind: "error", name: "Error", message: String(cause) };
 }
 
-function named(error: Error, name: string): Error {
-  if (name !== "Error" && name !== error.name) {
+function named(error: Error, name: unknown): Error {
+  if (typeof name === "string" && name !== "Error" && name !== error.name) {
     Object.defineProperty(error, "name", {
       value: name,
       writable: true,
@@ -133,33 +150,58 @@ function named(error: Error, name: string): Error {
   return error;
 }
 
-function restore(summary: ErrorSummary | undefined): Error | undefined {
-  if (!summary) return undefined;
-  const nested = restore(summary.cause);
+function text(value: unknown): string {
+  return typeof value === "string" ? value : String(value);
+}
+
+// The sender already bounds its summary; bound decoding independently so a
+// malformed, cyclic or very deep chain can never overflow the stack here.
+const decodeDepth = 8;
+
+function restore(summary: unknown, depth: number): Error | undefined {
+  if (typeof summary !== "object" || summary === null || depth === 0) {
+    return undefined;
+  }
+  const { name, message, cause } = summary as Partial<ErrorSummary>;
+  const nested = restore(cause, depth - 1);
   return named(
-    new Error(summary.message, nested ? { cause: nested } : undefined),
-    summary.name,
+    new Error(text(message), nested ? { cause: nested } : undefined),
+    name,
   );
 }
 
-/** Rebuild the error class direct execution would have thrown. */
+/**
+ * Rebuild the error class direct execution would have thrown. Total: any
+ * reply shape yields an Error, so the client always settles its job.
+ */
 export function decodeError(error: WireError): Error {
-  const cause = restore(error.cause);
-  const options = cause ? { cause } : undefined;
-  switch (error.kind) {
-    case "compile":
-      return new CompileError(
-        error.message,
-        error.stage,
-        error.diagnostics,
-        error.exitCode,
-        options,
-      );
-    case "type":
-      return new TypeError(error.message, options);
-    case "range":
-      return new RangeError(error.message, options);
-    default:
-      return named(new Error(error.message, options), error.name);
+  try {
+    if (typeof error !== "object" || error === null) {
+      return new Error(`worker reported an error: ${text(error)}`);
+    }
+    const cause = restore(error.cause, decodeDepth);
+    const options = cause ? { cause } : undefined;
+    const message = text(error.message);
+    switch (error.kind) {
+      case "compile":
+        return new CompileError(
+          message,
+          error.stage,
+          Array.isArray(error.diagnostics) ? error.diagnostics : [],
+          typeof error.exitCode === "number" ? error.exitCode : undefined,
+          options,
+        );
+      case "type":
+        return new TypeError(message, options);
+      case "range":
+        return new RangeError(message, options);
+      default:
+        return named(
+          new Error(message, options),
+          (error as { name?: unknown }).name,
+        );
+    }
+  } catch (cause) {
+    return new Error("worker reply could not be decoded", { cause });
   }
 }

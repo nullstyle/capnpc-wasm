@@ -16,6 +16,7 @@ import {
   type WorkerCompiler,
 } from "./mod.ts";
 import { hostileGuests } from "./testdata/hostile_guests.ts";
+import { resolveWorkerURL } from "./worker-client.ts";
 import {
   assert,
   commandGuest,
@@ -69,27 +70,33 @@ workerTest(
       try {
         equalOutputs(await worker.compile(request), expected);
         assert(constructions() === 1, "unexpected worker count after start");
-        const failures: [string, () => Promise<unknown>][] = [
-          ["schema error", () =>
+        const failures: [
+          string,
+          new (...args: never[]) => Error,
+          () => Promise<unknown>,
+        ][] = [
+          ["schema error", CompileError, () =>
             worker.compile({
               ...request,
               files: { ...request.files, "person.capnp": "invalid schema" },
             })],
           [
             "duplicate generators",
+            TypeError,
             () => worker.compile({ ...request, generators: ["cpp", "cpp"] }),
           ],
           [
             "empty entrypoints",
+            TypeError,
             () => worker.compile({ ...request, entrypoints: [] }),
           ],
-          ["malformed request", () =>
+          ["malformed request", CompileError, () =>
             worker.generate({
               request: expected.request.slice(0, 12),
               generators: ["rust"],
             })],
         ];
-        for (const [label, fail] of failures) {
+        for (const [label, expectedClass, fail] of failures) {
           let thrown: unknown;
           try {
             await fail();
@@ -97,8 +104,9 @@ workerTest(
             thrown = error;
           }
           assert(
-            thrown instanceof CompileError || thrown instanceof TypeError,
-            `${label}: unexpected rejection ${thrown}`,
+            thrown instanceof expectedClass &&
+              Object.getPrototypeOf(thrown) === expectedClass.prototype,
+            `${label}: expected ${expectedClass.name}, received ${thrown}`,
           );
           // No restart: the same worker answers at once, well inside the
           // 2.1 s Deno termination grace, and short deadlines still succeed.
@@ -553,11 +561,122 @@ workerTest(
       compiler: trapGuest,
       generators: {},
     });
+    // Assignable to Disposable, so `using compiler = ...` type-checks.
+    const resource: Disposable = disposable;
     assert(
-      typeof disposable[Symbol.dispose] === "function",
+      typeof resource[Symbol.dispose] === "function",
       "worker compiler is not disposable",
     );
-    disposable[Symbol.dispose]!();
+    resource[Symbol.dispose]();
     await rejects(() => disposable.compile(job), "Error", "disposed");
   },
 );
+
+workerTest(
+  "SDK worker client settles jobs whose error replies are malformed",
+  async () => {
+    // A stand-in worker that answers init, then replies to every job with an
+    // error whose cause chain is cyclic and whose fields have the wrong types.
+    const source = `self.onmessage = ({ data }) => {
+      if (data.kind === "init") {
+        self.postMessage({ id: data.id, result: undefined });
+        return;
+      }
+      const cycle = { name: "CycleError", message: "loops" };
+      cycle.cause = cycle;
+      self.postMessage({
+        id: data.id,
+        error: { kind: "type", message: 123, cause: cycle },
+      });
+    };`;
+    const url = URL.createObjectURL(
+      new Blob([source], { type: "text/javascript" }),
+    );
+    const job: CompileRequest = { ...simpleRequest(), generators: [] };
+    try {
+      const worker = await createWorkerCompiler(url, {
+        compiler: trapGuest,
+        generators: {},
+      });
+      try {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const error = await rejectsWith(
+            () => worker.compile(job),
+            TypeError,
+            "123",
+          );
+          let depth = 0;
+          let cause: unknown = error.cause;
+          while (cause instanceof Error) {
+            depth++;
+            cause = cause.cause;
+          }
+          assert(
+            depth === 8 && (error.cause as Error).name === "CycleError",
+            `attempt ${attempt}: cause chain depth ${depth}`,
+          );
+        }
+      } finally {
+        worker.dispose();
+      }
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+);
+
+workerTest(
+  "SDK worker factory ignores unrelated properties on the module set",
+  async () => {
+    // Only the validated fields are snapshotted, so a non-cloneable extra
+    // property is accepted exactly as createCompiler accepts it.
+    const decorated = Object.assign({ compiler: trapGuest, generators: {} }, {
+      loader() {},
+      registry: new WeakMap(),
+    });
+    const job: CompileRequest = { ...simpleRequest(), generators: [] };
+    const direct = await createCompiler(decorated);
+    await rejects(() => direct.compile(job), "CompileError", "trapped");
+    const worker = await createWorkerCompiler(workerURL, decorated);
+    try {
+      await rejects(() => worker.compile(job), "CompileError", "trapped");
+    } finally {
+      worker.dispose();
+    }
+  },
+);
+
+Deno.test("SDK resolves relative worker URLs against the document base", () => {
+  const page = { location: { href: "https://app.example/page/index.html" } };
+  assert(
+    resolveWorkerURL("./worker.js", page).href ===
+      "https://app.example/page/worker.js",
+    "location fallback",
+  );
+  const based = {
+    ...page,
+    document: { baseURI: "https://app.example/assets/" },
+  };
+  assert(
+    resolveWorkerURL("./worker.js", based).href ===
+      "https://app.example/assets/worker.js",
+    "base href was ignored",
+  );
+  assert(
+    resolveWorkerURL("https://cdn.example/w.js", based).href ===
+        "https://cdn.example/w.js" &&
+      resolveWorkerURL(new URL("https://cdn.example/w.js"), based).href ===
+        "https://cdn.example/w.js",
+    "absolute URLs were rewritten",
+  );
+  let thrown: unknown;
+  try {
+    resolveWorkerURL("./w.js", {});
+  } catch (error) {
+    thrown = error;
+  }
+  assert(
+    thrown instanceof TypeError && thrown.message.includes("absolute"),
+    `relative URL without a base: ${thrown}`,
+  );
+});

@@ -52,8 +52,8 @@ export interface WorkerCompiler {
   ): Promise<GenerationResult>;
   /** Terminate the worker and reject any pending operation. */
   dispose(): void;
-  /** `using` support where the engine provides Symbol.dispose. */
-  [Symbol.dispose]?(): void;
+  /** The same as dispose(), for `using` on engines that provide Symbol.dispose. */
+  [Symbol.dispose](): void;
 }
 
 const defaultTimeoutMs = 30_000;
@@ -75,13 +75,24 @@ function checkTimeout(timeoutMs: number, name: string): void {
   }
 }
 
-/** Resolve once, so restarts never re-resolve a relative URL against a moved document base. */
-function resolveWorkerURL(workerURL: string | URL): URL {
+/**
+ * Resolve once, at creation, so restarts never re-resolve a relative URL
+ * against a document base that moved. Relative strings resolve the way a
+ * plain `new Worker(string)` would: against `document.baseURI` (which honours
+ * `<base href>`), else the location. Injectable for tests.
+ */
+export function resolveWorkerURL(
+  workerURL: string | URL,
+  globals: {
+    document?: { baseURI?: string };
+    location?: { href?: string };
+  } = globalThis as unknown as { document?: { baseURI?: string } },
+): URL {
   if (workerURL instanceof URL) return new URL(workerURL.href);
   if (typeof workerURL !== "string") {
     throw new TypeError("worker URL must be a string or URL");
   }
-  const base = (globalThis as { location?: { href?: string } }).location?.href;
+  const base = globals.document?.baseURI ?? globals.location?.href;
   try {
     return new URL(workerURL, base);
   } catch (cause) {
@@ -133,17 +144,17 @@ export async function createWorkerCompiler(
   );
   const { signal: initSignal, initTimeoutMs = defaultTimeoutMs } = options;
   checkTimeout(initTimeoutMs, "initTimeoutMs");
-  // Keep private copies for restarting after cancellation; caller ownership stays intact.
-  const snapshot = structuredClone(modules);
-  // Structured cloning preserves SharedArrayBuffer storage. Copy every byte
-  // view explicitly so queued jobs and restarted workers own their snapshots.
-  if (snapshot.compiler instanceof Uint8Array) {
-    snapshot.compiler = new Uint8Array(snapshot.compiler);
-  }
-  for (const [language, module] of Object.entries(snapshot.generators)) {
-    if (module instanceof Uint8Array) {
-      snapshot.generators[language as Language] = new Uint8Array(module);
-    }
+  // Keep private copies of the validated fields only, for restarting after
+  // cancellation: caller ownership stays intact, shared storage is not
+  // retained, and unrelated properties on the caller's object are ignored.
+  const snapshot: Modules = {
+    compiler: new Uint8Array(modules.compiler),
+    generators: {},
+  };
+  for (const language of supplied) {
+    snapshot.generators[language] = new Uint8Array(
+      modules.generators[language]!,
+    );
   }
   let worker: Worker | undefined;
   let ready = false;
@@ -234,9 +245,18 @@ export async function createWorkerCompiler(
           return;
         }
         cleanup();
-        // A structured error answers the job; the worker stays ready.
-        if (reply.error) reject(decodeError(reply.error));
-        else resolve(reply.result);
+        // A structured error answers the job; the worker stays ready. Nothing
+        // after cleanup() may throw, or the job would never settle.
+        if (reply.error === undefined) resolve(reply.result);
+        else {
+          let error: Error;
+          try {
+            error = decodeError(reply.error);
+          } catch (cause) {
+            error = new Error("worker reply could not be decoded", { cause });
+          }
+          reject(error);
+        }
       };
       const timer = setTimeout(() => terminate(timeoutError()), timeoutMs);
       cancel = terminate;
@@ -340,15 +360,17 @@ export async function createWorkerCompiler(
 
   if (initSignal?.aborted) throw initSignal.reason;
   await initialize(initSignal, initTimeoutMs);
-  const client: WorkerCompiler = {
-    async compile(request, options) {
+  const client = {
+    async compile(request: CompileRequest, options?: JobOptions) {
       return await runJob("compile", request, options) as CompileResult;
     },
-    async generate(request, options) {
+    async generate(request: GenerationRequest, options?: JobOptions) {
       return await runJob("generate", request, options) as GenerationResult;
     },
     dispose,
-  };
+  } as WorkerCompiler;
+  // Engines without Symbol.dispose have no `using` either; the interface
+  // still declares the member so the client is assignable to Disposable.
   if (typeof Symbol.dispose === "symbol") {
     Object.defineProperty(client, Symbol.dispose, {
       value: dispose,
