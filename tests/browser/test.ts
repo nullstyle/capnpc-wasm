@@ -80,6 +80,7 @@ type HostileOutcome = {
   error?: {
     name: string;
     message: string;
+    isCompileError: boolean;
     hasOutputs: boolean;
     hasCause: boolean;
   };
@@ -690,11 +691,13 @@ try {
     for (const language of ["cpp", "zig"] as const) {
       for (
         const [name, request] of [
+          ["invalid segment table", new Uint8Array([255, 255, 255, 255])],
+          ["truncated", data.scenarios[0].request.slice(0, -1)],
           [
-            "invalid segment table",
+            "invalid eight-byte segment table",
             new Uint8Array([255, 255, 255, 255, 0, 0, 0, 0]),
           ],
-          ["truncated", data.scenarios[0].request.slice(0, 12)],
+          ["twelve-byte prefix", data.scenarios[0].request.slice(0, 12)],
         ] as const
       ) {
         const failure = await page.evaluate(
@@ -904,6 +907,7 @@ try {
             error: {
               name: (error as Error).name,
               message: (error as Error).message,
+              isCompileError: error instanceof state.sdk.CompileError,
               hasOutputs: "outputs" in (error as object),
               hasCause: (error as Error).cause !== undefined,
             },
@@ -930,6 +934,8 @@ try {
       if (guest.expectError) {
         assert(
           outcome.error?.name === guest.expectError.name &&
+            (guest.expectError.name !== "CompileError" ||
+              outcome.error.isCompileError) &&
             outcome.error.message.includes(guest.expectError.message) &&
             !outcome.error.hasOutputs && outcome.error.hasCause,
           `${label} did not fail as expected: ${JSON.stringify(outcome)}`,
