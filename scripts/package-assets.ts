@@ -344,11 +344,17 @@ async function goModules(
   return components;
 }
 
-/** Crates cargo resolves for the wasm32-wasip1 build, minus the references. */
+/**
+ * Registry crates linked into the wasm32-wasip1 build. `cargo tree` applies
+ * feature resolution, so it lists what is linked (an optional dependency
+ * such as capnp's embedded-io is absent); `cargo metadata` lists every crate
+ * in the lockfile but carries the license fields and manifest paths. Path
+ * crates are the generator itself (the project component) and the
+ * references (their own components).
+ */
 async function rustCrates(manifest: string): Promise<Component[]> {
   interface Metadata {
     packages: {
-      id: string;
       name: string;
       version: string;
       license: string | null;
@@ -356,13 +362,29 @@ async function rustCrates(manifest: string): Promise<Component[]> {
       source: string | null;
       manifest_path: string;
     }[];
-    resolve: {
-      root: string;
-      nodes: {
-        id: string;
-        deps: { pkg: string; dep_kinds: { kind: string | null }[] }[];
-      }[];
-    };
+  }
+  const tree = await viaMise([
+    "cargo",
+    "tree",
+    "--locked",
+    "--manifest-path",
+    manifest,
+    "--target",
+    "wasm32-wasip1",
+    "--edges",
+    "normal",
+    "--prefix",
+    "none",
+    "--format",
+    "{p}",
+  ]);
+  const linked = new Set<string>();
+  for (const line of tree.split("\n")) {
+    const match = /^(\S+) v(\S+)/.exec(line.trim());
+    if (match) linked.add(`${match[1]} ${match[2]}`);
+  }
+  if (linked.size === 0) {
+    throw new Error(`cargo tree listed no crates for ${manifest}`);
   }
   const metadata = JSON.parse(
     await viaMise([
@@ -377,23 +399,15 @@ async function rustCrates(manifest: string): Promise<Component[]> {
       "wasm32-wasip1",
     ]),
   ) as Metadata;
-  const packages = new Map(metadata.packages.map((pkg) => [pkg.id, pkg]));
-  const nodes = new Map(metadata.resolve.nodes.map((node) => [node.id, node]));
-  const linked = new Set<string>();
-  const walk = (id: string) => {
-    if (linked.has(id)) return;
-    linked.add(id);
-    for (const dep of nodes.get(id)!.deps) {
-      if (dep.dep_kinds.some((kind) => kind.kind === null)) walk(dep.pkg);
-    }
-  };
-  walk(metadata.resolve.root);
   const components: Component[] = [];
-  for (const id of [...linked].sort()) {
-    const pkg = packages.get(id)!;
-    if (id === metadata.resolve.root) continue;
+  const packages = [...metadata.packages].sort((a, b) =>
+    `${a.name} ${a.version}`.localeCompare(`${b.name} ${b.version}`)
+  );
+  for (const pkg of packages) {
+    if (!linked.has(`${pkg.name} ${pkg.version}`) || pkg.source === null) {
+      continue;
+    }
     const dir = pkg.manifest_path.slice(0, pkg.manifest_path.lastIndexOf("/"));
-    if (dir.startsWith(`${root}/ref/`)) continue;
     const files = await licenseFilesIn(dir);
     if (pkg.license_file && !files.includes(pkg.license_file)) {
       files.push(pkg.license_file);
