@@ -7,6 +7,10 @@
 # a port translation unit warns under -Werror, the build breaks, or the
 # parity suites differ from native. Bump ref/capnproto by hand with the
 # checklist in CONTRIBUTING.md.
+#
+# The `check:wasm-artifacts` task it runs comes from the module-contract
+# change (scripts/check-wasm-artifacts.ts), which merges to main before this
+# workflow does.
 name: Upstream canary
 
 on:
@@ -16,7 +20,7 @@ on:
   workflow_dispatch:
     inputs:
       revision:
-        description: "Cap'n Proto commit to try instead of the tip of v2 (full or abbreviated SHA)"
+        description: "Cap'n Proto commit to try instead of the tip of v2 (full 40-hex-digit SHA; git fetch cannot resolve an abbreviated one)"
         required: false
         default: ""
 
@@ -64,8 +68,13 @@ jobs:
         run: |
           pinned="$(git rev-parse :ref/capnproto)"
           if [ -n "$REVISION" ]; then
+            # git fetch resolves only full object names, not abbreviated SHAs.
             case "$REVISION" in
-              *[!0-9a-f]* | ????????????????????????????????????????*?) echo "revision must be a SHA of at most 40 hex digits" >&2; exit 2 ;;
+              ????????????????????????????????????????) ;;
+              *) echo "revision must be a full 40-hex-digit commit SHA" >&2; exit 2 ;;
+            esac
+            case "$REVISION" in
+              *[!0-9a-f]*) echo "revision must be a full 40-hex-digit commit SHA" >&2; exit 2 ;;
             esac
             git -C ref/capnproto fetch --no-tags origin "$REVISION"
           else
