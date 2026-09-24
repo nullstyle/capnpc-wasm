@@ -12,18 +12,23 @@
 # its owner. A waiter that finds the owner dead renames that very marker;
 # the name carries the pid, so the rename fails harmlessly if a live process
 # has re-owned the lock in the meantime. Only the owner removes the
-# directory, on release.
+# directory, on release. A takeover or reclaim that cannot be performed (a
+# lock left by another user, an unwritable directory) makes the waiter wait
+# like everyone else, with the same timeout, never spin.
 #
 # acquire_build_lock <lock dir> [--no-trap]
 #   Waits while a live process owns the lock (one note on stderr), takes
-#   over a lock whose owner is gone, and gives up after 30 minutes. Unless
-#   --no-trap is given, the lock is released on EXIT; a caller with its own
-#   EXIT trap passes --no-trap and calls release_build_lock from that trap.
-#   Call it from the script's main shell, not from a subshell.
+#   over a lock whose owner is gone, and gives up after
+#   CAPNP_WASM_LOCK_TIMEOUT seconds (default 1800). Unless --no-trap is
+#   given, the lock is released on EXIT; a caller with its own EXIT trap
+#   passes --no-trap and calls release_build_lock from that trap. Call it
+#   from the script's main shell, not from a subshell. A SIGTERM or SIGINT
+#   delivered to the script's shell alone runs that EXIT trap and releases
+#   the lock while a foreground child (zig, cmake, cargo) may keep running.
 # release_build_lock
-#   Removes the lock this process owns, if any. Bash runs EXIT traps in
-#   subshells too; those calls are ignored so a background job cannot
-#   release its parent's lock.
+#   Removes the lock this process owns, if any. Ignored in a subshell, so a
+#   background job can never release its parent's lock (bash does not run a
+#   parent's EXIT trap in subshells; the guard is defensive).
 
 build_lock_dir=""
 
@@ -44,7 +49,8 @@ build_lock_process_alive() {
 }
 
 acquire_build_lock() {
-  local dir="$1" staging owner waited=0
+  local dir="$1" staging owner reason waited=0
+  local timeout="${CAPNP_WASM_LOCK_TIMEOUT:-1800}"
   if [[ "${BASH_SUBSHELL:-0}" -ne 0 ]]; then
     echo "acquire_build_lock must run in the script's main shell" >&2
     return 1
@@ -65,19 +71,20 @@ acquire_build_lock() {
       rm -rf "$staging" "${dir:?}/${staging##*/}" 2> /dev/null || true
     fi
     owner="$(build_lock_owner "$dir")"
+    reason="held by process ${owner:-unknown}"
     if [[ -n "$owner" ]] && ! build_lock_process_alive "$owner"; then
       # Rename exactly that owner's marker away, then own the directory.
-      # Another waiter's rename of the same marker fails, and it loops.
       if mv "$dir/owner.$owner" "$dir/dead.$owner.$$" 2> /dev/null; then
         : > "$dir/owner.$$"
         rm -f "$dir/dead.$owner.$$"
         echo "took over $dir from process $owner, which is gone" >&2
         break
       fi
-      continue
-    fi
-    if [[ -z "$owner" && -d "$dir" ]] &&
-       [[ -n "$(find "$dir" -maxdepth 0 -mmin +1 2> /dev/null)" ]]; then
+      # Another waiter renamed it first, or this user cannot write the
+      # directory: wait below like everyone else.
+      reason="its owner $owner is gone but its marker cannot be renamed (another waiter may have taken over, or $dir is not writable)"
+    elif [[ -z "$owner" && -d "$dir" ]] &&
+         [[ -n "$(find "$dir" -maxdepth 0 -mmin +1 2> /dev/null)" ]]; then
       # No marker for over a minute: a takeover died between renaming the
       # old marker and writing its own, or this is a lock of an older
       # layout. Rename the directory away before removing it, and put it
@@ -90,15 +97,16 @@ acquire_build_lock() {
           echo "removed ownerless lock $dir" >&2
           rm -rf "$dir.dead.$$"
         fi
+        continue
       fi
-      continue
+      reason="it has no owner marker and cannot be renamed ($(dirname "$dir") may not be writable)"
     fi
     if ((waited == 0)); then
-      echo "waiting for $dir held by process ${owner:-unknown}" >&2
+      echo "waiting for $dir: $reason" >&2
     fi
     waited=$((waited + 1))
-    if ((waited > 1800)); then
-      echo "gave up waiting for $dir after 30 minutes" >&2
+    if ((waited > timeout)); then
+      echo "gave up waiting for $dir after $timeout seconds" >&2
       return 1
     fi
     sleep 1

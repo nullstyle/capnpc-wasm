@@ -40,8 +40,10 @@ check_tool_version() {
     echo "$tool is not on PATH"
     return 1
   fi
-  # The pin must appear as a whole version token: 1.27.10 is not 1.27.1.
-  if [[ " $reported " != *[!0-9.]"$pin"[!0-9.]* ]]; then
+  # The pin must appear as a whole version token: 1.27.10 is not 1.27.1,
+  # and neither is 1.27.1-nightly or a longer commit suffix. Real banners
+  # end the version with a space, a parenthesis, or the end of the line.
+  if [[ " $reported " != *[!0-9.]"$pin"[!0-9A-Za-z.+-]* ]]; then
     echo "$tool on PATH reports '$reported' but the pin is $pin"
     return 1
   fi
