@@ -41,6 +41,8 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      # Unpinned by design: Ubuntu's archive serves only the current build of
+      # a package, so an exact version pin breaks at every security update.
       - name: Install Linux host development libraries
         if: runner.os == 'Linux'
         run: |
@@ -49,8 +51,8 @@ jobs:
       # Confine the token to this step, where the WASI SDK resolves through the
       # GitHub releases API. mise-action exports MISE_GITHUB_TOKEN to every later
       # step unless the variable is already set, so it is set here as step env.
-      # Later steps run repository code without it: the tools are installed by
-      # then, and the Deno worker runtime downloads from dl.deno.land.
+      # Later steps run repository code without it: every tool, including the
+      # locked Deno worker runtime (deno-worker), is installed by then.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
@@ -58,15 +60,17 @@ jobs:
           version: 2026.9.1
       - name: Initialize only pinned top-level references
         run: mise run setup
-      # No build or project cache is restored: this also checks bootstrap and
-      # source preparation from the committed tool lock and reference gitlinks.
+      # mise-action restores its tool cache when mise.toml and mise.lock are
+      # unchanged, so the tool downloads run only on a cache miss; the nightly
+      # workflow bootstraps with cache: false. No build or project cache is
+      # restored: source preparation from the reference gitlinks runs every
+      # time.
       - name: Check native and Wasm parity, generated consumers, and SDKs
         run: mise run check
       - name: Verify release archive and external package consumers
         run: mise run test:package
-      # The task installs the supported runtime outside the project lockfile
-      # (an in-project install would prune the non-host WASI SDK variants) and
-      # reads its version from sdk/typescript/worker-client.ts.
+      # The task checks the locked worker runtime (tool deno-worker, installed
+      # above) against the version in sdk/typescript/environment.ts.
       - name: Verify supported Deno worker execution and termination
         run: mise run test:deno-worker
       - name: Verify checks leave the tree unchanged
@@ -101,8 +105,8 @@ jobs:
       # Confine the token to this step, where the WASI SDK resolves through the
       # GitHub releases API. mise-action exports MISE_GITHUB_TOKEN to every later
       # step unless the variable is already set, so it is set here as step env.
-      # Later steps run repository code without it: the tools are installed by
-      # then, and the Deno worker runtime downloads from dl.deno.land.
+      # Later steps run repository code without it: every tool, including the
+      # locked Deno worker runtime (deno-worker), is installed by then.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
