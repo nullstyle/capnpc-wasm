@@ -1042,6 +1042,7 @@ async function checkCompilerConfinement(context: Context) {
   assert(
     ok.success && ok.stdout.length > 0 &&
       stderrOf(ok).includes("symlink leaves the workspace") &&
+      stderrOf(ok).includes("absolute symlinks cannot be followed") &&
       stderrOf(ok).includes("absolute link") &&
       stderrOf(ok).includes("relative escape") &&
       !stderrOf(ok).includes("inside link") && !stderrOf(ok).includes("cd:"),

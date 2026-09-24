@@ -251,39 +251,41 @@ copy_tree() {
 }
 
 warn_escaping_symlinks() {
-  # The guest cannot follow absolute symlinks or symlinks that resolve outside
-  # its root; say so up front instead of leaving an opaque kj exception.
-  local root=$1 link target dir parent resolved hops shown=0
+  # The guest cannot follow absolute symlinks, or symlinks that resolve outside
+  # its root; say so up front instead of leaving an opaque kj exception. The
+  # scan runs on the original workspace, where relative targets resolve.
+  local root=$1 link target dir parent resolved reason hops shown=0
   while IFS= read -r -d '' link; do
     resolved=$link
+    reason=''
     hops=0
     while [[ -L "$resolved" && $hops -lt 40 ]]; do
       hops=$((hops + 1))
       target=$(readlink -- "$resolved") || break
       dir=${resolved%/*}
-      case $target in
-        /*) resolved=$target ;;
-        *)
-          if [[ -d "$dir/$target" ]]; then
-            resolved=$(unset CDPATH; cd -P -- "$dir/$target" 2>/dev/null && pwd -P) || break
-          else
-            parent=$(unset CDPATH; cd -P -- "$(dirname -- "$dir/$target")" 2>/dev/null && pwd -P) || break
-            resolved=$parent/$(basename -- "$dir/$target")
-          fi
-          ;;
-      esac
+      if [[ "$target" == /* ]]; then
+        reason='absolute symlinks cannot be followed by the guest'
+        break
+      elif [[ -d "$dir/$target" ]]; then
+        resolved=$(unset CDPATH; cd -P -- "$dir/$target" 2>/dev/null && pwd -P) || break
+      else
+        parent=$(unset CDPATH; cd -P -- "$(dirname -- "$dir/$target")" 2>/dev/null && pwd -P) || break
+        resolved=$parent/$(basename -- "$dir/$target")
+      fi
     done
-    case $resolved in
-      "$root"/*) ;;
-      *)
-        if [[ $shown -lt 8 ]]; then
-          warn "symlink leaves the workspace and cannot be followed by the guest: ${link#"$root/"} -> $(readlink -- "$link")"
-        fi
-        shown=$((shown + 1))
-        ;;
-    esac
+    if [[ -z "$reason" ]]; then
+      # A dangling link stays where it is and is reported by the guest if used.
+      case $resolved in
+        "$root"/*) continue ;;
+        *) reason='symlink leaves the workspace and cannot be followed by the guest' ;;
+      esac
+    fi
+    if [[ $shown -lt 8 ]]; then
+      warn "$reason: ${link#"$root/"} -> $(readlink -- "$link")"
+    fi
+    shown=$((shown + 1))
   done < <(find "$root" -type l -print0)
-  [[ $shown -le 8 ]] || warn "$((shown - 8)) more symlinks leave the workspace"
+  [[ $shown -le 8 ]] || warn "$((shown - 8)) more symlinks cannot be followed by the guest"
 }
 
 if [[ "$mode" == compiler ]]; then
@@ -308,7 +310,7 @@ if [[ "$mode" == compiler ]]; then
     [[ $((workspace_kib * 1024)) -le $max_workspace ]] ||
       fail 73 "workspace uses more than CAPNP_WASM_MAX_WORKSPACE=$max_workspace bytes of disk; point --workspace at the schema directory: $workspace"
     copy_tree "$workspace" "$root" || fail 73 "cannot copy the workspace into $stage"
-    warn_escaping_symlinks "$root"
+    warn_escaping_symlinks "$workspace"
   else
     mkdir -- "$root" || fail 73 "cannot create the empty workspace root: $root"
   fi

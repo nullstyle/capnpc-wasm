@@ -147,14 +147,14 @@ Inputs are read-only and outputs are transactional:
 Confinement follows Wasmtime's preopen rules. Relative symlinks that resolve
 inside the mapped root are followed; absolute symlinks and symlinks that leave
 the root fail inside the guest with `Operation not permitted`, and `..` cannot
-climb above the root. The launcher warns up front about workspace symlinks that
-leave the root. Layouts that rely on such links must be staged with `cp -RL`
-first. Because the guest reads a real host directory, behavior follows the host
-filesystem: imports are case-insensitive on default macOS volumes but
-case-sensitive on Linux and in the SDKs, names containing backslashes are
-ordinary characters here but rejected by the SDKs, and path length is bounded by
-the host `PATH_MAX`. Schemas that build here may fail in the SDKs or on another
-host for these reasons.
+climb above the root. The launcher warns up front about absolute workspace
+symlinks and relative ones that leave the root. Layouts that rely on such links
+must be staged with `cp -RL` first. Because the guest reads a real host
+directory, behavior follows the host filesystem: imports are case-insensitive on
+default macOS volumes but case-sensitive on Linux and in the SDKs, names
+containing backslashes are ordinary characters here but rejected by the SDKs,
+and path length is bounded by the host `PATH_MAX`. Schemas that build here may
+fail in the SDKs or on another host for these reasons.
 
 The guest environment is always empty. `CAPNPC_ZIG_*` variables (for example
 `CAPNPC_ZIG_API_PROFILE`) are not forwarded; the launcher prints a one-line
