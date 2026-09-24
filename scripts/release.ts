@@ -805,15 +805,16 @@ export async function prepareRelease(
       await write("runtime/wasmtime-version", `${wasmtimeVersion}\n`);
     }
     if (flavor.goSdk) {
-      for (
-        const file of [
-          "compiler.go",
-          "memoryfs.go",
-          "go.mod",
-          "go.sum",
-          "LICENSE",
-        ]
-      ) {
+      // Every non-test Go source file, so a new file is never dropped.
+      const goFiles: string[] = [];
+      for await (const entry of Deno.readDir("sdk/go")) {
+        if (
+          entry.isFile && entry.name.endsWith(".go") &&
+          !entry.name.endsWith("_test.go")
+        ) goFiles.push(entry.name);
+      }
+      if (goFiles.length === 0) throw new Error("sdk/go has no Go sources");
+      for (const file of [...goFiles.sort(), "go.mod", "go.sum", "LICENSE"]) {
         await copy(`sdk/go/${file}`, `sdk/go/${file}`);
       }
       await write(
