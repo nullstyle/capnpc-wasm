@@ -37,13 +37,18 @@ exit status:
   65       --module is not a WebAssembly binary
   66       missing or unreadable workspace, output directory, or module
   69       Wasmtime executable not found or its version cannot be read
+  70       the launcher cannot resolve its own location (unreadable or
+           overlong symlink chain)
   73       cannot stage the workspace, or cannot publish generator output
-           (destination is a directory, symlink, read-only, or below a symlink)
+           (destination is a directory, symlink, read-only, or below a symlink,
+           or the generator produced a symlink); a move that fails part-way
+           keeps the staging directory and names it
   78       Wasmtime version rejected, packaged runtime version missing, or an
            environment override is invalid
   134      Wasmtime trap: timeout, stack exhaustion, or a guest fault
   1        Wasmtime could not load or instantiate the module
-  128+N    the launcher was stopped by signal N"
+  128+N    the launcher was stopped by signal N
+Other failures of the launcher's own commands exit with that command's status."
 
 fail() {
   printf 'capnp-wasm: %s\n' "$2" >&2
@@ -219,11 +224,15 @@ cleanup() {
 trap cleanup EXIT
 
 make_stage() {
-  local template
+  local template created
   for template in "$@"; do
-    stage=$(mktemp -d -- "$template" 2>/dev/null) || continue
+    created=$(mktemp -d -- "$template" 2>/dev/null) || continue
     # Physical path: mktemp may return /var/... while pwd -P reports /private/var/....
-    stage=$(unset CDPATH; cd -P -- "$stage" && pwd -P) && return
+    stage=$(unset CDPATH; cd -P -- "$created" && pwd -P) ||
+      { rm -rf -- "$created" 2>/dev/null || true; continue; }
+    # The cleanup trap removes a staging path that would break the --dir mapping.
+    [[ "$stage" != *::* ]] || fail 73 "staging path contains ::: $stage"
+    return
   done
   stage=''
   fail 73 "cannot create a staging directory next to $1"
@@ -244,7 +253,7 @@ copy_tree() {
 warn_escaping_symlinks() {
   # The guest cannot follow absolute symlinks or symlinks that resolve outside
   # its root; say so up front instead of leaving an opaque kj exception.
-  local root=$1 link target dir resolved hops shown=0
+  local root=$1 link target dir parent resolved hops shown=0
   while IFS= read -r -d '' link; do
     resolved=$link
     hops=0
@@ -256,9 +265,10 @@ warn_escaping_symlinks() {
         /*) resolved=$target ;;
         *)
           if [[ -d "$dir/$target" ]]; then
-            resolved=$(unset CDPATH; cd -P -- "$dir/$target" && pwd -P) || break
+            resolved=$(unset CDPATH; cd -P -- "$dir/$target" 2>/dev/null && pwd -P) || break
           else
-            resolved=$(unset CDPATH; cd -P -- "$(dirname -- "$dir/$target")" && pwd -P)/$(basename -- "$dir/$target") || break
+            parent=$(unset CDPATH; cd -P -- "$(dirname -- "$dir/$target")" 2>/dev/null && pwd -P) || break
+            resolved=$parent/$(basename -- "$dir/$target")
           fi
           ;;
       esac
@@ -300,10 +310,10 @@ if [[ "$mode" == compiler ]]; then
     copy_tree "$workspace" "$root" || fail 73 "cannot copy the workspace into $stage"
     warn_escaping_symlinks "$root"
   else
-    mkdir -- "$root"
+    mkdir -- "$root" || fail 73 "cannot create the empty workspace root: $root"
   fi
   # Wasmtime honors host permissions, so the guest cannot modify the copy.
-  chmod -R a-w "$root"
+  chmod -R a-w "$root" || fail 73 "cannot write-protect the workspace copy: $root"
 else
   [[ "$module" == /* ]] || fail 64 "module must be an absolute path: $module"
   [[ -f "$module" && -r "$module" ]] || fail 66 "module is not a readable file: $module"
@@ -400,7 +410,7 @@ if [[ "$timeout_seconds" != 0 ]]; then
 fi
 # Run from the module's directory so Wasmtime's own failure text names only
 # the module file, not the host installation path.
-cd -- "${module%/*}"
+cd -- "${module%/*}" || fail 66 "module directory is not accessible: ${module%/*}"
 "$runtime" run -W exceptions=y "${bounds[@]}" -D "max-backtrace=$max_backtrace" \
   -S cwd=/ --dir "$root::/" --argv0="$argv0" "./${module##*/}" "$@" <&0 &
 child=$!

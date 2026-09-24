@@ -137,9 +137,12 @@ Inputs are read-only and outputs are transactional:
   guest `/`. Files move into `--output` only after the generator exits 0. Before
   the first move, every destination is checked: an existing directory where a
   file belongs, a file where a directory belongs, a read-only file, or a symlink
-  at any destination or parent inside `--output` fails with exit 73 and leaves
-  the output directory unchanged. A failed or interrupted run removes the
-  staging directory and writes nothing.
+  at any destination or parent inside `--output`, or a symlink created by the
+  generator, fails with exit 73 and leaves the output directory unchanged. A
+  failed or interrupted guest run removes the staging directory and writes
+  nothing. If a move into `--output` fails part-way (for example after a
+  permission change during the run), the launcher exits 73 and keeps the staging
+  directory, naming it in the message so the remaining output can be recovered.
 
 Confinement follows Wasmtime's preopen rules. Relative symlinks that resolve
 inside the mapped root are followed; absolute symlinks and symlinks that leave
@@ -172,19 +175,21 @@ by the guest itself (a failed `memory.grow`), so it surfaces as the guest's own
 error. Overrides that are not whole numbers in range fail with exit 78. Exit
 statuses:
 
-| Exit  | Meaning                                                                                                                                                  |
-| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0     | Success                                                                                                                                                  |
-| 1-63  | Guest exit status, passed through unchanged (`capnp` uses 1 for schema and usage errors)                                                                 |
-| 64    | Launcher usage error: unknown mode or option, missing `--`, relative or `::` root, `/` as a root                                                         |
-| 65    | `--module` is not a WebAssembly binary                                                                                                                   |
-| 66    | Missing or unreadable workspace, output directory, or module                                                                                             |
-| 69    | Wasmtime executable not found, or its version could not be read                                                                                          |
-| 73    | Cannot stage the workspace, or cannot publish generator output (conflict, read-only, symlink, not writable)                                              |
-| 78    | Packaged runtime version missing, Wasmtime version rejected, or an invalid environment override                                                          |
-| 134   | Wasmtime trap: timeout (`wasm trap: interrupt`), stack exhaustion, or a guest fault; the module's basename and a bounded backtrace are printed on stderr |
-| 1     | Wasmtime could not load or instantiate a module whose magic bytes were valid                                                                             |
-| 128+N | The launcher was stopped by signal N after forwarding it to the guest and removing its staging directory                                                 |
+| Exit  | Meaning                                                                                                                                                             |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Success                                                                                                                                                             |
+| 1-63  | Guest exit status, passed through unchanged (`capnp` uses 1 for schema and usage errors)                                                                            |
+| 64    | Launcher usage error: unknown mode or option, missing `--`, relative or `::` root, `/` as a root                                                                    |
+| 65    | `--module` is not a WebAssembly binary                                                                                                                              |
+| 66    | Missing or unreadable workspace, output directory, or module                                                                                                        |
+| 69    | Wasmtime executable not found, or its version could not be read                                                                                                     |
+| 70    | The launcher cannot resolve its own location (unreadable or overlong symlink chain)                                                                                 |
+| 73    | Cannot stage the workspace, or cannot publish generator output (conflict, read-only, symlink, not writable); a move that fails part-way keeps the staging directory |
+| 78    | Packaged runtime version missing, Wasmtime version rejected, or an invalid environment override                                                                     |
+| 134   | Wasmtime trap: timeout (`wasm trap: interrupt`), stack exhaustion, or a guest fault; the module's basename and a bounded backtrace are printed on stderr            |
+| 1     | Wasmtime could not load or instantiate a module whose magic bytes were valid                                                                                        |
+| 128+N | The launcher was stopped by signal N after forwarding it to the guest and removing its staging directory                                                            |
+| other | A failing launcher command of its own (for example `mkdir` or `chmod` on the staging copy) exits with that command's status, usually 1, and its message             |
 
 `capnp-wasm --help` prints this contract and `capnp-wasm --version` prints the
 package version and the packaged Wasmtime version, both with exit 0.

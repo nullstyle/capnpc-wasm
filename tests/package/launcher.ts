@@ -490,8 +490,9 @@ async function checkCliContract(context: Context) {
     context;
   const help = await run([...launcher, "--help"]);
   assert(
-    help.success && text.decode(help.stdout).includes("exit status"),
-    "--help failed",
+    help.success && text.decode(help.stdout).includes("exit status") &&
+      /^\s+70\s/m.test(text.decode(help.stdout)),
+    "--help failed or does not list exit 70",
   );
   const version = await run([...launcher, "--version"]);
   const packageVersion = JSON.parse(
@@ -627,6 +628,14 @@ async function checkCliContract(context: Context) {
       JSON.stringify(env),
     );
   }
+  // A TMPDIR containing Wasmtime's :: delimiter cannot hold the staging copy.
+  const colons = `${temporary}/t::mp`;
+  await Deno.mkdir(colons);
+  exitCode(
+    await run([...compiler, "--version"], { env: { TMPDIR: colons } }),
+    73,
+    "TMPDIR containing ::",
+  );
   // Runtime version policy: the packaged version, a newer patch release of the
   // same series (with a warning), or one explicitly accepted version.
   const [major, minor, patch] = wasmtimePin.split(".").map(Number);
@@ -1021,6 +1030,7 @@ async function checkCompilerConfinement(context: Context) {
   await symlink(`${outside}/secret.txt`, `${workspace}/absolute link`);
   await symlink("../outside/secret.txt", `${workspace}/relative escape`);
   await symlink(`${outside}/schemas`, `${workspace}/escaped schemas`);
+  await symlink("../missing dir/file", `${workspace}/dangling escape`);
   const before = await snapshot(temporary);
   const compile = (schema: string) =>
     run([...compiler, "compile", "--no-standard-import", "-o-", schema]);
@@ -1034,7 +1044,7 @@ async function checkCompilerConfinement(context: Context) {
       stderrOf(ok).includes("symlink leaves the workspace") &&
       stderrOf(ok).includes("absolute link") &&
       stderrOf(ok).includes("relative escape") &&
-      !stderrOf(ok).includes("inside link"),
+      !stderrOf(ok).includes("inside link") && !stderrOf(ok).includes("cd:"),
     `relative symlink inside the workspace failed or warnings are wrong: ${
       stderrOf(ok)
     }`,
@@ -1073,6 +1083,7 @@ async function checkCompilerConfinement(context: Context) {
       "absolute link",
       "relative escape",
       "escaped schemas",
+      "dangling escape",
     ]
   ) await Deno.remove(`${workspace}/${entry}`);
 }
