@@ -3,8 +3,12 @@
 The Zig generator and runtime now build from the pristine `ref/capnp-zig`
 revision. The former eight compatibility patches and three copied reflection
 source files have been incorporated into capnp-zig and removed from this
-repository. `generators/zig/sync.json` verifies the complete exported source
-tree and mirrored conformance fixtures against the native commit.
+repository. `mise run check:zig-sync` verifies the complete exported source tree
+and the mirrored conformance fixtures against the `ref/capnp-zig` gitlink;
+`generators/zig/sync.json` only maps each mirrored fixture to its native path.
+The September 2026 advance from `0fb8df4` to `295ff5e` needed no patch; its only
+generator change is upstream's failure isolation for interfaces with streaming
+methods, and one mirrored fixture gained the tests for it.
 
 Those changes covered workspace imports and generated-name collisions, canonical
 double-far list writing, lossless binary schema reflection, generated Builder

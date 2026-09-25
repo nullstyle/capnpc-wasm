@@ -112,6 +112,12 @@ version that ships them.
   archives. `THIRD_PARTY_NOTICES.md` ships at the package root and `licenses/`
   holds only the flavor's texts. The full SDK archive packages every non-test
   `.go` file of the Go SDK.
+- Zig generator: `ref/capnp-zig` advances from `0fb8df4` to `295ff5e`, the
+  revision the scheduled nightly measures (Zig pin unchanged,
+  `0.17.0-dev.1683+5ceec001b`); generated Zig output needs the runtime at
+  `295ff5e`, and on an interface with streaming methods an error from an
+  ordinary method now returns an exception for that call only instead of
+  rejecting the calls after it.
 
 ## capnp-wasm-compiler-host
 

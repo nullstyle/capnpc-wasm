@@ -76,11 +76,14 @@ equivalent diamonds retain their concrete types; ambiguous ancestor applications
 require an explicit `asAncestor()` view.
 
 Generated deferred streaming handlers acknowledge after application work
-completes. Delivery and subsequent barriers remain ordered. Default outbound and
-retained-input windows are 64 calls and 1 MiB encoded bytes; zero disables a
-selected limit. Oversized calls fail instead of temporarily exceeding a byte
-window. One-shot readiness and drain callbacks expose capacity recovery and
-terminal failure. These additions remain Experimental.
+completes. Delivery and subsequent barriers remain ordered. On an interface with
+streaming methods, an error from an ordinary method returns an exception for
+that call only, and later calls still run; an error from a streaming method
+still rejects the calls after it. Default outbound and retained-input windows
+are 64 calls and 1 MiB encoded bytes; zero disables a selected limit. Oversized
+calls fail instead of temporarily exceeding a byte window. One-shot readiness
+and drain callbacks expose capacity recovery and terminal failure. These
+additions remain Experimental.
 
 The [Builder/reflection tests](../../tests/reflection/README.md),
 [generic API tests](../../tests/generator_api/README.md), RPC codegen tests, and
