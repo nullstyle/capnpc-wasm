@@ -88,6 +88,7 @@ tool_checks=(
   "wasm-tools|wasm-tools --version"
   "wasmtime|wasmtime --version"
   "shellcheck|shellcheck --version"
+  "aqua:rhysd/actionlint|actionlint -version"
   "rust|rustc --version"
 )
 for entry in "${tool_checks[@]}"; do
