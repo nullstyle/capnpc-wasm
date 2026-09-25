@@ -39,7 +39,43 @@ seconds, then the outer eight-second timeout killed the process.
 This evidence establishes the observed host/runtime behavior. It does not
 identify a Deno source regression, establish termination bounds for untested
 versions/platforms, or justify claiming that promise rejection immediately stops
-guest CPU. Browser-worker cancellation has independent browser acceptance tests.
+guest CPU.
+
+## Canary
+
+A runtime that stops JavaScript but not Wasm, or a Deno release that restores
+forced termination, would be invisible to a JavaScript-only probe (GAP2-08). The
+probe therefore takes the guest as its argument: `js` (the default, the loop
+above), `wasm` (a Wasm loop over a shared page), or `wasm-catch-all` (the same
+loop inside `try_table (catch_all)` that retries, as C++ `catch (...)` would).
+`tests/hosts/deno/worker-termination-canary.ts` runs every guest under each
+runtime it is given, kills each run after eight seconds, and compares the result
+with the table below: only `supportedDenoWorkerVersion` may stop the guest.
+`mise run test:termination-canary` runs it on the worker runtime, the pinned
+Deno, and the newest release from dl.deno.land (`CAPNP_CANARY_LATEST=0` skips
+that download); the nightly workflow runs the task without gating, and a
+departure in either direction fails that job.
+
+Observed on macOS arm64 on 2026-09-24 with the canary (the counter values are in
+its receipt, `build/test/termination-canary.json`):
+
+| Deno        | JS stopped | Wasm stopped | Wasm catch_all stopped | Child exited before 8 s |
+| ----------- | ---------- | ------------ | ---------------------- | ----------------------- |
+| 2.6.8       | Yes        | Yes          | Yes                    | Yes                     |
+| 2.7.6       | No         | No           | No                     | Yes                     |
+| 2.8.3       | No         | No           | No                     | No                      |
+| 2.9.1       | No         | No           | No                     | No                      |
+| 2.9.5       | No         | No           | No                     | No                      |
+| 2.9.6 (pin) | No         | No           | No                     | No                      |
+
+"Stopped" means the counter did not move between three and four seconds after
+`terminate()`. On 2.6.8 every guest ran through the two-second grace and then
+stopped (the Wasm counter reached 1,199,659,203 at three seconds and stayed
+there). The catch_all handler never ran on any version: V8's termination is not
+an exception Wasm can catch, so a C++ catch-all cannot keep a terminated guest
+alive, and cannot help it stop either.
+
+## Worker runtime policy
 
 The SDK now admits Deno worker execution only on the verified 2.6.8 version, and
 browsers; Bun, Node.js and unrecognized hosts are rejected before a worker is

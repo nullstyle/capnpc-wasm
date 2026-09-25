@@ -333,6 +333,35 @@ esac
 deno run --allow-read --allow-write=build --allow-run=deno,cmake,build/native/bin/normalize-request,build/native/bin/capnp,"$deno_bin" scripts/test-compiler-host-package.ts "$deno_bin"
 '''
 
+[tasks."test:termination-canary"]
+description = "Canary, not a gate: does Worker.terminate() stop a spinning JS, Wasm, or Wasm catch_all guest on the worker runtime, the pinned Deno, and the newest Deno release? (the newest release needs network; CAPNP_CANARY_LATEST=0 skips it)"
+depends = ["deno-worker:install"]
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+runtimes=("worker=$(mise where deno-worker)/deno-worker" "pinned=$(command -v deno)")
+if [[ "${CAPNP_CANARY_LATEST:-1}" != 0 ]]; then
+  version="$(curl -fsSL https://dl.deno.land/release-latest.txt)"
+  [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected latest Deno version: $version" >&2; exit 1; }
+  case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64) target=x86_64-unknown-linux-gnu ;;
+    Linux-aarch64 | Linux-arm64) target=aarch64-unknown-linux-gnu ;;
+    Darwin-arm64) target=aarch64-apple-darwin ;;
+    Darwin-x86_64) target=x86_64-apple-darwin ;;
+    *) echo "no Deno release for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+  esac
+  latest="build/test/termination-canary/deno-$version"
+  if [[ ! -x "$latest/deno" ]]; then
+    rm -rf "$latest"
+    mkdir -p "$latest"
+    curl -fsSL -o "$latest/deno.zip" "https://dl.deno.land/release/$version/deno-$target.zip"
+    unzip -q "$latest/deno.zip" -d "$latest"
+  fi
+  runtimes+=("latest=$latest/deno")
+fi
+deno run --allow-read --allow-write=build/test --allow-run tests/hosts/deno/worker-termination-canary.ts "${runtimes[@]}"
+'''
+
 [tasks."test:browser-bootstrap"]
 description = "Verify the Playwright bootstrap permission boundary without launching browsers"
 run = "deno test --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-env --allow-sys tests/browser/playwright_test.ts"
@@ -419,9 +448,9 @@ depends = ["build:native", "build:wasm", "build:wazero"]
 run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/cli_parity_test.ts"
 
 [tasks."test:conformance"]
-description = "Check the failure and limit conformance corpus (tests/fixtures/conformance) and run the TypeScript direct surface against it; the other surfaces run it in their own suites"
+description = "Check the failure and limit conformance corpus (tests/fixtures/conformance) and the termination probe's guest against their sources, and run the TypeScript direct surface against the corpus; the other surfaces run it in their own suites"
 depends = ["build:wasm", "build:rust", "build:go", "build:zig"]
-run = "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read --allow-write=build --allow-run=wasm-tools --allow-env={{vars.suite_env}} tests/conformance/conformance_test.ts"
+run = "deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read --allow-write=build --allow-run=wasm-tools --allow-env={{vars.suite_env}} tests/conformance/conformance_test.ts tests/hosts/deno/worker-termination-guest_test.ts"
 
 [tasks."test:studio-unit"]
 description = "Run the Schema Studio state and workspace unit tests on the pinned Deno (no browser, no build)"
