@@ -37,8 +37,9 @@ deno run --allow-read /path/to/capnpc-wasm/scripts/verify-release.ts --sums SHA2
 
 ## TypeScript: compile and generate
 
-`createCompiler` runs the guests in the calling thread, and
-`createWorkerCompiler` runs them off the main thread; in both, a deadline or an
+`createCompiler` runs the guests in the calling thread: its deadline stops a
+running guest, and an abort takes effect before the next guest stage.
+`createWorkerCompiler` runs them off the main thread, where a deadline or an
 abort stops the running guest. Worker execution is admitted in browsers, on
 Deno, and on Bun; Node.js has no Web `Worker` and is rejected before a worker
 starts. The caller supplies the module and schema bytes; the package performs no

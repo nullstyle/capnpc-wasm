@@ -36,13 +36,14 @@ deno run --allow-read /path/to/capnpc-wasm/scripts/verify-release.ts --sums SHA2
 
 ## Compile a schema
 
-`createCompiler` runs the compiler in the calling thread, and
-`createWorkerCompiler` runs it off the main thread; in both, a deadline or an
-abort stops the running compiler. Worker execution is admitted in browsers, on
-Deno, and on Bun; Node.js has no Web `Worker` and is rejected before a worker
-starts, with an error that points back to `createCompiler`. The caller supplies
-the module and schema bytes; the package performs no filesystem or network
-access of its own. Run this program from the `package/` directory with
+`createCompiler` runs the compiler in the calling thread: its deadline stops a
+running compiler, and an abort takes effect before the next guest stage.
+`createWorkerCompiler` runs it off the main thread, where a deadline or an abort
+stops the running compiler. Worker execution is admitted in browsers, on Deno,
+and on Bun; Node.js has no Web `Worker` and is rejected before a worker starts,
+with an error that points back to `createCompiler`. The caller supplies the
+module and schema bytes; the package performs no filesystem or network access of
+its own. Run this program from the `package/` directory with
 `deno run --allow-read=. example.ts`:
 
 ```ts example
