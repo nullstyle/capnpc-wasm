@@ -60,13 +60,34 @@ Deno.test("run escalates to SIGKILL when the child ignores SIGTERM", async () =>
   );
 });
 
+/** Fails instead of hanging when a regression leaves `pending` unsettled. */
+async function settlesWithin<T>(pending: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`run did not return within ${ms} ms`)),
+          ms,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 Deno.test("run escalates to SIGKILL while a stalled stdin write is pending", async () => {
   const started = performance.now();
   // A megabyte fills the pipe: the write blocks until the child is gone, and
   // the child ignores SIGTERM and never reads.
-  const result = await run(
-    ["sh", "-c", 'trap "" TERM; while :; do :; done'],
-    { stdin: new Uint8Array(1 << 20), timeoutMs: 200, killAfterMs: 200 },
+  const result = await settlesWithin(
+    run(
+      ["sh", "-c", 'trap "" TERM; while :; do :; done'],
+      { stdin: new Uint8Array(1 << 20), timeoutMs: 200, killAfterMs: 200 },
+    ),
+    10_000,
   );
   const elapsed = performance.now() - started;
   assert(
@@ -74,4 +95,40 @@ Deno.test("run escalates to SIGKILL while a stalled stdin write is pending", asy
     `unexpected result ${describeExit(result)}`,
   );
   assert(elapsed < 3_000, `run returned only after ${Math.round(elapsed)} ms`);
+});
+
+Deno.test("run leaves no kill timer behind when the timeout fires after the child exited", async () => {
+  // A separate Deno process runs the scenario and must exit on its own soon
+  // after run() returns. sh exits at once, and the backgrounded sleep keeps
+  // the pipes open until the timeout stops the reads; a kill timer that the
+  // late timeout armed would hold that process for killAfterMs (20 s). Deno's
+  // op sanitizer does not report such a timer, so the lifetime is measured.
+  const scenario = `
+    import { run } from "./tests/lib/process.ts";
+    const result = await run(["sh", "-c", "sleep 2 & printf partial"], {
+      timeoutMs: 300,
+      killAfterMs: 20000,
+    });
+    console.log(JSON.stringify({ timedOut: result.timedOut, code: result.code }));
+  `;
+  const started = performance.now();
+  const result = await run(
+    ["sh", "-c", 'exec deno eval --no-config "$0"', scenario],
+    { timeoutMs: 15_000 },
+  );
+  const elapsed = performance.now() - started;
+  assert(
+    result.success && !result.timedOut,
+    `the scenario process ${describeExit(result)}: ${text(result.stderr)}`,
+  );
+  assert(
+    text(result.stdout).includes('"timedOut":true,"code":0'),
+    text(result.stdout),
+  );
+  assert(
+    elapsed < 10_000,
+    `the scenario process lived ${
+      Math.round(elapsed)
+    } ms: a kill timer outlived run()`,
+  );
 });

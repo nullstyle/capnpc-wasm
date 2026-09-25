@@ -211,13 +211,15 @@ async function waitForExit(
   killAfterMs: number,
 ): Promise<Deno.CommandStatus> {
   let killTimer: ReturnType<typeof setTimeout> | undefined;
+  let escalateNow!: () => void;
   const escalate = new Promise<"kill">((resolve) => {
-    const arm = () => {
-      killTimer = setTimeout(() => resolve("kill"), killAfterMs);
-    };
-    if (signal.aborted) arm();
-    else signal.addEventListener("abort", arm, { once: true });
+    escalateNow = () => resolve("kill");
   });
+  const arm = () => {
+    killTimer = setTimeout(escalateNow, killAfterMs);
+  };
+  if (signal.aborted) arm();
+  else signal.addEventListener("abort", arm, { once: true });
   try {
     const outcome = await Promise.race([child.status, escalate]);
     if (outcome !== "kill") return outcome;
@@ -228,6 +230,9 @@ async function waitForExit(
     }
     return await child.status;
   } finally {
+    // A timeout that fires after the child exited (while a grandchild still
+    // holds the pipes) must not arm a kill timer that nothing clears.
+    signal.removeEventListener("abort", arm);
     clearTimeout(killTimer);
   }
 }
