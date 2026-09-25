@@ -1089,7 +1089,9 @@ try {
               elapsed: performance.now() - started,
             };
           } finally {
-            if ("dispose" in compiler) compiler.dispose();
+            // Since both kinds take job options, the conditional's type
+            // reduces to Compiler, which declares no dispose.
+            if ("dispose" in compiler) (compiler as WorkerCompiler).dispose();
           }
         }
         return outcomes;
