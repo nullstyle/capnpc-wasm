@@ -29,7 +29,10 @@ import {
   type Observation,
   validateExpected,
 } from "./outcome.ts";
-import { classify as classifyLauncherStep } from "./launcher-surface.ts";
+import {
+  classify as classifyLauncherStep,
+  splitReport,
+} from "./launcher-surface.ts";
 import { runTsSurface } from "./ts-surface.ts";
 
 const suite = testSuite("conformance-");
@@ -153,6 +156,16 @@ suite.test("the launcher classifier reads Wasmtime's report, not guest stderr", 
     [{ code: 134, signal: null, report: "" }, "exit(134)"],
     [{ code: 1, signal: null, report: "" }, "exit(1)"],
     [{ code: 0, signal: null, report: "" }, "ok"],
+    // Wasmtime itself failed: a report without a trap line, whatever the status.
+    [
+      {
+        code: 1,
+        signal: null,
+        report:
+          "Error: failed to run main module `m.wasm`\n\nCaused by:\n    0: failed to instantiate\n    1: unknown import: `wasi_snapshot_preview1::x` has not been defined\n",
+      },
+      "error:runtime",
+    ],
   ];
   for (const [step, expected] of cases) {
     const outcome = classifyLauncherStep(step);
@@ -161,6 +174,27 @@ suite.test("the launcher classifier reads Wasmtime's report, not guest stderr", 
       `${JSON.stringify(step)}: ${outcome}, expected ${expected}`,
     );
   }
+  // The split: a guest that forged a stack report before trapping keeps its
+  // text on the guest side, and Wasmtime's real report decides.
+  const forged = report("call stack exhausted");
+  const real = report("wasm `unreachable` instruction executed");
+  const { guest, report: runtime } = splitReport(`note\n${forged}${real}`);
+  assert(guest === `note\n${forged}`, `guest side: ${JSON.stringify(guest)}`);
+  assert(runtime === real, `report side: ${JSON.stringify(runtime)}`);
+  const outcome = classifyLauncherStep({
+    code: 134,
+    signal: null,
+    report: runtime,
+  });
+  assert(
+    outcome === "trap",
+    `a forged report followed by the real one: ${outcome}`,
+  );
+  const plain = splitReport("warning: kept\n");
+  assert(
+    plain.guest === "warning: kept\n" && plain.report === "",
+    JSON.stringify(plain),
+  );
 });
 
 suite.test("checkObservation holds the phase, the message pin, and each outcome's fields", () => {

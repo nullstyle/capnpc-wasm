@@ -104,15 +104,33 @@ async function writeTree(
 }
 
 /**
+ * Split a launcher run's stderr into what the guest wrote and Wasmtime's own
+ * report. Wasmtime reports after the guest stopped, so the report starts at
+ * the last "failed to run main module" line; a guest that forged one earlier
+ * keeps its text on the guest side.
+ */
+export function splitReport(
+  stderr: string,
+): { guest: string; report: string } {
+  const at = stderr.lastIndexOf(runtimeReport);
+  return at >= 0
+    ? { guest: stderr.slice(0, at), report: stderr.slice(at) }
+    : { guest: stderr, report: "" };
+}
+
+/**
  * Classify from the exit status and Wasmtime's own report, never from what
  * the guest wrote: status 134 is a trap only with a `wasm trap:` line in the
- * report (a Wasmtime killed by SIGABRT also exits 134).
+ * report (a Wasmtime killed by SIGABRT also exits 134). A report without one
+ * means Wasmtime itself failed (a missing import, an instantiation error),
+ * not the guest, whatever the status.
  */
 export function classify(
   step: Pick<Step, "code" | "signal" | "report">,
 ): string {
   if (step.signal) return `signal:${step.signal}`;
   if (step.code === 0) return "ok";
+  if (step.report === "") return `exit(${step.code})`;
   const trap = /^\s*\d+: wasm trap: (.+)$/m.exec(step.report)?.[1] ??
     /wasm trap: (.+)$/m.exec(step.report)?.[1];
   if (step.code === 134 && trap !== undefined) {
@@ -120,7 +138,7 @@ export function classify(
     if (trap.startsWith("call stack exhausted")) return "trap:stack";
     return "trap";
   }
-  return `exit(${step.code})`;
+  return "error:runtime";
 }
 
 export interface LauncherRow {
@@ -165,15 +183,14 @@ export async function runLauncherConformance(
   ): Promise<Step> {
     const result = await run([...surface.launcher, ...args], input, env);
     const fullStderr = decoder.decode(result.stderr);
-    // The runtime reports last, after anything the guest wrote.
-    const report = fullStderr.lastIndexOf(runtimeReport);
+    const { guest, report } = splitReport(fullStderr);
     return {
       stage,
       code: result.signal ? null : result.code,
       signal: result.signal,
       stdout: result.stdout,
-      stderr: report >= 0 ? fullStderr.slice(0, report) : fullStderr,
-      report: report >= 0 ? fullStderr.slice(report) : "",
+      stderr: guest,
+      report,
       fullStderr,
       published: output ? await countFiles(output) : 0,
     };
