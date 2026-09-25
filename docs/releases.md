@@ -372,10 +372,12 @@ does not add a TypeScript generator or an `encode`/`decode` command API. All
 asset loading belongs to the consumer. After loading bytes and a worker script
 into a blob URL, jobs and worker restarts can run without filesystem, network,
 or process permission. Keep the blob URL alive until the worker is disposed.
-Worker execution requires Deno 2.6.8 and has its documented two-second engine
-termination grace; unsupported Deno versions fail before starting a worker.
-Direct compilation is also tested on Deno 2.9.6 and has no hard execution
-deadline.
+Worker execution runs on every Deno release: every guest is instrumented with
+interruption checks, so a job's `timeoutMs`, its abort signal, and `dispose()`
+stop the guest itself, and the worker survives cancellation. Direct compilation
+enforces the same deadline. The published rc.2 and rc.3 archives predate this:
+their worker execution accepts only Deno 2.6.8, and their direct compilation has
+no hard deadline.
 
 The rc.3 compiler host adds optional canonical `sourcePrefix` and ordered
 `importPaths` within the supplied files snapshot. The package gate compares
@@ -389,12 +391,9 @@ immutable; consumers opt into the new version with new integrity pins.
 notices, the packaged links and README example, modified/missing/extra-file
 rejection, and an external npm-layout Deno consumer with a fresh cache. It
 checks direct/worker request parity, imports and binary embeds, diagnostics,
-limits, active-guest cancellation, and recovery after restarting the worker
-offline on Deno 2.6.8. The default producer-runtime check instead verifies
-direct compilation and actionable worker-version rejection. On the supported
-Deno, an eight-second parent bound also encloses a real shared counter probe
-that confirms execution stops within the engine grace. To test another installed
-Deno without changing the producer pin:
+limits, and an active guest's timeout and abort, each followed by a job on the
+same worker, offline. To test another installed Deno without changing the
+producer pin:
 
 ```sh
 mise exec -- deno run --allow-read --allow-write=build \
