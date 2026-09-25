@@ -58,6 +58,9 @@ func run() int {
 	config := wazero.NewRuntimeConfigCompiler()
 	if *interpreter {
 		config = wazero.NewRuntimeConfigInterpreter()
+	} else if cache := compilationCache(); cache != nil {
+		defer cache.Close(ctx)
+		config = config.WithCompilationCache(cache)
 	}
 	// The shipped modules carry sysroot DWARF that wazero would otherwise walk
 	// on every proc_exit; this runner leaves it unloaded.
@@ -107,6 +110,31 @@ func run() int {
 		return exitHost
 	}
 	return 0
+}
+
+// compilationCache keeps the compiler engine's machine code in
+// build/wazero-cache, beside build/hosts/wazero-run, so the test suites that
+// run this host hundreds of times compile each module once. The directory is
+// keyed by this binary's size and modification time: a rebuilt host, which
+// may embed another wazero, never reads code that another build compiled.
+// wazero writes each entry to a temporary file and renames it, so concurrent
+// hosts share the directory safely. Any failure only disables the cache.
+func compilationCache() wazero.CompilationCache {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	info, err := os.Stat(executable)
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Join(filepath.Dir(executable), "..", "wazero-cache",
+		fmt.Sprintf("%x-%x", info.Size(), info.ModTime().UnixNano()))
+	cache, err := wazero.NewCompilationCacheWithDir(dir)
+	if err != nil {
+		return nil
+	}
+	return cache
 }
 
 func main() {
