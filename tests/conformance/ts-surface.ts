@@ -27,7 +27,7 @@ import {
   observe,
   type Surface,
 } from "./outcome.ts";
-import { cachingHost, runCase } from "./page-runner.js";
+import { cachingHost, orderCases, runCase } from "./page-runner.js";
 
 const root = new URL("../../", import.meta.url);
 const workerURL = new URL("../../sdk/typescript/worker.ts", import.meta.url);
@@ -81,8 +81,9 @@ export interface Row {
 }
 
 /**
- * Run every case the surface can express, as one test step each. Returns
- * the observed rows; a mismatch fails its step.
+ * Run every case the surface can express, as one test step each, in the
+ * shared orderCases() order. Returns the observed rows in corpus order; a
+ * mismatch fails its step.
  */
 export async function runTsSurface(
   t: Deno.TestContext,
@@ -103,7 +104,7 @@ export async function runTsSurface(
   });
   const rows: Row[] = [];
   try {
-    for (const spec of corpus.cases) {
+    for (const spec of orderCases(corpus.cases)) {
       const expectation = expectationFor(corpus.expected, spec.name, surface);
       if ("skip" in expectation) {
         rows.push({
@@ -146,5 +147,8 @@ export async function runTsSurface(
   } finally {
     host.disposeAll();
   }
-  return rows;
+  const position = new Map(
+    corpus.cases.map((spec, index) => [spec.name, index]),
+  );
+  return rows.sort((a, b) => position.get(a.name)! - position.get(b.name)!);
 }

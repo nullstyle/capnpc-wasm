@@ -116,6 +116,7 @@ export function summarizeResult(result) {
  * @returns {Modules}
  */
 export function caseModules(spec, modules, guests) {
+  /** @param {string} name */
   const named = (name) => {
     const bytes = guests[name];
     if (!bytes) throw new Error(`${spec.name}: unknown guest ${name}`);
@@ -143,6 +144,7 @@ export function caseJob(spec, inputs) {
   if (spec.op === "generate") {
     return { request: inputs.request, generators: spec.generators };
   }
+  /** @type {Record<string, unknown>} */
   const job = {
     files: inputs.files,
     includeFiles: inputs.includeFiles,
@@ -155,9 +157,12 @@ export function caseJob(spec, inputs) {
 }
 
 /**
- * A host that keeps one client per module set and limits, so a surface
- * compiles its modules once per distinct configuration rather than per case.
- * A client a cancelled job terminated restarts by itself on its next job.
+ * A host that reuses one client while consecutive cases share a module set and
+ * limits, and disposes it when the configuration changes, so a surface
+ * compiles its modules once per run of cases instead of once per case and
+ * never holds more than one client (in a browser, one worker) at a time. Run
+ * the cases in orderCases() order. A client a cancelled job terminated
+ * restarts by itself on its next job.
  *
  * @param {{
  *   create: (modules: Modules, options: { limits: Record<string, number> }) => Promise<any>,
@@ -167,25 +172,26 @@ export function caseJob(spec, inputs) {
  * @returns {SurfaceHost & { disposeAll: () => void }}
  */
 export function cachingHost(base) {
-  const clients = new Map();
+  /** @type {{ key: string, client: any } | undefined} */
+  let current;
+  const dispose = () => {
+    if (typeof current?.client?.dispose === "function") {
+      current.client.dispose();
+    }
+    current = undefined;
+  };
   return {
     CompileError: base.CompileError,
     jobOptions: base.jobOptions,
     async create(modules, options, key) {
-      let client = clients.get(key);
-      if (!client) {
-        client = await base.create(modules, options);
-        clients.set(key, client);
-      }
+      if (current?.key === key) return current.client;
+      dispose();
+      const client = await base.create(modules, options);
+      current = { key, client };
       return client;
     },
     release() {},
-    disposeAll() {
-      for (const client of clients.values()) {
-        if (typeof client.dispose === "function") client.dispose();
-      }
-      clients.clear();
-    },
+    disposeAll: dispose,
   };
 }
 
@@ -201,6 +207,28 @@ export function configurationKey(spec) {
     [...spec.generators].sort(),
     spec.limits ?? {},
   ]);
+}
+
+/**
+ * The order every TypeScript surface runs the corpus in: cases grouped by
+ * configuration (so cachingHost reuses clients), and cases with a deadline
+ * last, because an engine whose terminate() does not stop Wasm (WebKit) keeps
+ * each timed-out guest spinning until the browser closes. Outcomes do not
+ * depend on the order.
+ *
+ * @template {CaseSpec} T
+ * @param {T[]} cases
+ * @returns {T[]}
+ */
+export function orderCases(cases) {
+  return [...cases].sort((a, b) =>
+    Number(Boolean(a.deadlineMs)) - Number(Boolean(b.deadlineMs)) ||
+    (configurationKey(a) < configurationKey(b)
+      ? -1
+      : configurationKey(a) > configurationKey(b)
+      ? 1
+      : 0)
+  );
 }
 
 /**
@@ -262,6 +290,7 @@ export async function runStudioCase(spec, inputs, studio, CompileError) {
     let request = inputs.request;
     if (spec.op === "compile") {
       const compiled = await studio.compile(
+        /** @param {Record<string, Uint8Array>} standard */
         (standard) => ({
           files: inputs.files,
           includeFiles: { ...standard, ...inputs.includeFiles },
