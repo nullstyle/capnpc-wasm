@@ -146,21 +146,38 @@ the C++, Rust, and Go generators, whose files are checked against the native
 oracle. On this page, which is not cross-origin isolated, each abort replaces
 the worker and each timeout keeps it.
 
-Every soak worker is traced (`worker-trace.ts`): it reports its start, each
-message, each Wasm compile and instantiate, and each reply. A recovery gets 20
-seconds, over six times the slowest one measured in CI. One that does not finish
-in time is retried once on the same client, which replaces the stalled worker as
-it would for an application, and judged by its evidence:
+Every soak worker is traced (`worker-trace.ts`): a module that loads before the
+SDK's `worker.js` reports the worker's start, each message it receives, each
+Wasm compile and instantiate, and each reply, and the page adds each message it
+posts to the worker and each reply that reaches it. A recovery gets 20 seconds,
+over six times the slowest one measured in CI. One that does not finish in time
+is retried once on the same client, which replaces the stalled worker as it
+would for an application, and the evidence is judged by one rule
+(`judgeStall()`), which the termination check's start stalls share. The message
+the worker had to answer is the page's last post to it, if the page posted
+anything for the recovery.
 
-- If the stalled worker had received the job and never answered it, while a
+- The SDK is the suspect when the recovery ended with anything but a timeout, a
+  failure rather than a stall; when the page never posted the message, since
+  only the SDK's client decides to post; or when the engine did its part and
+  stayed healthy, yet the worker never answered. The engine did its part when a
   fresh worker still starts and Wasm still compiles in a worker and on the page,
-  the SDK is the suspect: the run fails with both workers' traces.
+  the worker received the message, every Wasm compile and instantiation it began
+  finished, and every reply it sent reached the page. The run then fails with
+  both workers' traces.
 - Otherwise the engine is the suspect, and the stall is tolerated within a
   budget per CI job. `CAPNP_SOAK_STALL_BUDGET` (1 by default, 0 for none) bounds
   these stalls and the termination check's start stalls (see below) together, as
   every driver of the job records them in `build/test/soak-stalls.jsonl`: all
   engines, the suite run, and each soak round. CI jobs start from a clean
   checkout; locally the ledger lasts until `mise run clean:test`.
+
+Until the rule was shared, the soak read two cases the other way. A worker whose
+trace showed no job was blamed on the engine; the page's posts now show whether
+the page sent one, and a job the page never sent is the SDK's. A job received
+and left unanswered while its Wasm compile never finished was blamed on the SDK;
+an unfinished compile is the engine's, as these guests have no start function
+that instantiation could run.
 
 A tolerated stall prints an `OBSERVED <engine> soak recovery stall` line with
 both traces and the health checks, goes into the engine's receipt and the run
@@ -216,16 +233,17 @@ reported by then would have made the client terminate its worker, so no
 `terminate()` call and no second worker show that it stopped. The checks run
 after everything else.
 
-A sample whose probe worker does not initialize within 10 seconds, or whose
-guest does not run within 10 seconds of its job (before its deadline, for a
-timeout), is a start stall rather than a measurement. The probe worker is traced
-like a soak worker, and the page returns that trace, its own messages to the
-worker, and the soak's engine health checks. The evidence is read as the soak
-reads it. If the page never posted the message, or the engine started the
-worker, delivered the message, finished every Wasm compile and instantiation,
-and stayed healthy while the worker never answered or its guest never ran, the
-SDK is the suspect and the check fails. Otherwise the sample is retried once,
-and the stall counts against the soak's stall budget, with an
+A sample whose probe worker's initialization times out after 10 seconds, or
+whose guest does not run within 10 seconds of its job (before its deadline, for
+a timeout that fires on time), is a start stall rather than a measurement. Any
+other outcome is not: a factory that fails, or a timeout job that ends early,
+fails the check. The probe worker is traced like a soak worker, and the page
+returns that trace, its own posts to the worker and the replies that reached it,
+and the engine health checks. The soak's rule judges the evidence, with the
+guest's counter as one more sign: a guest that ran, only late, points at the
+engine, and one that never ran while the engine did its part points at the SDK.
+A stall that points at the SDK fails the check. Otherwise the sample is retried
+once, and the stall counts against the soak's stall budget, with an
 `OBSERVED <engine> worker start stall` line, a receipt entry, and a warning
 annotation on GitHub Actions. One start stall has been seen: in the nightly run
 [36132427000](https://github.com/nullstyle/capnpc-wasm/actions/runs/36132427000),
