@@ -240,7 +240,7 @@ pinned generator. Consumption details, including package manifests, are in the
 | `capnpc-c++`  | Cap'n Proto v2 at `851c45bb` (`2.0-dev`, `CAPNP_VERSION` 2000000); generated headers `#error` against any other version, including every 1.x |
 | `capnpc-rust` | `capnp` 0.27.2 and `capnpc` 0.27.0 at `81bc1b8` (tag `capnp-v0.27.2`)                                                                        |
 | `capnpc-go`   | go-capnp at `5d74edb` (`v3.1.0-alpha.2.0.20260727122444-5d74edb9db42`, untagged)                                                             |
-| `capnpc-zig`  | capnp-zig at `0fb8df4` (`v0.18.0-14-g0fb8df4`, untagged), bound as module `capnpc-zig` to its `src/lib_core.zig`                             |
+| `capnpc-zig`  | capnp-zig at `295ff5e` (`v0.18.0-17-g295ff5e`, untagged), bound as module `capnpc-zig` to its `src/lib_core.zig`                             |
 
 ## Repository toolchain integration
 
