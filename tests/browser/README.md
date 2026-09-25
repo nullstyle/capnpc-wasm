@@ -130,7 +130,9 @@ This step gives each worker init 60 seconds and each job 30 seconds explicitly,
 since a WebKit worker's init once ran out of the SDK's implicit 30-second
 default under load (nightly 36141746707), although it measures about 0.15 s with
 every core busy. An init or job that runs out names itself and its duration, and
-`OBSERVED <engine> <host> resource limits: ...` prints every duration.
+`OBSERVED <engine> <host> resource limits: ...` prints every duration. These
+workers are not traced, so the one stall rule (`judgeStall`) cannot read them: a
+stalled init here fails the run rather than counting against the stall budget.
 
 The hostile guests under `guests/` run in both modes as well. Each one-page
 command asks the host for more than the guest owns (oversized read iovec arrays,
