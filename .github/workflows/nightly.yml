@@ -96,8 +96,10 @@ jobs:
       # at once: the harness's SIGTERM race (nightly 36120138448), an SDK
       # cancellation grace (36132427000), and a cold Zig consumer build past
       # its timeout (36141746707). With two tasks at once its check, about 17
-      # minutes now, takes an estimated 25 to 45 (the tasks' logged durations
-      # sum to 78 to 94 minutes), well inside the job's 90.
+      # minutes now, should take roughly 25 to 45 minutes. That is an
+      # estimate: the tasks' durations, logged under full contention, sum to
+      # 78 to 94 minutes, so two at once finish within half that plus half the
+      # longest dependency chain, about 56 minutes, inside the job's 90.
       - name: Run two mise tasks at once on the Intel runner
         if: matrix.os == 'macos-15-intel'
         run: echo "MISE_JOBS=2" >> "$GITHUB_ENV"
@@ -138,13 +140,14 @@ jobs:
     name: Browsers and soak (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
-    # One engine at a time: with three at once on these four-CPU runners,
-    # WebKit stalled recovering or starting workers (nightly 36112692524 soak
-    # recovery, 36132427000 termination probe start, 36141746707
-    # resource-limits worker init, all on Linux). Estimated, not measured:
-    # nine one-round runs logged each engine's pass at 81 to 150 s, so a pass
-    # in sequence takes at most about 400 s, and five soak rounds after
-    # test:browser and test:studio keep the job near 45 minutes.
+    # One engine at a time: with three at once on these small runners (four
+    # vCPUs on ubuntu-24.04, three on macos-15), WebKit stalled recovering or
+    # starting workers (nightly 36112692524 soak recovery, 36132427000
+    # termination probe start, 36141746707 resource-limits worker init, all
+    # on Linux). Estimated, not measured: nine one-round runs logged each
+    # engine's pass at 81 to 150 s, so a pass in sequence takes about 400 s
+    # at most, and five soak rounds after test:browser and test:studio keep
+    # the job near 45 minutes.
     env:
       CAPNP_BROWSER_JOBS: "1"
     strategy:
