@@ -4,16 +4,19 @@
  *
  * compileBounded instruments every guest module: a countdown global ticks at
  * each loop header, at the entry of each function that can call guest code,
- * and after each direct call to an import. Every `pollInterval` ticks the
- * guest calls the one added import, `capnp_wasm.interrupt`, which answers from
- * the job's JobControl. A nonzero answer executes `unreachable`. That is a
- * trap, which no `try_table`/`catch_all` in the guest can intercept, so guest
- * cleanup and `catch (...)` handlers never run after a stop.
+ * and after each call to an import, direct or through the thunk that stands
+ * in for an import used as a value; bulk memory and table operations are
+ * charged by size, one tick per KiB or per 16 entries. Every `pollInterval`
+ * ticks the guest calls the one added import, `capnp_wasm.interrupt`, which
+ * answers from the job's JobControl. A nonzero answer executes `unreachable`.
+ * That is a trap, which no `try_table`/`catch_all` in the guest can intercept,
+ * so guest cleanup and `catch (...)` handlers never run after a stop.
  *
  * The host stops a guest from inside an import the same way, never by
- * throwing into it: the runtime records why, zeroes the exported countdown,
- * and the check right after the import call polls and traps. `proc_exit`
- * is followed by an injected `unreachable` as well.
+ * throwing into it: every import polls the JobControl before it acts, and on
+ * a stop the runtime records why, zeroes the exported countdown, and the
+ * check right after the import call polls and traps. `proc_exit` is followed
+ * by an injected `unreachable` instead.
  */
 
 /** Module and field of the import instrumentation adds: `() -> i32`. */

@@ -10,16 +10,21 @@ import {
   type Modules,
 } from "./mod.ts";
 import { Cancelled, countdownExport, JobControl } from "./interrupt.ts";
-import { runCommand } from "./runtime.ts";
+import { CommandError, runCommand } from "./runtime.ts";
 import { compileBounded, instrument } from "./wasm.ts";
 import {
   bulkChargesModule,
   catchRetryGuest,
   catchRetryMode,
+  costlyStep,
+  costlyStepsGuest,
   escapingImportsModule,
   legacyExceptionsModule,
   namedTrapGuest,
+  pollOverlapGuest,
   rewriterCoverageModule,
+  startFailureGuest,
+  swallowAllGuest,
 } from "./testdata/interrupt_guests.ts";
 import {
   assert,
@@ -635,6 +640,97 @@ Deno.test("SDK direct jobs stop running guests at their deadline", async () => {
     await compiler.compile({ ...request, generators: ["rust"] }),
     expected,
   );
+});
+
+Deno.test("SDK direct jobs stop bulk operations and costly imports at their deadline", async () => {
+  const compiler = await createCompiler({
+    compiler: trapGuest,
+    generators: { cpp: costlyStepsGuest },
+  });
+  // Each step repeats a 16 MiB fill, a fill of a million table entries, or a
+  // 16 MiB random_get. At one tick per iteration the first poll would come
+  // minutes after the deadline; charges and import polls stop each in time.
+  for (const [step, mode] of Object.entries(costlyStep)) {
+    let failure: unknown;
+    const took = await elapsed(async () => {
+      try {
+        await compiler.generate({
+          request: Uint8Array.of(mode),
+          generators: ["cpp"],
+        }, { timeoutMs });
+      } catch (error) {
+        failure = error;
+      }
+    });
+    assert(
+      failure instanceof DOMException && failure.name === "TimeoutError",
+      `${step}: ${failure}`,
+    );
+    stoppedInTime(took, step);
+  }
+});
+
+Deno.test("SDK stops a guest as a host failure when polling its job throws", async () => {
+  // The guest has no imports and swallows every exception, so only its polls
+  // read the signal, and an exception thrown from one would let it exit 0.
+  const failure = new Error("the signal cannot be read");
+  const signal = new EventTarget() as unknown as AbortSignal;
+  Object.defineProperty(signal, "aborted", {
+    get: () => {
+      throw failure;
+    },
+  });
+  const module = await compileBounded(swallowAllGuest, 16);
+  let stopped: unknown;
+  try {
+    await runCommand(
+      module,
+      ["guest"],
+      new Uint8Array(),
+      {},
+      true,
+      defaultLimits,
+      true,
+      new JobControl({ signal }),
+    );
+  } catch (error) {
+    stopped = error;
+  }
+  assert(
+    stopped instanceof CommandError && stopped.cause === failure,
+    `the failed poll did not stop the guest: ${stopped}`,
+  );
+});
+
+Deno.test("SDK keeps a host failure in a start function and never runs _start", async () => {
+  // _start would exit 0; the failure recorded during instantiation stands.
+  const compiler = await createCompiler({
+    compiler: trapGuest,
+    generators: { cpp: startFailureGuest },
+  });
+  const failure = await rejectsWith(
+    () => compiler.generate({ request: Uint8Array.of(0), generators: ["cpp"] }),
+    CompileError,
+  );
+  assert(
+    failure.kind === "trap" && failure.stage === "cpp" &&
+      failure.message.startsWith("cpp trapped: WASI command failed: "),
+    `start failure lost: ${failure.kind}: ${failure.message}`,
+  );
+});
+
+Deno.test("SDK poll_oneoff reads the subscription before writing an overlapping event", async () => {
+  // The guest exits with the userdata the event reports.
+  const compiler = await createCompiler({
+    compiler: trapGuest,
+    generators: { cpp: pollOverlapGuest },
+  });
+  const exit = await rejectsWith(
+    () => compiler.generate({ request: Uint8Array.of(0), generators: ["cpp"] }),
+    CompileError,
+    "cpp exited with status 42",
+  );
+  assert(exit.kind === "exit" && exit.exitCode === 42, `${exit.exitCode}`);
 });
 
 Deno.test("SDK direct jobs observe their abort signal", async () => {

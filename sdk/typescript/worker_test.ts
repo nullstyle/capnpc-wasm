@@ -21,6 +21,8 @@ import { hostileGuests } from "./testdata/hostile_guests.ts";
 import {
   catchRetryGuest,
   catchRetryMode,
+  costlyStep,
+  costlyStepsGuest,
 } from "./testdata/interrupt_guests.ts";
 import { resolveWorkerURL } from "./worker-client.ts";
 import {
@@ -759,6 +761,45 @@ workerTest(
         assert(
           constructions() === 1,
           `cancellation replaced the worker (${constructions()} workers)`,
+        );
+      } finally {
+        worker.dispose();
+      }
+    });
+  },
+);
+
+workerTest(
+  "SDK worker aborts stop bulk operations and costly imports inside the guest",
+  async () => {
+    await countingWorkers(async (constructions) => {
+      const worker = await createWorkerCompiler(workerURL, {
+        compiler: trapGuest,
+        generators: { cpp: costlyStepsGuest },
+      });
+      try {
+        for (const [step, mode] of Object.entries(costlyStep)) {
+          const controller = new AbortController();
+          const running = worker.generate(generation(mode), {
+            signal: controller.signal,
+          });
+          await delay(100);
+          controller.abort();
+          await rejects(() => running, "AbortError");
+          // The trapping compiler runs only once the aborted guest stopped;
+          // a guest still running after a second would replace the worker.
+          const [, next] = await timed(() =>
+            rejects(
+              () => worker.compile({ ...simpleRequest(), generators: [] }),
+              "CompileError",
+              "compiler trapped",
+            )
+          );
+          assert(next < lateMs, `${step}: the next job waited ${next} ms`);
+        }
+        assert(
+          constructions() === 1,
+          `an abort replaced the worker (${constructions()} workers)`,
         );
       } finally {
         worker.dispose();

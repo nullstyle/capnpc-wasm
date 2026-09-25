@@ -239,6 +239,7 @@ function clockPoll(
     } else if (clock === CLOCKID_REALTIME) {
       now = BigInt(Date.now()) * 1_000_000n;
     } else return ERRNO_INVAL;
+    const userdata = view.getBigUint64(input, true);
     const timeout = view.getBigUint64(input + 24, true);
     const absolute = view.getUint16(input + 40, true) &
       SUBCLOCKFLAGS_SUBSCRIPTION_CLOCK_ABSTIME;
@@ -249,9 +250,10 @@ function clockPoll(
       return ERRNO_INTR;
     }
     // event: userdata u64 @0, error u16 @8, type u8 @10, 32 bytes in all.
+    // The subscription was read in full first: the two may overlap.
     const event = new DataView(wasi.inst.exports.memory.buffer, output, 32);
     for (let offset = 0; offset < 32; offset += 4) event.setUint32(offset, 0);
-    event.setBigUint64(0, view.getBigUint64(input, true), true);
+    event.setBigUint64(0, userdata, true);
     event.setUint8(10, EVENTTYPE_CLOCK);
     new DataView(wasi.inst.exports.memory.buffer).setUint32(events, 1, true);
     return 0;
@@ -264,10 +266,11 @@ function clockPoll(
  * pass only for buffers they already own privately.
  *
  * `module` must come from compileBounded: the injected checks poll `control`,
- * and a stop never throws into the guest (see interrupt.ts). An exit records
- * its status, a budget or host error records its cause, and a cancellation
- * records nothing here; each zeroes the countdown so the guest traps at its
- * next check, before any guest handler runs. Once stopped, every import
+ * and so does every import before it acts, and a stop never throws into the
+ * guest (see interrupt.ts). An exit records its status, a budget or host
+ * error records its cause, and a cancellation records nothing here; each
+ * zeroes the countdown so the guest traps at the check that follows the
+ * import call, before any guest handler runs. Once stopped, every import
  * returns EINTR without acting. A cancelled job rejects with Cancelled.
  */
 export async function runCommand(
@@ -318,23 +321,35 @@ export async function runCommand(
   // the shim's WASIProcExit would unwind through guest catch handlers.
   wasi.wasiImport.proc_exit = (code: number) => halt({ kind: "exit", code });
   // Outermost: no host exception reaches guest frames, where catch_all could
-  // intercept it; it stops the guest like a trap instead.
+  // intercept it; it stops the guest like a trap instead. Each call first
+  // polls the job, so a loop of costly calls (random_get over all of memory,
+  // say) stops after one of them rather than at the countdown's next expiry.
+  const cancel = () => {
+    if (!control.cancelled()) return false;
+    halt({ kind: "cancel" });
+    return true;
+  };
   for (const [name, original] of Object.entries(wasi.wasiImport)) {
     wasi.wasiImport[name] = (...values: unknown[]) => {
       if (stop) return ERRNO_INTR;
       try {
-        return original(...values);
+        return cancel() ? ERRNO_INTR : original(...values);
       } catch (error) {
         halt({ kind: "failure", error });
         return ERRNO_INTR;
       }
     };
   }
+  // The same containment for the poll itself: a signal whose `aborted`
+  // throws stops the guest as a host failure.
   const interrupt = () => {
     if (stop) return 1;
-    if (!control.cancelled()) return 0;
-    halt({ kind: "cancel" });
-    return 1;
+    try {
+      return cancel() ? 1 : 0;
+    } catch (error) {
+      halt({ kind: "failure", error });
+      return 1;
+    }
   };
 
   let code = 0;
@@ -355,8 +370,11 @@ export async function runCommand(
       throw new Error("WASI command was not instrumented for interruption");
     }
     countdown = counter;
-    if (stop) countdown.value = 0;
-    code = wasi.start({ exports: { memory, _start: () => _start() } });
+    // A stop recorded while a start function ran, before the countdown
+    // could be zeroed, is final: _start never runs.
+    if (!stop) {
+      code = wasi.start({ exports: { memory, _start: () => _start() } });
+    }
   } catch (error) {
     // A trap after a stop is the stop itself; any other is the failure.
     if (!stop) failure = { error };
