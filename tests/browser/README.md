@@ -71,14 +71,16 @@ seconds`. The
 driver records the running step next to its receipt. `run.ts` gives each driver
 an overall deadline, 20 minutes by default; past it, the driver receives
 SIGTERM, names the step it was on, and closes its browser, and it is killed 30
-seconds later if it has not exited. Environment variables adjust this:
+seconds later if it has not exited. The pages' Playwright timeouts are 60
+seconds. Environment variables adjust this:
 
-| Variable                          | Effect                                                           |
-| --------------------------------- | ---------------------------------------------------------------- |
-| `CAPNP_BROWSER_DEADLINE_MS`       | Each step's deadline (default 60000)                             |
-| `CAPNP_BROWSER_ENGINE_TIMEOUT_MS` | Each driver's overall deadline (default 1200000)                 |
-| `CAPNP_BROWSER_JOBS`              | Drivers that run at once (default 3; 1 runs the engines in turn) |
-| `CAPNP_BROWSER_STALL`             | Hangs the first step whose label contains the text, as a drill   |
+| Variable                          | Effect                                                                                     |
+| --------------------------------- | ------------------------------------------------------------------------------------------ |
+| `CAPNP_BROWSER_DEADLINE_MS`       | Each step's deadline (default 60000)                                                       |
+| `CAPNP_BROWSER_ENGINE_TIMEOUT_MS` | Each driver's overall deadline (default 1200000)                                           |
+| `CAPNP_BROWSER_JOBS`              | Drivers that run at once (default 3; 1 runs the engines in turn)                           |
+| `CAPNP_BROWSER_STALL`             | Hangs the first step whose label contains the text, as a drill                             |
+| `CAPNP_TEST_TIMEOUT_SCALE`        | Multiplies both default deadlines, the kill grace, and the Playwright timeouts (default 1) |
 
 For example,
 `CAPNP_BROWSER_STALL="abort recovery cycle 3" CAPNP_BROWSER_DEADLINE_MS=5000 mise run test:browser chromium`
@@ -86,7 +88,12 @@ fails on that step five seconds after it starts. `deadline_test.ts`, part of
 `test:browser-bootstrap`, checks the deadline without a browser. The nightly
 browser job sets `CAPNP_BROWSER_JOBS=1` on Linux and macOS: with three engines
 at once on a four-CPU runner, WebKit stalled starting or recovering workers in
-nightlies 36112692524, 36132427000, and 36141746707.
+nightlies 36112692524, 36132427000, and 36141746707. On macos-15 it also sets
+`CAPNP_TEST_TIMEOUT_SCALE=3` (see `tests/lib/timeout-scale.ts`), which scales
+every default deadline, grace, and Playwright timeout here together so each
+still outlasts the ones inside it; an explicit `CAPNP_BROWSER_*` value is used
+as given, and the SDK bounds inside the pages (termination, soak, resource
+limits) keep their values, since the stall rule budgets their misses.
 
 Before compiling, the driver blocks network requests and WebSocket connections,
 closes its asset server, and revokes its own Deno network and process-spawning
@@ -405,6 +412,9 @@ C++/Rust/Go/Zig output. It also covers workspace editing, error recovery,
 cancellation, binary imports/exports, file management, and responsive layouts.
 Each navigation may take two minutes, not Playwright's 30-second default: on a
 loaded runner Firefox once timed out loading Studio right after Chromium passed
-(nightly 36141746707). Evidence lives under `build/test/studio-*/`; browser CI
-retains failing fixtures and the complete Studio bundle. See the
+(nightly 36141746707). Navigations and the 30-second action timeout scale by
+`CAPNP_TEST_TIMEOUT_SCALE`, which the nightly sets to 3 on macos-15 after a
+folder upload there outlasted 30 seconds (nightly 36168208228). Evidence lives
+under `build/test/studio-*/`; browser CI retains failing fixtures and the
+complete Studio bundle. See the
 [Studio guide](../../examples/browser/README.md).

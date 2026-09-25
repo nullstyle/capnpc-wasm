@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { type Engine, selectedEngines } from "./engines.ts";
 import { envMilliseconds } from "./deadline.ts";
+import { scaled, timeoutScale } from "../lib/timeout-scale.ts";
 import {
   describeObservation,
   type Observation,
@@ -96,16 +97,18 @@ async function verifyRequests(receiptPath: string, engine: string) {
 // a driver that overruns it receives SIGTERM, reports the step it was on, and
 // is killed if it has not exited 30 seconds later. CAPNP_BROWSER_JOBS=1 runs
 // the engines one after another; CAPNP_BROWSER_ENGINE_TIMEOUT_MS sets the
-// deadline (20 minutes by default).
+// deadline (20 minutes by default). The default deadline and the kill grace
+// scale by CAPNP_TEST_TIMEOUT_SCALE with the drivers' step deadlines, so each
+// still outlasts the steps inside it.
 const engineTimeoutMs = envMilliseconds(
   "CAPNP_BROWSER_ENGINE_TIMEOUT_MS",
-  20 * 60_000,
+  scaled(20 * 60_000),
 );
 const jobs = Number(Deno.env.get("CAPNP_BROWSER_JOBS") || 3);
 if (!Number.isInteger(jobs) || jobs < 1) {
   throw new TypeError("CAPNP_BROWSER_JOBS must be a positive integer");
 }
-const killGraceMs = 30_000;
+const killGraceMs = scaled(30_000);
 
 /** Copy a driver's stream to ours line by line, prefixed with its engine. */
 async function relay(
@@ -269,6 +272,13 @@ const receipts = await Deno.makeTempDir({
   prefix: "browser-verification-",
 });
 const queue = [...selectedEngines(Deno.args)];
+if (timeoutScale !== 1) {
+  console.log(
+    `CAPNP_TEST_TIMEOUT_SCALE=${timeoutScale}: step deadlines ${
+      scaled(60_000) / 1000
+    } s by default, engine deadline ${engineTimeoutMs / 60_000} min`,
+  );
+}
 const outcomes: Outcome[] = [];
 await Promise.all(
   Array.from({ length: Math.min(jobs, queue.length) }, async () => {

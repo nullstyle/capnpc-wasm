@@ -16,6 +16,7 @@ import type {
   WorkerCompiler,
 } from "./sdk.ts";
 import { envMilliseconds, stepClock } from "./deadline.ts";
+import { scaled } from "../lib/timeout-scale.ts";
 import {
   type EngineHealth,
   engineHealthScript,
@@ -155,7 +156,11 @@ function assert(condition: unknown, message: string): asserts condition {
 
 // Every browser step runs under a labelled deadline (TST-07), 60 seconds by
 // default (CAPNP_BROWSER_DEADLINE_MS), so a stalled engine fails with the
-// step's label instead of holding the job until the CI timeout.
+// step's label instead of holding the job until the CI timeout. The default,
+// the pages' Playwright timeouts, and the close steps scale together by
+// CAPNP_TEST_TIMEOUT_SCALE (tests/lib/timeout-scale.ts); an explicit
+// CAPNP_BROWSER_DEADLINE_MS is used as given, and the SDK bounds inside the
+// page (termination, soak, resource limits) keep their calibrated values.
 // CAPNP_BROWSER_STALL=<text> makes the first step whose label contains the
 // text hang, which demonstrates the deadline. The running step's label is kept
 // next to the receipt for run.ts, which reports it if it has to stop a driver.
@@ -172,7 +177,7 @@ function recordStep(label: string) {
   }
 }
 const clock = stepClock({
-  defaultMs: envMilliseconds("CAPNP_BROWSER_DEADLINE_MS", 60_000),
+  defaultMs: envMilliseconds("CAPNP_BROWSER_DEADLINE_MS", scaled(60_000)),
   stall: Deno.env.get("CAPNP_BROWSER_STALL") || undefined,
   onStep(label) {
     if (failedStep === undefined) recordStep(label);
@@ -689,7 +694,7 @@ Deno.addSignalListener("SIGTERM", () => {
   );
   closing = true;
   const shutdown = browser ? browser.close() : Promise.resolve();
-  clock.step(shutdown, `${engine} close after SIGTERM`, 10_000)
+  clock.step(shutdown, `${engine} close after SIGTERM`, scaled(10_000))
     .catch(() => {})
     .finally(() => Deno.exit(1));
 });
@@ -712,7 +717,7 @@ try {
   const page = await clock.step(context.newPage(), `${engine} new page`);
   page.on("pageerror", (error) => errors.push(error.message));
   await watchPage(page, "main");
-  page.setDefaultTimeout(60_000);
+  page.setDefaultTimeout(scaled(60_000));
   const evaluate = evaluateOn(page);
   await clock.step(page.goto(`${origin}/`), `${engine} load page`);
   await evaluate(
@@ -795,7 +800,7 @@ try {
     );
     auditedPage.on("pageerror", (error) => errors.push(error.message));
     await watchPage(auditedPage, name);
-    auditedPage.setDefaultTimeout(60_000);
+    auditedPage.setDefaultTimeout(scaled(60_000));
     await clock.step(
       auditedPage.goto(`${origin}/${name === "isolated" ? "isolated" : ""}`),
       `${engine} load ${name} termination page`,
@@ -1883,7 +1888,7 @@ try {
     await clock.step(
       browser ? browser.close() : Promise.resolve(),
       `${engine} close`,
-      30_000,
+      scaled(30_000),
     );
   } catch (error) {
     console.error(`FAIL ${engine}: ${(error as Error).message}`);

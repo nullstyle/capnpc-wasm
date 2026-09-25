@@ -13,6 +13,11 @@ import { asTree } from "./fs.ts";
 import { TRAP_TEXT } from "./hosts.ts";
 import { clangxx, normalizeDiagnostic } from "./oracle.ts";
 import { ldflags } from "./process.ts";
+import {
+  parseTimeoutScale,
+  scaleTimeout,
+  timeoutScale,
+} from "./timeout-scale.ts";
 
 const encode = (text: string) => new TextEncoder().encode(text);
 
@@ -158,4 +163,33 @@ Deno.test("TRAP_TEXT matches runtime failures and not KJ diagnostics", () => {
       "Error parsing CodeGeneratorRequest: error.TruncatedMessage\nerror: TruncatedMessage",
     ]
   ) assert(!TRAP_TEXT.test(text), `should not match: ${text}`);
+});
+
+Deno.test("CAPNP_TEST_TIMEOUT_SCALE: unset is 1, a positive number scales, anything else fails", async () => {
+  for (const unset of [undefined, "", "  "]) {
+    assert(parseTimeoutScale(unset) === 1, `${JSON.stringify(unset)} is not 1`);
+  }
+  for (const [value, factor] of [["3", 3], ["1.5", 1.5], ["0.5", 0.5]]) {
+    assert(
+      parseTimeoutScale(value as string) === factor,
+      `${value} is not ${factor}`,
+    );
+  }
+  for (const bad of ["0", "-1", "abc", "3x", "Infinity", "NaN"]) {
+    const message = await failure(() => {
+      parseTimeoutScale(bad);
+    });
+    assert(
+      message.includes("CAPNP_TEST_TIMEOUT_SCALE must be a positive number"),
+      `${bad} was accepted: ${message}`,
+    );
+  }
+  assert(
+    scaleTimeout(60_000, 3) === 180_000 && scaleTimeout(10, 1.25) === 13 &&
+      scaleTimeout(60_000, 1) === 60_000,
+    "scaleTimeout",
+  );
+  // This task grants no environment access: the factor is read only where the
+  // variable may be read, so here it is 1 whatever the variable says.
+  assert(timeoutScale === 1, `timeoutScale ${timeoutScale} without permission`);
 });
