@@ -175,6 +175,7 @@ run = [
   "cargo clippy --locked --manifest-path generators/rust/Cargo.toml --all-targets -- -D warnings",
   "zig fmt --check {{vars.zig_dirs}}",
   { task = "check:links" },
+  { task = "check:evidence" },
 ]
 
 [tasks.fmt]
@@ -608,3 +609,11 @@ run = "deno run --allow-read --allow-net=api.osv.dev scripts/check-advisories.ts
 description = "Check the staged dist/wasm modules against the module contract: feature allow-lists, declared target features, no DWARF or build-host paths, size budgets"
 depends = ["build:sdk"]
 run = "deno run --allow-read --allow-env=HOME --allow-run=wasm-tools scripts/check-wasm-artifacts.ts"
+
+[tasks."check:evidence"]
+description = "Validate every receipt under docs/release-evidence against its schema and check the receipts it names (offline)"
+run = "deno run --allow-read scripts/check-evidence.ts"
+
+[tasks."audit:nightly"]
+description = "Recompute the nightly-confidence ledger for the pinned ref/capnp-zig revision from the GitHub API (network, read-only gh; `-- --check` writes nothing)"
+run = "deno run --allow-read --allow-run=git,gh --allow-write=docs/release-evidence scripts/audit-nightly.ts"

@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "capnp-zig Windows Maker inheritance experiment",
+  "description": "The diagnostic run that confirmed the Windows Maker timeout cause in nullstyle/capnp-zig: the instrumented toolchain, the experiment parameters, and per-mode parallel and serial results with artifact digests.",
+  "x-fileNamePattern": "^windows-maker-inheritance\\.json$",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "classification",
+    "run",
+    "toolchain",
+    "experiment",
+    "modes",
+    "originalFailure",
+    "limitations"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "classification": { "type": "string", "minLength": 1 },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "id",
+        "url",
+        "revision",
+        "branch",
+        "conclusion",
+        "successMeans"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "id": { "type": "integer", "minimum": 1 },
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"
+        },
+        "revision": { "$ref": "#/$defs/commit" },
+        "branch": { "type": "string", "minLength": 1 },
+        "conclusion": { "type": "string", "minLength": 1 },
+        "successMeans": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "zig",
+        "originalMakerSha256",
+        "instrumentedMakerSha256",
+        "sourcePath",
+        "instrumentation"
+      ],
+      "properties": {
+        "zig": { "type": "string", "minLength": 1 },
+        "originalMakerSha256": { "$ref": "#/$defs/sha256" },
+        "instrumentedMakerSha256": { "$ref": "#/$defs/sha256" },
+        "sourcePath": { "type": "string", "minLength": 1 },
+        "instrumentation": { "type": "string", "minLength": 1 }
+      }
+    },
+    "experiment": {
+      "type": "object",
+      "additionalProperties": { "type": ["number", "boolean", "string"] }
+    },
+    "modes": {
+      "description": "Keyed by optimize mode.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["jobId", "artifact", "parallel", "serial"],
+        "properties": {
+          "jobId": { "type": "integer", "minimum": 1 },
+          "artifact": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "archiveSha256",
+              "archiveDigestVerifiedAgainstGitHub",
+              "rawReceiptPath",
+              "rawReceiptSha256",
+              "parallelLogPath",
+              "serialLogPath",
+              "instrumentationReceiptPath",
+              "copiedSourcePath"
+            ],
+            "properties": {
+              "id": { "type": "integer", "minimum": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "archiveSha256": { "$ref": "#/$defs/sha256" },
+              "archiveDigestVerifiedAgainstGitHub": { "type": "boolean" },
+              "rawReceiptPath": { "type": "string", "minLength": 1 },
+              "rawReceiptSha256": { "$ref": "#/$defs/sha256" },
+              "parallelLogPath": { "type": "string", "minLength": 1 },
+              "serialLogPath": { "type": "string", "minLength": 1 },
+              "instrumentationReceiptPath": {
+                "type": "string",
+                "minLength": 1
+              },
+              "copiedSourcePath": { "type": "string", "minLength": 1 }
+            }
+          },
+          "parallel": { "type": "object" },
+          "serial": { "type": "object" }
+        }
+      }
+    },
+    "originalFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "runId",
+        "jobId",
+        "mode",
+        "testRoot",
+        "error",
+        "phaseObserved"
+      ],
+      "properties": {
+        "revision": { "$ref": "#/$defs/commit" },
+        "runId": { "type": "integer", "minimum": 1 },
+        "jobId": { "type": "integer", "minimum": 1 },
+        "mode": { "type": "string", "minLength": 1 },
+        "testRoot": { "type": "string", "minLength": 1 },
+        "error": { "type": "string", "minLength": 1 },
+        "phaseObserved": { "type": "boolean" }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}

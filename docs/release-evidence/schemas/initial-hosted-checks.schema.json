@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Initial hosted acceptance runs",
+  "description": "The CI runs, keyed by lane, that accepted the native, Wasm, and Deno revisions before the first scheduled nightly cycle; not a scheduled confidence cycle.",
+  "x-fileNamePattern": "^initial-hosted-checks\\.json$",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "scope", "runs"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "scope": { "type": "string", "minLength": 1 },
+    "runs": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/run" }
+    }
+  },
+  "$defs": {
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "conclusion": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled",
+        "skipped",
+        "timed_out",
+        "neutral",
+        "action_required",
+        "stale",
+        "startup_failure"
+      ]
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "conclusion",
+        "createdAt",
+        "event",
+        "headSha",
+        "status",
+        "updatedAt",
+        "url",
+        "jobs"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "conclusion": { "$ref": "#/$defs/conclusion" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "event": { "enum": ["push", "schedule", "workflow_dispatch"] },
+        "headSha": { "$ref": "#/$defs/commit" },
+        "status": { "const": "completed" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" },
+        "url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"
+        },
+        "jobs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "databaseId",
+              "name",
+              "status",
+              "conclusion",
+              "startedAt",
+              "completedAt",
+              "url"
+            ],
+            "properties": {
+              "databaseId": { "type": "integer", "minimum": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "status": { "const": "completed" },
+              "conclusion": { "$ref": "#/$defs/conclusion" },
+              "startedAt": { "$ref": "#/$defs/timestamp" },
+              "completedAt": { "$ref": "#/$defs/timestamp" },
+              "url": {
+                "type": "string",
+                "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+/job/[0-9]+$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

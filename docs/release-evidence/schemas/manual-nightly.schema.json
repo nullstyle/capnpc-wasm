@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Manual capnp-zig Nightly fuzz receipt",
+  "description": "The per-target fuzz receipts of one manually dispatched nullstyle/capnp-zig Nightly run, named by the run's head commit. Manual runs never count toward a nightly streak. The receipts before 0fb8df4 carry no audit block and no per-target output digests.",
+  "x-fileNamePattern": "^[0-9a-f]{7}-manual-nightly\\.json$",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run",
+    "qualifies_as_scheduled_daily_cycle",
+    "artifact_id",
+    "raw_summary_sha256",
+    "target_count",
+    "total_executions",
+    "targets"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conclusion",
+        "createdAt",
+        "event",
+        "headSha",
+        "updatedAt",
+        "url"
+      ],
+      "properties": {
+        "conclusion": { "$ref": "#/$defs/conclusion" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "event": { "const": "workflow_dispatch" },
+        "headSha": { "$ref": "#/$defs/commit" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" },
+        "url": { "$ref": "#/$defs/runUrl" }
+      }
+    },
+    "qualifies_as_scheduled_daily_cycle": { "const": false },
+    "artifact_id": { "type": "integer", "minimum": 1 },
+    "artifact_sha256": { "$ref": "#/$defs/sha256" },
+    "raw_manifest_sha256": { "$ref": "#/$defs/sha256" },
+    "raw_summary_sha256": { "$ref": "#/$defs/sha256" },
+    "raw_job_log_sha256": { "$ref": "#/$defs/sha256" },
+    "harness_self_checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "expected", "job_id"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "expected": { "type": "integer", "minimum": 0 },
+        "job_id": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_declarations",
+        "manifest_targets",
+        "individual_receipts",
+        "manifest_source_filter_report_match",
+        "missing_or_extra_receipts",
+        "oracle_failures",
+        "all_processes_exited_zero",
+        "minimum_measured_iterations",
+        "platform"
+      ],
+      "properties": {
+        "source_declarations": { "type": "integer", "minimum": 0 },
+        "manifest_targets": { "type": "integer", "minimum": 0 },
+        "individual_receipts": { "type": "integer", "minimum": 0 },
+        "manifest_source_filter_report_match": { "type": "boolean" },
+        "missing_or_extra_receipts": { "type": "integer", "minimum": 0 },
+        "oracle_failures": { "type": "integer", "minimum": 0 },
+        "all_processes_exited_zero": { "type": "boolean" },
+        "minimum_measured_iterations": { "type": "integer", "minimum": 0 },
+        "platform": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["os", "arch", "zig_version"],
+          "properties": {
+            "os": { "type": "string", "minLength": 1 },
+            "arch": { "type": "string", "minLength": 1 },
+            "zig_version": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "target_count": { "type": "integer", "minimum": 0 },
+    "total_executions": { "type": "integer", "minimum": 0 },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "source_sha256",
+          "target",
+          "report_name",
+          "requested_iterations",
+          "seed",
+          "report",
+          "process_term"
+        ],
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "source_sha256": { "$ref": "#/$defs/sha256" },
+          "target": { "type": "string", "minLength": 1 },
+          "report_name": { "type": "string", "minLength": 1 },
+          "requested_iterations": { "type": "integer", "minimum": 1 },
+          "seed": { "type": "integer", "minimum": 0 },
+          "report": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["before", "after", "iterations"],
+            "properties": {
+              "before": { "type": "integer", "minimum": 0 },
+              "after": { "type": "integer", "minimum": 0 },
+              "iterations": { "type": "integer", "minimum": 0 }
+            }
+          },
+          "process_term": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["exited"],
+            "properties": { "exited": { "type": "integer" } }
+          },
+          "raw_receipt_sha256": { "$ref": "#/$defs/sha256" },
+          "stdout_sha256": { "$ref": "#/$defs/sha256" },
+          "stderr_sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "runUrl": {
+      "type": "string",
+      "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"
+    },
+    "conclusion": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled",
+        "skipped",
+        "timed_out",
+        "neutral",
+        "action_required",
+        "stale",
+        "startup_failure"
+      ]
+    }
+  }
+}

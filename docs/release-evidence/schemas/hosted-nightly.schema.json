@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Scheduled capnp-zig Nightly execution receipt",
+  "description": "Every job and step of one scheduled nullstyle/capnp-zig Nightly run, with hashes and execution summaries of the non-fuzz job logs, audited by hand for the superseded capnp-zig ledger.",
+  "x-fileNamePattern": "^nightly-[0-9]{4}-[0-9]{2}-[0-9]{2}-hosted\\.json$",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "scheduledDateUtc",
+    "scheduledTimeUtc",
+    "run",
+    "audit",
+    "fuzzEvidence"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "scheduledDateUtc": { "$ref": "#/$defs/date" },
+    "scheduledTimeUtc": { "type": "string", "pattern": "^[0-9]{2}:[0-9]{2}$" },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conclusion",
+        "createdAt",
+        "event",
+        "headSha",
+        "jobs",
+        "status",
+        "updatedAt",
+        "url"
+      ],
+      "properties": {
+        "conclusion": { "$ref": "#/$defs/conclusion" },
+        "createdAt": { "$ref": "#/$defs/timestamp" },
+        "event": { "const": "schedule" },
+        "headSha": { "$ref": "#/$defs/commit" },
+        "jobs": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/job" }
+        },
+        "status": { "const": "completed" },
+        "updatedAt": { "$ref": "#/$defs/timestamp" },
+        "url": { "$ref": "#/$defs/runUrl" }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allFiveJobsSucceeded",
+        "allowedSkips",
+        "everyRequiredStepSucceeded",
+        "nonFuzzLogs",
+        "rawRunSha256"
+      ],
+      "properties": {
+        "allFiveJobsSucceeded": { "type": "boolean" },
+        "allowedSkips": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["jobId", "step", "reason"],
+            "properties": {
+              "jobId": { "type": "integer", "minimum": 1 },
+              "step": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "everyRequiredStepSucceeded": { "type": "boolean" },
+        "nonFuzzLogs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "jobId",
+              "rawLog",
+              "bytes",
+              "sha256",
+              "executionSummaries"
+            ],
+            "properties": {
+              "jobId": { "type": "integer", "minimum": 1 },
+              "rawLog": { "type": "string", "minLength": 1 },
+              "bytes": { "type": "integer", "minimum": 0 },
+              "sha256": { "$ref": "#/$defs/sha256" },
+              "executionSummaries": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "rawRunSha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "fuzzEvidence": { "type": "string", "x-evidenceFile": true }
+  },
+  "$defs": {
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "runUrl": {
+      "type": "string",
+      "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"
+    },
+    "jobUrl": {
+      "type": "string",
+      "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+/job/[0-9]+$"
+    },
+    "conclusion": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled",
+        "skipped",
+        "timed_out",
+        "neutral",
+        "action_required",
+        "stale",
+        "startup_failure"
+      ]
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "databaseId",
+        "name",
+        "status",
+        "conclusion",
+        "startedAt",
+        "completedAt",
+        "url",
+        "steps"
+      ],
+      "properties": {
+        "databaseId": { "type": "integer", "minimum": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "status": { "const": "completed" },
+        "conclusion": { "$ref": "#/$defs/conclusion" },
+        "startedAt": { "$ref": "#/$defs/timestamp" },
+        "completedAt": { "$ref": "#/$defs/timestamp" },
+        "url": { "$ref": "#/$defs/jobUrl" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "number",
+              "name",
+              "status",
+              "conclusion",
+              "startedAt",
+              "completedAt"
+            ],
+            "properties": {
+              "number": { "type": "integer", "minimum": 1 },
+              "name": { "type": "string", "minLength": 1 },
+              "status": { "const": "completed" },
+              "conclusion": { "$ref": "#/$defs/conclusion" },
+              "startedAt": { "$ref": "#/$defs/timestamp" },
+              "completedAt": { "$ref": "#/$defs/timestamp" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

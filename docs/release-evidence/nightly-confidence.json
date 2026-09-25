@@ -1,49 +1,29 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "phase": "scheduled_nightly_confidence",
-  "requiredConsecutiveScheduledRuns": 7,
-  "currentConsecutiveScheduledRuns": 1,
-  "nativeRevision": "0fb8df40126ea166f95016963c465b03db22819e",
-  "acceptedWasmRevision": "94ba6b257fbfd16b2e35bc0117a8afa55a4d55e1",
-  "acceptedDenoRevision": "24ccd2960b411dd20feb0a1965f2535fdf16d012",
-  "initialEvidence": "initial-hosted-checks.json",
   "workflow": {
-    "repository": "nullstyle/capnp-zig",
+    "repository": "nullstyle/capnpc-wasm",
     "path": ".github/workflows/nightly.yml",
-    "requiredEvent": "schedule",
-    "scheduledTimeUtc": "09:17"
+    "event": "schedule"
   },
-  "earliestEligibleScheduledDateUtc": "2026-09-09",
-  "followupLocalTime": "05:00",
-  "followupTimeZone": "America/Anchorage",
-  "cycles": [
-    {
-      "scheduledDateUtc": "2026-09-09",
-      "runId": 34334866428,
-      "runUrl": "https://github.com/nullstyle/capnp-zig/actions/runs/34334866428",
-      "event": "schedule",
-      "nativeRevision": "0fb8df40126ea166f95016963c465b03db22819e",
-      "conclusion": "success",
-      "qualifies": true,
-      "consecutiveScheduledRuns": 1,
-      "hostedEvidence": "nightly-2026-09-09-hosted.json",
-      "fuzzEvidence": "nightly-2026-09-09-fuzz.json",
-      "fuzzTargets": 17,
-      "fuzzExecutions": 180296,
-      "minimumMeasuredIterations": 10005,
-      "requiredIterationsPerTarget": 10000,
-      "artifactId": 10097562092,
-      "artifactSha256": "ac124fda7cce15d7629bc623443e5a328e261a592799d53cac36f90d4912d3b9"
-    }
-  ],
+  "nativeReference": "ref/capnp-zig",
+  "nativeRevision": "295ff5ea766bea3383485847a89b81884c61f969",
+  "requiredConsecutiveScheduledRuns": 7,
+  "status": "no_scheduled_runs",
+  "statusDetail": "no completed scheduled run of .github/workflows/nightly.yml in nullstyle/capnpc-wasm yet; GitHub schedules the workflow only from the default branch, and the streak starts with its first scheduled run there",
+  "currentConsecutiveScheduledRuns": 0,
+  "firstQualifyingScheduledDateUtc": null,
+  "lastQualifyingScheduledDateUtc": null,
+  "cycles": [],
+  "streakEnd": null,
   "rules": [
-    "Every job must succeed, including all soak, extended, forward-compatibility and fuzz gates.",
-    "Audit execution receipts for every discovered fuzz target against the exact source revision and requested iteration floor.",
-    "Manual workflow_dispatch and local runs are never scheduled confidence cycles.",
-    "A missed or failed daily scheduled run breaks the consecutive streak.",
-    "Relevant runtime, generator, test, dependency or gate changes reset qualifying evidence.",
-    "Evidence-only documentation updates do not reset the native runtime confidence streak."
+    "A cycle is a run of the workflow named in workflow, triggered by schedule; GitHub runs scheduled workflows on the default branch only.",
+    "A cycle qualifies when the run concluded success, so every job without continue-on-error succeeded, and the ref/capnp-zig gitlink at the run's head commit equals nativeRevision, the gitlink the index pins when the ledger is computed.",
+    "Manually dispatched runs, runs of other workflows, and local runs are never cycles.",
+    "The streak counts qualifying cycles on consecutive UTC dates, newest first, starting on the current or the previous UTC date. A scheduled run that did not conclude success or tested another native revision ends it, and so does a UTC date without a completed scheduled run. A run that has not completed is not counted yet.",
+    "Bumping the ref/capnp-zig gitlink restarts the count at zero. Changes to this repository's other sources do not; per-push CI gates them.",
+    "scripts/audit-nightly.ts (mise run audit:nightly) computes every other field from the GitHub API; only requiredConsecutiveScheduledRuns, rules, publicationAuthorized, and supersedes are edited by hand."
   ],
   "publicationAuthorized": false,
-  "lastAuditedScheduledDateUtc": "2026-09-09"
+  "supersedes": "capnp-zig-nightly-confidence.json"
 }

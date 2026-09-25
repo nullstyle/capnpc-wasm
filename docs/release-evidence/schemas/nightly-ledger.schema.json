@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Nightly-confidence ledger",
+  "description": "The streak of consecutive successful scheduled runs of this repository's nightly workflow at the pinned ref/capnp-zig revision (decision D5 = A). scripts/audit-nightly.ts computes every field except requiredConsecutiveScheduledRuns, rules, publicationAuthorized, and supersedes, which are maintained by hand.",
+  "x-fileNamePattern": "^nightly-confidence\\.json$",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "phase",
+    "workflow",
+    "nativeReference",
+    "nativeRevision",
+    "requiredConsecutiveScheduledRuns",
+    "status",
+    "statusDetail",
+    "currentConsecutiveScheduledRuns",
+    "firstQualifyingScheduledDateUtc",
+    "lastQualifyingScheduledDateUtc",
+    "cycles",
+    "streakEnd",
+    "rules",
+    "publicationAuthorized",
+    "supersedes"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "phase": { "const": "scheduled_nightly_confidence" },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "path", "event"],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^\\.github/workflows/[A-Za-z0-9_.-]+\\.ya?ml$"
+        },
+        "event": { "const": "schedule" }
+      }
+    },
+    "nativeReference": { "const": "ref/capnp-zig" },
+    "nativeRevision": { "$ref": "#/$defs/commit" },
+    "requiredConsecutiveScheduledRuns": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["no_scheduled_runs", "measured"] },
+    "statusDetail": { "type": ["string", "null"], "minLength": 1 },
+    "currentConsecutiveScheduledRuns": { "type": "integer", "minimum": 0 },
+    "firstQualifyingScheduledDateUtc": { "$ref": "#/$defs/optionalDate" },
+    "lastQualifyingScheduledDateUtc": { "$ref": "#/$defs/optionalDate" },
+    "cycles": {
+      "description": "The qualifying runs of the current streak, newest first.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/cycle" }
+    },
+    "streakEnd": {
+      "description": "Why the streak does not reach further back; null when no older scheduled run exists.",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["scheduledDateUtc", "kind", "detail", "runUrl"],
+      "properties": {
+        "scheduledDateUtc": { "$ref": "#/$defs/date" },
+        "kind": { "enum": ["conclusion", "native_revision", "missed"] },
+        "detail": { "type": "string", "minLength": 1 },
+        "runUrl": {
+          "type": ["string", "null"],
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"
+        }
+      }
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "publicationAuthorized": { "type": "boolean" },
+    "supersedes": { "type": "string", "x-evidenceFile": true }
+  },
+  "$defs": {
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "optionalDate": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "cycle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scheduledDateUtc",
+        "runId",
+        "runAttempt",
+        "runUrl",
+        "headSha"
+      ],
+      "properties": {
+        "scheduledDateUtc": { "$ref": "#/$defs/date" },
+        "runId": { "type": "integer", "minimum": 1 },
+        "runAttempt": { "type": "integer", "minimum": 1 },
+        "runUrl": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"
+        },
+        "headSha": { "$ref": "#/$defs/commit" }
+      }
+    }
+  }
+}

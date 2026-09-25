@@ -143,6 +143,13 @@ version that ships them.
   under `build/test` and run on a dirty tree, with the package gates' writes
   confined to `build/`; the wazero test host caches compiled code
   (`test:cli-parity` 80 s to 56 s); `clean:all` runs without Go.
+- Release evidence: every receipt in `docs/release-evidence/` carries a schema
+  version and validates against its type's JSON Schema in `schemas/`
+  (`mise run check:evidence`, part of `lint`); the nightly-confidence ledger
+  measures this repository's scheduled `nightly.yml` at the `ref/capnp-zig`
+  gitlink (decision D5 = A) and is regenerated from the GitHub API by
+  `mise run audit:nightly` (streak 0 until the held workflow runs from `main`);
+  the capnp-zig-based ledger is kept as `capnp-zig-nightly-confidence.json`.
 
 ## capnp-wasm-compiler-host
 

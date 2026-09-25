@@ -24,8 +24,8 @@ candidate.
 | Supported Deno worker lane: SDK tests with worker tests enabled and the compiler-host consumer, both on Deno 2.6.8                                                      | Green on both CI hosts                                                                                                      | Passing on `17c99cb`                                                                                                                                                                                                                                                      | 2026-09-15    | `ci.yml` step "Verify supported Deno worker execution and termination"                                |
 | Browser matrix: offline SDK parity and cancellation in Chromium, Firefox, and WebKit, plus Schema Studio                                                                | Green for all three engines                                                                                                 | Passing on `17c99cb` (Linux only)                                                                                                                                                                                                                                         | 2026-09-15    | `ci.yml` job `browsers`                                                                               |
 | Checks leave tracked sources unchanged                                                                                                                                  | `git diff --exit-code` after the check job                                                                                  | Passing on `17c99cb`. Failed on `a5ccaae`, the compiler-host rc.3 producer commit, on both hosts; fixed by `672679a`                                                                                                                                                      | 2026-09-15    | `ci.yml` step "Verify checks leave tracked sources unchanged"                                         |
-| Zig source synchronization: the prepared source tree and 36 mirrored fixtures match the `ref/capnp-zig` gitlink (`mise run check:zig-sync`)                             | `check:zig-sync` passes for native commit `0fb8df4`                                                                         | Passing; it runs inside every `build:zig`                                                                                                                                                                                                                                 | 2026-09-15    | `scripts/check-zig-sync.ts`, invoked by `scripts/build-zig.sh`                                        |
-| Nightly confidence: seven consecutive scheduled capnp-zig Nightly successes on the pinned native revision, receipts audited                                             | Ledger with one audited entry per cycle                                                                                     | Not met on the pinned revision. Six consecutive scheduled successes on `0fb8df4` (2026-09-09 to 2026-09-14), then capnp-zig `main` moved. See [Nightly ledger](#nightly-ledger)                                                                                           | 2026-09-22    | None in this repository. `nullstyle/capnp-zig` `.github/workflows/nightly.yml`, cron `17 9 * * *` UTC |
+| Zig source synchronization: the prepared source tree and 36 mirrored fixtures match the `ref/capnp-zig` gitlink (`mise run check:zig-sync`)                             | `check:zig-sync` passes for native commit `295ff5e`                                                                         | Passing; it runs inside every `build:zig`                                                                                                                                                                                                                                 | 2026-09-24    | `scripts/check-zig-sync.ts`, invoked by `scripts/build-zig.sh`                                        |
+| Nightly confidence: seven consecutive successful scheduled runs of this repository's nightly workflow at the pinned `ref/capnp-zig` revision (decision D5 = A)          | The generated [ledger](release-evidence/nightly-confidence.json) (`mise run audit:nightly`) with seven consecutive cycles   | Not met: this repository's nightly workflow is held with no scheduled run yet, so the streak for `295ff5e` is 0. capnp-zig's own scheduled Nightly passed 9 runs in a row on `295ff5e` (2026-09-16 to 09-24), receipts unaudited. See [Nightly ledger](#nightly-ledger)   | 2026-09-24    | `scripts/audit-nightly.ts`; job `ledger` of the held `.github/workflows/nightly.yml`, 11:17 UTC daily |
 | Published asset integrity: archive and manifest SHA-256 recorded in this repository, independent of the download host                                                   | A row per published archive in the release guide                                                                            | Recorded for all three archives. The manifest digest of tools rc.2 is not recorded because no byte-identical local copy exists; the digest of its `SHA256SUMS` asset, which lists it, is recorded instead                                                                 | 2026-09-22    | None. `scripts/release.ts` writes `SHA256SUMS`; the table is maintained by hand                       |
 | Release signing or attestation                                                                                                                                          | Signed `SHA256SUMS` or a provenance attestation, plus verification instructions                                             | Not started. `manifest.json` detects tampering but is not a signature                                                                                                                                                                                                     | 2026-09-22    | None                                                                                                  |
 | Registry publication path: npm or JSR package and a `sdk/go/v…` module tag                                                                                              | A tag-triggered release job that builds, verifies, and publishes with provenance                                            | Not started. `scripts/release.ts` accepts only `X.Y.Z-rc.N` with `private: true`; no `sdk/go/v*` tag exists; CI has no release job                                                                                                                                        | 2026-09-22    | None                                                                                                  |
@@ -74,58 +74,77 @@ candidate.
 
 ## Nightly ledger
 
-The nightly gate is measured in a different repository. The machine-readable
-ledger is [nightly-confidence.json](release-evidence/nightly-confidence.json).
-It records the workflow (`nullstyle/capnp-zig`, `.github/workflows/nightly.yml`,
-`schedule` event, 09:17 UTC), the pinned native revision
-`0fb8df40126ea166f95016963c465b03db22819e` (the `ref/capnp-zig` gitlink), the
-accepted Wasm revision `94ba6b2`, the rules, and one audited cycle. Its last
-audited scheduled date is 2026-09-09 and its consecutive count is 1; it has not
-been updated since commit `b8d8e3f`. This repository's own nightly workflow
-(`.github/workflows/nightly.yml`, daily at 11:17 UTC plus manual dispatch) is
-held on the `quality/held-workflows` branch pending its first run; whether it or
-capnp-zig's Nightly measures the streak is decision D5. The daily follow-up the
-ledger names (05:00 America/Anchorage) is a manual step that was last performed
-on 2026-09-09.
+The nightly gate is measured in this repository (decision D5 = A): seven
+consecutive successful scheduled runs of `.github/workflows/nightly.yml` at the
+`ref/capnp-zig` revision this repository pins, now `295ff5e`
+(`295ff5ea766bea3383485847a89b81884c61f969`). The workflow runs daily at 11:17
+UTC. It is held on the `quality/held-workflows` branch and has never run from
+`main`, and GitHub schedules a workflow only from the default branch, so the
+streak starts with the first scheduled run after the held workflows reach `main`
+on GitHub. Runs on verification branches (push or manual triggers) never count.
 
-Ledger rules, copied from the JSON: every job must succeed; execution receipts
-for every discovered fuzz target are audited against the exact source revision
-and the 10,000-iteration floor; manual and local runs never count; a missed or
-failed scheduled run breaks the streak; relevant runtime, generator, test,
-dependency, or gate changes reset the evidence; evidence-only documentation
-updates do not.
+The ledger, [nightly-confidence.json](release-evidence/nightly-confidence.json),
+is generated. `mise run audit:nightly` reads the gitlink from the index and the
+workflow's scheduled runs from the GitHub API with read-only `gh` calls, then
+rewrites the counters: `status`, `currentConsecutiveScheduledRuns`,
+`firstQualifyingScheduledDateUtc`, `lastQualifyingScheduledDateUtc`, the
+qualifying `cycles`, and `streakEnd`, the run or missed date that ends the
+streak. `mise run audit:nightly -- --check` fails when the committed ledger is
+stale, and `mise run check:evidence` validates it against its
+[schema](release-evidence/schemas/nightly-ledger.schema.json). The workflow's
+`ledger` job runs the audit after the other jobs and uploads the regenerated
+ledger as an artifact; CI never commits it. Commit a regenerated ledger to
+record progress and with every `ref/capnp-zig` bump, which restarts the count.
+The ledger now records `"status": "no_scheduled_runs"` and a streak of 0 of 7
+for `295ff5e`. `publicationAuthorized` remains `false`.
 
-Scheduled Nightly runs observed on 2026-09-22 with
-`gh run list --repo nullstyle/capnp-zig --workflow nightly.yml`. Only the
-2026-09-09 run has audited receipts
+Rules, from the JSON: a cycle is a scheduled run of the workflow. It qualifies
+when the run concluded `success`, so every job without `continue-on-error`
+succeeded, and the gitlink at its head commit is the pinned revision. Manual and
+local runs never count. Qualifying cycles fall on consecutive UTC dates, the
+newest today or yesterday; a scheduled run that failed, was cancelled, or tested
+another native revision ends the streak, and so does a date without a completed
+scheduled run. A gitlink bump restarts the count; changes to this repository's
+other sources do not, because per-push CI gates them.
+
+### capnp-zig scheduled Nightly
+
+Before decision D5 the gate counted capnp-zig's own scheduled Nightly
+(`nullstyle/capnp-zig`, `.github/workflows/nightly.yml`, 09:17 UTC), which runs
+capnp-zig `main`, with every fuzz receipt audited by hand. That ledger is kept
+unchanged as
+[capnp-zig-nightly-confidence.json](release-evidence/capnp-zig-nightly-confidence.json):
+one audited cycle (2026-09-09, native `0fb8df4`), last updated in commit
+`b8d8e3f`. capnp-zig's runs remain supporting evidence for the pinned revision;
+they do not count toward the gate. Runs observed on 2026-09-24 with
+`gh run list --repo nullstyle/capnp-zig --workflow nightly.yml --event schedule`.
+Only the 2026-09-09 run has audited receipts
 ([hosted](release-evidence/nightly-2026-09-09-hosted.json),
-[fuzz](release-evidence/nightly-2026-09-09-fuzz.json)); the later rows record
+[fuzz](release-evidence/nightly-2026-09-09-fuzz.json)); the other rows record
 workflow conclusions only.
 
-| Date (UTC) | Run                                                                            | Head      | Conclusion                   |
-| ---------- | ------------------------------------------------------------------------------ | --------- | ---------------------------- |
-| 2026-09-09 | [34334866428](https://github.com/nullstyle/capnp-zig/actions/runs/34334866428) | `0fb8df4` | success, receipts audited    |
-| 2026-09-10 | [34460732774](https://github.com/nullstyle/capnp-zig/actions/runs/34460732774) | `0fb8df4` | success, receipts unaudited  |
-| 2026-09-11 | [34584252852](https://github.com/nullstyle/capnp-zig/actions/runs/34584252852) | `0fb8df4` | success, receipts unaudited  |
-| 2026-09-12 | [34685741233](https://github.com/nullstyle/capnp-zig/actions/runs/34685741233) | `0fb8df4` | success, receipts unaudited  |
-| 2026-09-13 | [34750331309](https://github.com/nullstyle/capnp-zig/actions/runs/34750331309) | `0fb8df4` | success, receipts unaudited  |
-| 2026-09-14 | [34828617106](https://github.com/nullstyle/capnp-zig/actions/runs/34828617106) | `0fb8df4` | success, receipts unaudited  |
-| 2026-09-15 | [34952938728](https://github.com/nullstyle/capnp-zig/actions/runs/34952938728) | `0c5e33f` | success, not the pinned head |
-| 2026-09-16 | [35079521933](https://github.com/nullstyle/capnp-zig/actions/runs/35079521933) | `295ff5e` | success, not the pinned head |
-| 2026-09-17 | [35205304642](https://github.com/nullstyle/capnp-zig/actions/runs/35205304642) | `295ff5e` | success, not the pinned head |
-| 2026-09-18 | [35329598998](https://github.com/nullstyle/capnp-zig/actions/runs/35329598998) | `295ff5e` | success, not the pinned head |
-| 2026-09-19 | [35434607031](https://github.com/nullstyle/capnp-zig/actions/runs/35434607031) | `295ff5e` | success, not the pinned head |
-| 2026-09-20 | [35502221367](https://github.com/nullstyle/capnp-zig/actions/runs/35502221367) | `295ff5e` | success, not the pinned head |
-| 2026-09-21 | [35584000510](https://github.com/nullstyle/capnp-zig/actions/runs/35584000510) | `295ff5e` | success, not the pinned head |
-| 2026-09-22 | [35710421424](https://github.com/nullstyle/capnp-zig/actions/runs/35710421424) | `295ff5e` | success, not the pinned head |
+| Date (UTC) | Run                                                                            | Head      | Conclusion                                   |
+| ---------- | ------------------------------------------------------------------------------ | --------- | -------------------------------------------- |
+| 2026-09-09 | [34334866428](https://github.com/nullstyle/capnp-zig/actions/runs/34334866428) | `0fb8df4` | success, previous pin, receipts audited      |
+| 2026-09-10 | [34460732774](https://github.com/nullstyle/capnp-zig/actions/runs/34460732774) | `0fb8df4` | success, previous pin, receipts unaudited    |
+| 2026-09-11 | [34584252852](https://github.com/nullstyle/capnp-zig/actions/runs/34584252852) | `0fb8df4` | success, previous pin, receipts unaudited    |
+| 2026-09-12 | [34685741233](https://github.com/nullstyle/capnp-zig/actions/runs/34685741233) | `0fb8df4` | success, previous pin, receipts unaudited    |
+| 2026-09-13 | [34750331309](https://github.com/nullstyle/capnp-zig/actions/runs/34750331309) | `0fb8df4` | success, previous pin, receipts unaudited    |
+| 2026-09-14 | [34828617106](https://github.com/nullstyle/capnp-zig/actions/runs/34828617106) | `0fb8df4` | success, previous pin, receipts unaudited    |
+| 2026-09-15 | [34952938728](https://github.com/nullstyle/capnp-zig/actions/runs/34952938728) | `0c5e33f` | success, never pinned                        |
+| 2026-09-16 | [35079521933](https://github.com/nullstyle/capnp-zig/actions/runs/35079521933) | `295ff5e` | success, pinned revision, receipts unaudited |
+| 2026-09-17 | [35205304642](https://github.com/nullstyle/capnp-zig/actions/runs/35205304642) | `295ff5e` | success, pinned revision, receipts unaudited |
+| 2026-09-18 | [35329598998](https://github.com/nullstyle/capnp-zig/actions/runs/35329598998) | `295ff5e` | success, pinned revision, receipts unaudited |
+| 2026-09-19 | [35434607031](https://github.com/nullstyle/capnp-zig/actions/runs/35434607031) | `295ff5e` | success, pinned revision, receipts unaudited |
+| 2026-09-20 | [35502221367](https://github.com/nullstyle/capnp-zig/actions/runs/35502221367) | `295ff5e` | success, pinned revision, receipts unaudited |
+| 2026-09-21 | [35584000510](https://github.com/nullstyle/capnp-zig/actions/runs/35584000510) | `295ff5e` | success, pinned revision, receipts unaudited |
+| 2026-09-22 | [35710421424](https://github.com/nullstyle/capnp-zig/actions/runs/35710421424) | `295ff5e` | success, pinned revision, receipts unaudited |
+| 2026-09-23 | [35843089376](https://github.com/nullstyle/capnp-zig/actions/runs/35843089376) | `295ff5e` | success, pinned revision, receipts unaudited |
+| 2026-09-24 | [35981446744](https://github.com/nullstyle/capnp-zig/actions/runs/35981446744) | `295ff5e` | success, pinned revision, receipts unaudited |
 
-Reading of the table. The pinned revision `0fb8df4` accumulated six consecutive
-scheduled successes (2026-09-09 through 2026-09-14). On 2026-09-15 capnp-zig
-`main` advanced by three commits (`c30abbb`, `0c5e33f`, `295ff5e`; `0c5e33f` is
-a code-generation fix), and Nightly runs on `main`, so the pinned revision can
-no longer accrue scheduled cycles. `295ff5e` has seven consecutive scheduled
-successes (2026-09-16 through 2026-09-22) with unaudited receipts, but it is not
-the revision this repository builds or tests. Under the ledger's own rules the
-gate is therefore not met for `0fb8df4`, and the streak on `main` counts only if
-decision D5 changes what is measured and `ref/capnp-zig` is bumped to a revision
-that the streak covers. `publicationAuthorized` remains `false`.
+Reading of the table. `ref/capnp-zig` moved from `0fb8df4` to `295ff5e` on
+2026-09-24. capnp-zig's Nightly passed nine consecutive scheduled runs on
+`295ff5e` (2026-09-16 through 2026-09-24) with unaudited receipts; `0fb8df4` had
+six (2026-09-09 through 2026-09-14) before capnp-zig `main` advanced. Under
+decision D5 = A these runs support the choice of revision but do not count: the
+gate counts this repository's scheduled runs of `295ff5e`, and none exists yet.

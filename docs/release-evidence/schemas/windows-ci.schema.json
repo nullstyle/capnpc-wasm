@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "capnp-zig Windows CI execution receipt",
+  "description": "Windows jobs of one nullstyle/capnp-zig CI run, named by the run's head commit: per-job logs and metadata digests plus the timed-read and suite results under the recorded workaround. The per-job detail blocks are free-form objects.",
+  "x-fileNamePattern": "^[0-9a-f]{7}-windows-ci\\.json$",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "run",
+    "evidenceRoot",
+    "toolchain",
+    "workaround",
+    "jobs",
+    "limitations"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "html_url",
+        "head_sha",
+        "status",
+        "conclusion",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "html_url": {
+          "type": "string",
+          "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"
+        },
+        "head_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "status": { "const": "completed" },
+        "conclusion": { "$ref": "#/$defs/conclusion" },
+        "created_at": { "$ref": "#/$defs/timestamp" },
+        "updated_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+    "evidenceRoot": { "type": "string", "minLength": 1 },
+    "toolchain": { "type": "string", "minLength": 1 },
+    "workaround": { "type": "string", "minLength": 1 },
+    "jobs": {
+      "description": "Keyed by optimize mode or suite.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "id",
+          "url",
+          "name",
+          "conclusion",
+          "startedAt",
+          "completedAt",
+          "elapsedSeconds",
+          "rawLogPath",
+          "rawLogSha256",
+          "jobMetadataPath",
+          "jobMetadataSha256"
+        ],
+        "properties": {
+          "id": { "type": "integer", "minimum": 1 },
+          "url": {
+            "type": "string",
+            "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+/job/[0-9]+$"
+          },
+          "name": { "type": "string", "minLength": 1 },
+          "conclusion": { "$ref": "#/$defs/conclusion" },
+          "startedAt": { "$ref": "#/$defs/timestamp" },
+          "completedAt": { "$ref": "#/$defs/timestamp" },
+          "elapsedSeconds": { "type": "number", "minimum": 0 },
+          "rawLogPath": { "type": "string", "minLength": 1 },
+          "rawLogSha256": { "$ref": "#/$defs/sha256" },
+          "jobMetadataPath": { "type": "string", "minLength": 1 },
+          "jobMetadataSha256": { "$ref": "#/$defs/sha256" }
+        },
+        "additionalProperties": { "type": "object" }
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"
+    },
+    "conclusion": {
+      "enum": [
+        "success",
+        "failure",
+        "cancelled",
+        "skipped",
+        "timed_out",
+        "neutral",
+        "action_required",
+        "stale",
+        "startup_failure"
+      ]
+    }
+  }
+}
