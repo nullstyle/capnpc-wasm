@@ -334,6 +334,43 @@ suite.test("validateExpected rejects fields no accepted outcome reads", async ()
   }
 });
 
+suite.test("validateExpected requires a stage for a guest failure and outputs for ok", async () => {
+  const expected = await loadExpected(root);
+  const names = (await loadCases(root)).map((spec) => spec.name);
+  const edited: ExpectedFile = structuredClone(expected);
+  // The 1c66d73 WebKit shape: both outcomes and none of the reference's pins.
+  edited.cases["const-chain-100"].surfaces!["browser-worker@webkit"] = {
+    expect: ["ok", "trap:stack"],
+    reason: "r",
+    finding: "f",
+  };
+  // A failure override that drops the reference's stage.
+  edited.cases["const-chain-4000"].surfaces!["launcher"] = {
+    expect: "trap",
+    reason: "r",
+    finding: "f",
+  };
+  // An override with the failure's stage but not the success's outputs.
+  edited.cases["import-chain-100"].surfaces!["studio@webkit"] = {
+    expect: ["ok", "trap:stack"],
+    stage: "compiler",
+    diagnostics: 0,
+    reason: "r",
+    finding: "f",
+  };
+  const problems = validateExpected(edited, names);
+  const wanted = [
+    "const-chain-100/browser-worker@webkit: the row accepts trap:stack but pins no stage",
+    "const-chain-100/browser-worker@webkit: the row accepts ok but pins no outputs",
+    "const-chain-4000/launcher: the row accepts trap but pins no stage",
+    "import-chain-100/studio@webkit: the row accepts ok but pins no outputs",
+  ];
+  assert(
+    JSON.stringify(problems.toSorted()) === JSON.stringify(wanted.toSorted()),
+    JSON.stringify(problems),
+  );
+});
+
 suite.test("TypeScript direct execution conforms to the corpus", async (t) => {
   const rows = await runTsSurface(t, "ts-direct");
   // A fixed path outside the suite's work directories, which a green run

@@ -257,38 +257,57 @@ export function expectationFor(
 const outcomeWord =
   /^(ok|validation(:\w+)?|exit\(\d+\)|trap(:stack)?|limit:\w+|policy:[\w-]+|protocol|timeout)$/;
 
+/** Failures a guest stage produced, so the stage that failed is known. */
+const guestFailure =
+  /^(trap(:stack)?|exit\(\d+\)|limit:\w+|protocol|policy:[\w-]+)$/;
+
 /**
- * The fields of an expectation that checkObservation never reads for the
- * outcomes it accepts: stage and stderr describe a failure, diagnostics and
- * outputs a success.
+ * The field problems of one effective expectation (the reference, or what an
+ * override leaves of it). A field checkObservation never reads for the
+ * outcomes the row accepts: stage and stderr describe a failure, diagnostics
+ * and outputs a success. A pin an accepted outcome needs: a guest failure
+ * names its stage and ok names its outputs, so an override that replaces the
+ * reference cannot drop them unseen.
  */
-function unreadFields(expectation: Expectation): string[] {
+function fieldProblems(expectation: Expectation): string[] {
   const words = Array.isArray(expectation.expect)
     ? expectation.expect
     : [expectation.expect];
-  const unread: string[] = [];
+  const problems: string[] = [];
   if (!words.includes("ok")) {
     for (const field of ["diagnostics", "outputs"] as const) {
       if (expectation[field] !== undefined) {
-        unread.push(`the row accepts no success, so ${field} is never checked`);
+        problems.push(
+          `the row accepts no success, so ${field} is never checked`,
+        );
       }
     }
   }
   if (words.every((word) => word === "ok")) {
     for (const field of ["stage", "stderr"] as const) {
       if (expectation[field] !== undefined) {
-        unread.push(`the row accepts no failure, so ${field} is never checked`);
+        problems.push(
+          `the row accepts no failure, so ${field} is never checked`,
+        );
       }
     }
   }
-  return unread;
+  const failure = words.find((word) => guestFailure.test(word));
+  if (failure !== undefined && expectation.stage === undefined) {
+    problems.push(`the row accepts ${failure} but pins no stage`);
+  }
+  if (words.includes("ok") && expectation.outputs === undefined) {
+    problems.push("the row accepts ok but pins no outputs");
+  }
+  return problems;
 }
 
 /**
  * Structural checks on expected.json against the corpus: every case has an
  * entry, every entry names a case, outcomes use the vocabulary, every
  * departure carries a reason (and a finding when it changes the outcome), and
- * no row sets a field its accepted outcomes never read.
+ * every effective expectation sets no field its accepted outcomes never read
+ * and pins the stage of a guest failure and the outputs of ok.
  */
 export function validateExpected(
   expected: ExpectedFile,
@@ -311,7 +330,7 @@ export function validateExpected(
       problems.push(`${name}: a bare validation row needs a message pin`);
     }
     const { surfaces: _surfaces, ...reference } = entry;
-    for (const problem of unreadFields(reference)) {
+    for (const problem of fieldProblems(reference)) {
       problems.push(`${name}: ${problem}`);
     }
     for (const [surface, override] of Object.entries(entry.surfaces ?? {})) {
@@ -362,7 +381,7 @@ export function validateExpected(
         engine,
       );
       if (!("skip" in effective)) {
-        for (const problem of unreadFields(effective)) {
+        for (const problem of fieldProblems(effective)) {
           problems.push(`${name}/${surface}: ${problem}`);
         }
       }
