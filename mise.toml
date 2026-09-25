@@ -35,6 +35,8 @@ zig = "0.17.0-dev.1683+5ceec001b"
 wasm-tools = "1.258.0"
 wasmtime = "48.0.1"
 shellcheck = "0.11.0"
+# Workflow linting in `lint` (it runs shellcheck over run: scripts too).
+"aqua:rhysd/actionlint" = "1.7.12"
 # Rust exposes Cargo's user bin directory; put it after managed binaries so
 # previously installed Cargo commands cannot shadow wasm-tools or other pins.
 rust = { version = "1.98.1", profile = "minimal", components = ["rustfmt", "clippy"], targets = ["wasm32-wasip1"] }
@@ -151,6 +153,8 @@ run = [
 description = "Static checks without a build: shell, formatting, lint, type checks, vet, clippy"
 run = [
   "shellcheck bin/capnp-wasm $(find scripts -name '*.sh')",
+  # Every workflow under .github/workflows, with shellcheck over run: scripts.
+  "actionlint",
   "deno fmt --check {{vars.fmt_paths}}",
   "deno lint tests sdk/typescript examples scripts/*.ts",
   # examples/deno.ts imports the built dist/ bundle; example:deno, which test
@@ -185,8 +189,14 @@ description = "Static checks, the tool doctor, and native/Wasm parity across the
 depends = ["lint", "doctor", "test"]
 
 [tasks.ci]
-description = "Run the CI check job locally: check, package gates, the Deno worker lane, browser bootstrap, then require a clean tree"
-depends = ["check", "test:package", "test:deno-worker", "test:browser-bootstrap"]
+description = "Run the CI check job locally: check, package gates, the Deno worker lane, the Go race tests, browser bootstrap, then require a clean tree"
+depends = [
+  "check",
+  "test:package",
+  "test:deno-worker",
+  "test:sdk-go-race",
+  "test:browser-bootstrap",
+]
 run = 'changes="$(git status --porcelain)" && test -z "$changes" || { echo "checks left tracked or untracked changes:"; echo "$changes"; exit 1; }'
 
 [tasks."build:native"]
