@@ -360,6 +360,22 @@ try {
       expectFailure: "dirty producer tree",
     });
   }
+  // A SHA256SUMS without the manifest asset cannot tie the package to a
+  // published manifest, so --sums refuses it even when its lines check out.
+  const partialSums = `${temporary}/partial-sums`;
+  await Deno.mkdir(partialSums);
+  const placeholder = new TextEncoder().encode("not the archive\n");
+  await Deno.writeFile(`${partialSums}/${stem}.tgz`, placeholder);
+  await Deno.writeTextFile(
+    `${partialSums}/SHA256SUMS`,
+    `${await sha256(placeholder)}  ${stem}.tgz\n`,
+  );
+  await command(
+    [...verifier, "--sums", `${partialSums}/SHA256SUMS`, extracted],
+    {
+      expectFailure: "lists no manifest asset",
+    },
+  );
   const packageMetadata = JSON.parse(
     await Deno.readTextFile(`${extracted}/package.json`),
   );
@@ -558,7 +574,7 @@ try {
           "reproducible archive and SBOM",
           "stale staging cleanup",
           "publish mode refuses candidate flags and an untagged HEAD",
-          "verifier --sums, --expect-manifest-sha256, --expect-commit, and --require-clean",
+          "verifier --sums (manifest asset required), --expect-manifest-sha256, --expect-commit, and --require-clean",
           "tampered manifest rejection",
           "unexpected file rejection",
           "every non-test Go source packaged",

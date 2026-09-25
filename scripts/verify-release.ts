@@ -5,11 +5,11 @@
 //
 // ROOT is the extracted package/ directory (default: the current directory).
 // --sums checks every file that a SHA256SUMS file lists, next to that file,
-// and ties the extracted manifest to the listed manifest asset. The other
-// options pin the extracted manifest to a digest published through another
-// channel, to the tagged commit, and to a clean producer tree. Run the copy
-// from a repository checkout at the release tag rather than the one inside the
-// archive when the archive itself is what you are verifying.
+// and ties the extracted manifest to the listed manifest asset, which must be
+// present. The other options pin the extracted manifest to a digest published
+// through another channel, to the tagged commit, and to a clean producer tree.
+// Run the copy from a repository checkout at the release tag rather than the
+// one inside the archive when the archive itself is what you are verifying.
 export interface ReleaseFile {
   path: string;
   bytes: number;
@@ -173,7 +173,12 @@ export async function verify(options: VerifyOptions): Promise<ReleaseManifest> {
     const asset = entries.find((entry) =>
       entry.path.endsWith(".manifest.json")
     );
-    if (asset && asset.sha256 !== manifestDigest) {
+    if (!asset) {
+      throw new Error(
+        "SHA256SUMS lists no manifest asset (<stem>.manifest.json), so it cannot tie the package to a published manifest",
+      );
+    }
+    if (asset.sha256 !== manifestDigest) {
       throw new Error(
         `extracted manifest.json differs from the ${asset.path} listed in SHA256SUMS`,
       );
