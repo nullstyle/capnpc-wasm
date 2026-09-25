@@ -135,6 +135,15 @@ export async function runTsSurface(
         const observation = observe(summary, phase);
         const mismatches = checkObservation(expectation, observation);
         rows.push({ name: spec.name, surface, observation, mismatches });
+        if (
+          Array.isArray(expectation.expect) && expectation.expect.length > 1
+        ) {
+          console.log(
+            `OBSERVED ${surface} ${spec.name}: ${observation.outcome} (accepts ${
+              expectation.expect.join(" or ")
+            })`,
+          );
+        }
         if (mismatches.length > 0) {
           throw new Error(
             `${surface} ${spec.name}: ${mismatches.join("; ")} [observed ${

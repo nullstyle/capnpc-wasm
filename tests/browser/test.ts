@@ -1226,6 +1226,17 @@ try {
         rows.length - skipped
       } conformance rows match tests/fixtures/conformance/expected.json (${skipped} not expressible)`,
     );
+    // Rows that accept more than one outcome are unmeasured on some host;
+    // record what this one produced.
+    for (const row of rows) {
+      if (row.accepted && row.observation) {
+        console.log(
+          `OBSERVED ${engine} ${surface} ${row.name}: ${row.observation.outcome} (accepts ${
+            row.accepted.join(" or ")
+          })`,
+        );
+      }
+    }
   }
   await teardownConformance(evaluate, `${engine} dispose conformance clients`);
 

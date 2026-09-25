@@ -183,8 +183,12 @@ the pinned Deno, which is primed with every module while the asset server is
 up). The page runs each case through `tests/conformance/page-runner.js`, the
 runner the Deno surfaces use, and the driver checks the classified outcome
 against the surface's column of `expected.json`, including `<surface>@<engine>`
-departures. The rows measured a small worker stack in WebKit: about 34 const
-references and 90 nested imports, against 275 and 744 in a Chromium worker.
+departures. On macOS the rows measured a small worker stack in WebKit: about 34
+const references and 90 nested imports, against 275 and 744 in a Chromium
+worker, which matches macOS's 512 KiB default for secondary threads. Linux
+threads default to 8 MiB, so the corpus accepts either outcome there until CI
+records one; rows that accept more than one outcome print what they observed
+(`OBSERVED ...`), and the run summary repeats it.
 
 ## Hosted CI
 

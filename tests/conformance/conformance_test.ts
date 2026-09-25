@@ -161,18 +161,16 @@ suite.test("the launcher classifier reads Wasmtime's report, not guest stderr", 
 
 suite.test("TypeScript direct execution conforms to the corpus", async (t) => {
   const rows = await runTsSurface(t, "ts-direct");
-  const directory = await suite.workDir("matrix-");
-  await Deno.writeTextFile(
-    `${directory}/ts-direct.json`,
-    JSON.stringify(rows, null, 2) + "\n",
-  );
+  // A fixed path outside the suite's work directories, which a green run
+  // deletes: the matrix stays for inspection and the next run replaces it.
+  const matrix = `${buildTest}/conformance-ts-direct.json`;
+  await Deno.mkdir(buildTest, { recursive: true });
+  await Deno.writeTextFile(matrix, JSON.stringify(rows, null, 2) + "\n");
   const skipped = rows.filter((row) => row.skipped).length;
   console.log(
     `ts-direct: ${
       rows.length - skipped
-    } cases observed, ${skipped} skipped; matrix in ${
-      directory.replace(`${buildTest}/`, "build/test/")
-    }`,
+    } cases observed, ${skipped} skipped; matrix in build/test/conformance-ts-direct.json`,
   );
   for (const row of rows) {
     if (row.observation) {

@@ -10,6 +10,12 @@ type Receipt = {
     requests: { host: string; path: string }[];
   }[];
   conformance?: Record<string, { observed: number; skipped: number }>;
+  conformanceRows?: {
+    name: string;
+    surface: string;
+    accepted?: string[];
+    observation?: { outcome: string };
+  }[];
   termination?: { verdict: string }[];
 };
 
@@ -213,6 +219,12 @@ async function runEngine(engine: Engine, receipts: string): Promise<Outcome> {
         `offline SDK parity and canonical requests for ${receipt.scenarios.length} scenarios`,
         ...Object.entries(receipt.conformance ?? {}).map(([surface, count]) =>
           `${surface}: ${count.observed} conformance rows as expected, ${count.skipped} not expressible`
+        ),
+        ...(receipt.conformanceRows ?? []).filter((row) => row.accepted).map(
+          (row) =>
+            `observed ${row.surface} ${row.name}: ${row.observation?.outcome} (accepts ${
+              row.accepted!.join(" or ")
+            })`,
         ),
         ...(receipt.termination ?? []).map((result) => result.verdict),
       ],

@@ -39,6 +39,8 @@ export interface BrowserRow {
   name: string;
   surface: Surface;
   observation?: Observation;
+  /** The outcomes the row accepts, when it accepts more than one. */
+  accepted?: string[];
   skipped?: string;
   mismatches: string[];
 }
@@ -331,6 +333,10 @@ export async function runBrowserSurface(
       name: spec.name,
       surface,
       observation,
+      ...(Array.isArray(expectation.expect) &&
+          expectation.expect.length > 1
+        ? { accepted: expectation.expect }
+        : {}),
       mismatches: checkObservation(expectation, observation),
     });
   }
