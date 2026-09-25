@@ -1,4 +1,9 @@
 import { packageFiles } from "../../scripts/verify-release.ts";
+import {
+  archiveStem,
+  flavorNamed,
+  readMetadata,
+} from "../../scripts/release.ts";
 import { runLauncherConformance } from "../conformance/launcher-surface.ts";
 
 const text = new TextDecoder();
@@ -1533,8 +1538,13 @@ export async function checkLauncher(
 }
 
 if (import.meta.main) {
-  const metadata = JSON.parse(await Deno.readTextFile("release.json"));
+  // `mise run test:launcher` prepares this candidate first; pass another
+  // package directory to check it instead.
+  const metadata = await readMetadata();
   await checkLauncher(
-    Deno.args[0] ?? `dist/releases/capnpc-wasm-${metadata.version}/package`,
+    Deno.args[0] ??
+      `build/test/launcher/${
+        archiveStem(flavorNamed("capnpc-wasm"), metadata.version)
+      }/package`,
   );
 }

@@ -317,8 +317,8 @@ esac
 [tasks."test:deno-worker"]
 description = "Run the SDK tests and the compiler-host gate on the supported Deno worker runtime (worker termination coverage)"
 depends = ["deno-worker:install", "build:native", "build:sdk"]
-# Both this lane and test:compiler-host-package rewrite the same
-# dist/releases/<compiler-host stem>; run after it whenever both are scheduled.
+# Both this lane and test:compiler-host-package write
+# build/test/compiler-host/<stem>; run after it whenever both are scheduled.
 wait_for = ["test:compiler-host-package"]
 run = '''
 set -eu
@@ -330,7 +330,7 @@ case "$("$deno_bin" --version | head -n 1)" in
   *) echo "expected Deno $version at $deno_bin, got: $("$deno_bin" --version | head -n 1)" >&2; exit 1 ;;
 esac
 "$deno_bin" test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/
-deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts "$deno_bin"
+deno run --allow-read --allow-write=build --allow-run=deno,cmake,build/native/bin/normalize-request,build/native/bin/capnp,"$deno_bin" scripts/test-compiler-host-package.ts "$deno_bin"
 '''
 
 [tasks."test:browser-bootstrap"]
@@ -358,41 +358,44 @@ depends = ["build:native", "build:studio"]
 run = "deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/studio.ts"
 
 [tasks."release:prepare"]
-description = "Prepare a private versioned SDK archive with checksums and source/tool/reference provenance"
+description = "Prepare a full SDK release candidate in dist/releases: archive, manifest, SBOM, notes, and SHA256SUMS (refuses a dirty tree)"
 depends = ["build:sdk"]
 run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/release.ts"
 
 [tasks."test:package"]
 description = "Verify reproducible candidate packaging and clean external Deno/Go consumers"
-# Only the compiler-host gate reads build/native, but it is listed here directly
-# so the documented release flow (release:prepare, then test:package) also
-# works on a fresh checkout.
-depends = ["build:native", "release:prepare", "test:compiler-host-package"]
-run = "deno run --allow-read --allow-write --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts"
+# test-package.ts prepares its own candidates under build/test/package (with
+# --allow-dirty), so it runs on a dirty tree and never touches dist/releases;
+# build:native is for the compiler-host gate it follows.
+depends = ["build:native", "build:sdk", "test:compiler-host-package"]
+run = "deno run --allow-read --allow-write=build --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts"
 
 [tasks."test:launcher"]
-description = "Check packaged Wasmtime launcher binary streams, filesystem roots, and failures"
-depends = ["release:prepare"]
-run = "deno run --allow-read --allow-write=build --allow-run=bash,wasmtime tests/package/launcher.ts"
+description = "Check the packaged Wasmtime launcher (binary streams, filesystem roots, failures, and the conformance corpus) in a candidate prepared under build/test/launcher"
+# A throwaway candidate of its own, like test:package's, so the check runs on a
+# dirty tree and leaves dist/releases alone.
+depends = ["build:sdk"]
+run = [
+  "deno run --allow-read --allow-write=build --allow-run=git,go scripts/release.ts --out build/test/launcher --allow-dirty --allow-existing-tag",
+  "deno run --allow-read --allow-write=build --allow-run=bash,wasmtime tests/package/launcher.ts",
+]
 
 [tasks."release:tools"]
-description = "Prepare a private compiler-only archive for repository toolchain integrations"
+description = "Prepare a compiler-only (tools) release candidate in dist/releases for repository toolchain integrations"
 depends = ["build:sdk"]
 run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/release.ts --tools-only"
 
 [tasks."release:compiler-host"]
-description = "Prepare a private compiler and TypeScript host archive without language generators"
+description = "Prepare a compiler and TypeScript host release candidate in dist/releases, without language generators"
 depends = ["build:sdk"]
 run = "deno run --allow-read --allow-write=dist --allow-run=git scripts/release.ts --compiler-host"
 
 [tasks."test:compiler-host-package"]
 description = "Verify compiler-host packaging and an offline external Deno worker consumer"
-# The script prepares the compiler-host archive itself (twice, for reproducibility).
-# --allow-write stays unscoped (here and in test:deno-worker): the script makes
-# its work directory with Deno.makeTempDir() in the system temp dir, which no
-# path grant satisfies; a work directory under build/ would allow build,dist.
+# The script prepares the compiler-host candidate itself (twice, for
+# reproducibility) under build/test/compiler-host.
 depends = ["build:native", "build:sdk"]
-run = "deno run --allow-read --allow-write --allow-run scripts/test-compiler-host-package.ts"
+run = "deno run --allow-read --allow-write=build --allow-run=deno,cmake,build/native/bin/normalize-request,build/native/bin/capnp scripts/test-compiler-host-package.ts"
 
 [tasks."check:links"]
 description = "Check relative links and heading anchors in Markdown files outside ref/"
