@@ -7,6 +7,22 @@ lockfile_platforms = ["linux-x64", "linux-arm64", "macos-x64", "macos-arm64"]
 [settings.task]
 run_auto_install = false
 
+# The pinned Zig is a development build that ziglang.org no longer serves, so
+# the project keeps the ZSF-signed tarballs in its own release
+# toolchain-zig-<version>. core:zig never downloads the url that mise.lock
+# records: it requests https://ziglang.org/builds/<file>, or a randomly chosen
+# community mirror whose .minisig must also exist (zig.bcr.ist has none), and
+# then <file>.minisig from the same host. With the mirrors off, the rule below
+# sends both requests to the release; mise still verifies the minisign
+# signature and the sha256 in mise.lock, and the rule matches nothing but
+# ziglang.org development builds. `mise run mirror:zig` stages, verifies, and
+# locks a release; its lock entries name the rewritten URLs.
+[settings.zig]
+use_community_mirrors = false
+
+[settings.url_replacements]
+'regex:^https://ziglang\.org/builds/(zig-[a-z0-9_]+-[a-z]+-([0-9][^/?]*?)\.tar\.xz(?:\.minisig)?)(?:\?.*)?$' = "https://github.com/nullstyle/capnpc-wasm/releases/download/toolchain-zig-${2}/${1}"
+
 [tool_alias.wasi-sdk]
 backend = "github:WebAssembly/wasi-sdk"
 
@@ -18,13 +34,10 @@ cmake = "4.4.3"
 ninja = "1.13.2"
 go = "1.27.1"
 deno = "2.9.6"
-# Match ref/capnp-zig/mise.toml when updating that reference. This development
-# build is no longer on ziglang.org: mise installs it from the Zig community
-# mirrors, verifies the ZSF minisign signature, and checks the sha256 that
-# mise.lock records for all four platforms. Those checksums come from
-# signature-verified downloads (`mise run mirror:zig -- lock --write` records
-# them; `mise lock` cannot for a pruned build), and `mise run mirror:zig -- stage`
-# prepares a project-owned mirror of the exact tarballs.
+# Match ref/capnp-zig/mise.toml when updating that reference. mise installs
+# this development build from the project's mirror release (see [settings.zig]
+# above); mise.lock records its sha256 and minisign provenance for all four
+# platforms. A bump needs the new release first: CONTRIBUTING.md, "Tool pins".
 zig = "0.17.0-dev.1683+5ceec001b"
 wasm-tools = "1.258.0"
 wasmtime = "48.0.1"
@@ -436,7 +449,7 @@ description = "Run the Schema Studio state and workspace unit tests on the pinne
 run = "deno test --config examples/browser/deno.json --frozen examples/browser/"
 
 [tasks."mirror:zig"]
-description = "Stage, verify, or record checksums for a project-owned mirror of the pinned Zig toolchain: stage | verify <base-url> | lock [--write]"
+description = "Stage, verify, or lock the project's mirror release of the pinned Zig toolchain: stage | verify [<base-url>] | lock [--write]"
 run = "deno run --allow-read --allow-write=build,mise.lock --allow-net scripts/mirror-zig.ts"
 
 # Scheduled verification (.github/workflows/nightly.yml and supply-chain.yml).

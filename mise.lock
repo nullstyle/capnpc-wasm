@@ -1137,20 +1137,20 @@ specifiers = ["0.17.0-dev.1683+5ceec001b"]
 
 [tools.zig."platforms.linux-arm64"]
 checksum = "sha256:b18bd9c61b751ec64982359f85c3d4aec3347f4988b9edbfc15a14c055452eee"
-url = "https://ziglang.org/builds/zig-aarch64-linux-0.17.0-dev.1683+5ceec001b.tar.xz"
+url = "https://github.com/nullstyle/capnpc-wasm/releases/download/toolchain-zig-0.17.0-dev.1683+5ceec001b/zig-aarch64-linux-0.17.0-dev.1683+5ceec001b.tar.xz"
 provenance = "minisign"
 
 [tools.zig."platforms.linux-x64"]
 checksum = "sha256:e6e5c7e0834626bded90cd786d148bebf211dc80b013afefd631472b57b41f77"
-url = "https://ziglang.org/builds/zig-x86_64-linux-0.17.0-dev.1683+5ceec001b.tar.xz"
+url = "https://github.com/nullstyle/capnpc-wasm/releases/download/toolchain-zig-0.17.0-dev.1683+5ceec001b/zig-x86_64-linux-0.17.0-dev.1683+5ceec001b.tar.xz"
 provenance = "minisign"
 
 [tools.zig."platforms.macos-arm64"]
 checksum = "sha256:1081a0318a97f492aaca1b76c4e6fe1ce5cd586a212ee2c0db364b05a29b5870"
-url = "https://ziglang.org/builds/zig-aarch64-macos-0.17.0-dev.1683+5ceec001b.tar.xz"
+url = "https://github.com/nullstyle/capnpc-wasm/releases/download/toolchain-zig-0.17.0-dev.1683+5ceec001b/zig-aarch64-macos-0.17.0-dev.1683+5ceec001b.tar.xz"
 provenance = "minisign"
 
 [tools.zig."platforms.macos-x64"]
 checksum = "sha256:2b154b47ce5396c000260c06c8cf018a4bf22dd5f858fc8538e27f2012d86536"
-url = "https://ziglang.org/builds/zig-x86_64-macos-0.17.0-dev.1683+5ceec001b.tar.xz"
+url = "https://github.com/nullstyle/capnpc-wasm/releases/download/toolchain-zig-0.17.0-dev.1683+5ceec001b/zig-x86_64-macos-0.17.0-dev.1683+5ceec001b.tar.xz"
 provenance = "minisign"
