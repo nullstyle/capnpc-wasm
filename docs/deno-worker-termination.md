@@ -151,8 +151,14 @@ interruption: on Linux CI (run 36103736516) Chromium stopped a terminated
 worker's Wasm about 2.01 to 2.02 s after `terminate()`, Firefox at once in all
 six cases, and WebKit stopped a guest when it next called into JavaScript but
 never stopped a loop that stayed in Wasm (GAP2-V1). The SDK's bounds no longer
-depend on those delays: without cross-origin isolation an abort terminates the
-worker, and a guest that `terminate()` does not stop runs only until its own
+depend on those delays. Without cross-origin isolation an abort terminates the
+worker, and an instrumented guest calls into JavaScript at every poll, so WebKit
+now stops it at its next poll. The diagnostic run
+[36117453491](https://github.com/nullstyle/capnpc-wasm/actions/runs/36117453491)
+measured, after aborting a guest 110 ms into a job with a 2-second deadline:
+WebKit on Linux stopped it within 0 to 50 ms (0 to 52 ms locally on macOS),
+Firefox at once, and Chromium about 1.9 s after the abort, at the guest's own
+deadline. A guest that `terminate()` does not stop runs only until its own
 `timeoutMs` and then traps.
 
 ## Alternatives considered

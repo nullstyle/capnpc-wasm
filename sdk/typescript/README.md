@@ -224,11 +224,12 @@ keep the worker: every job already runs fresh guest instances and filesystems,
 so the next job starts immediately with no restart and no recompilation.
 
 Without cross-origin isolation an abort or `dispose()` therefore terminates the
-worker, and nothing can stop its running guest early. Where `terminate()` does
-not stop a running Wasm guest (WebKit never does, Chromium does after about 2 s,
-and Deno 2.7.6 and later do not stop a spinning worker), the guest runs until
-its own `timeoutMs` deadline and then traps. Serve pages with
-`Cross-Origin-Opener-Policy: same-origin` and
+worker, and the engine decides when its running guest stops. The guest calls
+into JavaScript at every interruption check, and WebKit stops a terminated
+worker's guest there: within 50 ms on macOS and Linux. Firefox stops it at once.
+Chromium stops it about 2 s after `terminate()`, and Deno 2.7.6 and later do not
+stop it at all, so there the guest may run until its own `timeoutMs` deadline
+and then trap. Serve pages with `Cross-Origin-Opener-Policy: same-origin` and
 `Cross-Origin-Embedder-Policy: require-corp` so that aborts stop guests at once,
 and keep `timeoutMs` short where they cannot.
 
