@@ -284,6 +284,12 @@ function checkReleaseRules() {
     { ...valid, versions: { ...valid.versions, [tools.name]: "1.2.3" } },
     "is not a private release candidate",
   );
+  for (const leadingZero of ["0.1.0-rc.03", "01.0.0-rc.1", "0.01.0-rc.1"]) {
+    rejects(
+      { ...valid, versions: { ...valid.versions, [tools.name]: leadingZero } },
+      "is not a private release candidate",
+    );
+  }
   rejects({ ...valid, version: "1.2.3-rc.4" }, 'unexpected key "version"');
   rejects({ ...valid, private: false }, "private must be true");
 
@@ -321,7 +327,12 @@ function checkReleaseRules() {
   expect(
     "dirty tree",
     { ...candidate, flavor: tools, tags: {}, dirty: true },
-    "--allow-dirty",
+    `--allow-dirty for a local ${tools.name} ${v} candidate`,
+  );
+  expect(
+    "candidate with its own tag at HEAD",
+    { ...candidate, flavor: tools, tags: { [releaseTag(tools, v)]: head } },
+    undefined,
   );
   expect(
     "own tag at another commit",
@@ -388,7 +399,31 @@ function checkReleaseRules() {
   expect(
     "publish with a candidate flag",
     { ...publish, allowExistingTag: true, flavor: tools, tags: {} },
-    "not accepted with --publish",
+    `not accepted with --publish (${tools.name} ${v})`,
+  );
+  expect(
+    "publish from a dirty tree",
+    {
+      ...publish,
+      dirty: true,
+      flavor: tools,
+      tags: { [releaseTag(tools, v)]: head },
+    },
+    `refusing to publish ${tools.name} ${v} from a working tree`,
+  );
+  expect(
+    "publish with the flavor's own tag elsewhere",
+    { ...publish, flavor: tools, tags: { [releaseTag(tools, v)]: other } },
+    `tag ${releaseTag(tools, v)} points at bbbbbbb, not at HEAD aaaaaaa`,
+  );
+  expect(
+    "publish tools with a Go module tag elsewhere",
+    {
+      ...publish,
+      flavor: tools,
+      tags: { [releaseTag(tools, v)]: head, [goModuleTag(v)]: other },
+    },
+    undefined,
   );
 }
 checkReleaseRules();
@@ -486,7 +521,9 @@ if (probe.success) {
   await Deno.remove(`${repository}/${probeOut}`, { recursive: true });
 } else if (
   !(original.source.dirty
-    ? probeStderr.includes("refusing to publish from a working tree")
+    ? probeStderr.includes(
+      `refusing to publish ${full.name} ${version} from a working tree`,
+    )
     : probeStderr.includes(`is not tagged ${releaseTag(full, version)}`))
 ) {
   throw new Error(`publish mode failed for another reason:\n${probeStderr}`);

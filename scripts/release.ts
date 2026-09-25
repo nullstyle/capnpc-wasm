@@ -20,6 +20,11 @@
 // Publish mode, which only the release workflow uses, additionally requires
 // HEAD to carry the release tag (and the Go module tag, if it exists), an
 // empty destination, and a CHANGELOG.md entry for the version.
+//
+// The tag checks read the local repository's tags only; run
+// `git fetch --tags` first. The release workflow checks out with
+// fetch-depth: 0, which fetches every tag; a checkout without tags (such as
+// ci.yml's) sees none, so its candidates pass the existing-tag check.
 
 import {
   packageFiles,
@@ -134,8 +139,12 @@ export interface ReleaseMetadata {
   license: "Apache-2.0";
 }
 
-/** The private release-candidate scheme; no other version is prepared yet. */
-const candidateVersion = /^\d+\.\d+\.\d+-rc\.\d+$/;
+/**
+ * The private release-candidate scheme, `X.Y.Z-rc.N` with no leading zeros
+ * (Semantic Versioning); no other version is prepared yet.
+ */
+const candidateVersion =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.(?:0|[1-9]\d*)$/;
 
 /**
  * Parses and validates release.json: the keys `name` (the full SDK's package
@@ -799,10 +808,10 @@ export function refusal(input: RefusalInput): string | undefined {
       : `version ${version} of the Go module`;
   if (input.publish) {
     if (input.allowDirty || input.allowExistingTag) {
-      return "--allow-dirty and --allow-existing-tag are not accepted with --publish";
+      return `--allow-dirty and --allow-existing-tag are not accepted with --publish (${flavor.name} ${version})`;
     }
     if (input.dirty) {
-      return "refusing to publish from a working tree with uncommitted or untracked changes (git status --porcelain is not empty)";
+      return `refusing to publish ${flavor.name} ${version} from a working tree with uncommitted or untracked changes (git status --porcelain is not empty)`;
     }
     const tagCommit = tags[tag];
     if (tagCommit === undefined) {
@@ -828,7 +837,7 @@ export function refusal(input: RefusalInput): string | undefined {
     return undefined;
   }
   if (input.dirty && !input.allowDirty) {
-    return "the working tree has uncommitted or untracked changes; commit them, or pass --allow-dirty for a local candidate (candidates are never published)";
+    return `the working tree has uncommitted or untracked changes; commit them, or pass --allow-dirty for a local ${flavor.name} ${version} candidate (candidates are never published)`;
   }
   if (!input.allowExistingTag) {
     for (const name of [tag, ...related]) {

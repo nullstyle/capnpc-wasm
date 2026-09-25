@@ -184,6 +184,10 @@ inputs, and the Wasm modules are byte-identical from any checkout path
   arguments pass through, so
   `mise run release:compiler-host -- --allow-existing-tag` works.
 
+The tag checks read the local repository's tags only, so run `git fetch --tags`
+before preparing a candidate. The release workflow checks out with every tag
+(`fetch-depth: 0`); a checkout without tags, such as `ci.yml`'s, sees none.
+
 `--out <dir>` writes `<dir>/<stem>/` instead of `dist/releases/<stem>/`; the
 package tests prepare their candidates under `build/test/` and never touch
 `dist/releases/`. `--publish` is the workflow's mode.
