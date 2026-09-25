@@ -141,6 +141,7 @@ run = [
   "deno check scripts/*.ts",
   "deno check --config tests/hosts/deno/deno.json --unstable-sloppy-imports tests/hosts/deno/main.ts",
   "deno check --config sdk/typescript/deno.json --unstable-sloppy-imports sdk/typescript/mod.ts sdk/typescript/worker.ts",
+  "deno check --config sdk/typescript/deno.strict.json sdk/typescript/*.ts sdk/typescript/testdata/*.ts",
   "deno check --config tests/browser/deno.json --frozen tests/browser/test.ts tests/browser/install.ts tests/browser/run.ts tests/browser/studio.ts",
   'unformatted="$(gofmt -l {{vars.go_dirs}})" && test -z "$unformatted" || { echo "gofmt -l: $unformatted"; exit 1; }',
   "go -C tests/hosts/wazero vet ./...",

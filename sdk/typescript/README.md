@@ -404,10 +404,10 @@ disposal of a running job). Per-push CI also runs `sdk_test.ts` and the external
 compiler-host package consumer on Deno 2.6.8, a lane kept from when worker
 execution required that release, and `mise run test:deno-worker` runs the whole
 suite there; the exact lanes are listed in
-[CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes). The SDK and
-its tests also type-check in strict mode against a typed facade of the pinned
-shim (`shim.ts`, `shim.d.ts`):
-`mise exec -- deno check --config sdk/typescript/deno.strict.json --unstable-sloppy-imports sdk/typescript/mod.ts sdk/typescript/worker.ts sdk/typescript/*_test.ts`.
+[CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes). The SDK, its
+tests, and their test data also type-check in strict mode against a typed facade
+of the pinned shim (`shim.ts`, `shim.d.ts`); `mise run lint` runs
+`deno check --config sdk/typescript/deno.strict.json sdk/typescript/*.ts sdk/typescript/testdata/*.ts`.
 `deno test` itself runs with the non-strict `deno.json`, because it also
 type-checks the shim's upstream sources, which are not strict-clean.
 `mise run browser:install` installs the pinned browsers, then
