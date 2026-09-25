@@ -4,7 +4,7 @@ import {
   boundWasiIO,
   LimitError,
 } from "./resource-fs.ts";
-import { checkPath } from "./limits.ts";
+import { checkPath, utf8Size } from "./limits.ts";
 import { checkName, correctShimAbi } from "./shim-abi.ts";
 import {
   Cancelled,
@@ -125,6 +125,11 @@ function collectFiles(
     for (const [name, inode] of current.directory.contents) {
       checkName(name);
       const path = current.prefix + name;
+      // An overlong path is a budget the guest exceeded, reported as a limit
+      // like the others; checkPath then only rejects non-canonical names.
+      if (utf8Size(path, limits.pathBytes) > limits.pathBytes) {
+        throw new LimitError("pathBytes");
+      }
       checkPath(path, limits);
       if (++entries > limits.outputEntries) {
         throw new LimitError("outputEntries");

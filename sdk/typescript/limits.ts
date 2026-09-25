@@ -33,7 +33,7 @@ export function resolveLimits(options: CompilerOptions = {}): ResourceLimits {
 
 // Count without allocating encoded storage, including TextEncoder's replacement
 // semantics for lone surrogates. Stop once the caller's remaining budget fails.
-function utf8Size(text: string, maximum: number): number {
+export function utf8Size(text: string, maximum: number): number {
   if (text.length > maximum) return maximum + 1;
   let size = 0;
   for (const point of text) {

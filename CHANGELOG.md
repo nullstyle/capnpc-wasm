@@ -240,8 +240,11 @@ every flavor it applies to has shipped it.
   the 2.1 s Deno restart grace is gone. The worker tests run on the pinned Deno.
 - TypeScript SDK: `CompileError` gains `kind` (`exit`, `trap`, `limit`, or
   `protocol`) and, for budget overruns, `limit` naming the exceeded
-  `ResourceLimits` field; both cross the worker protocol unchanged. Messages and
-  classes are unchanged.
+  `ResourceLimits` field; both cross the worker protocol unchanged. Classes are
+  unchanged, and so are messages except one: a generated output path over
+  `pathBytes` is now a limit like the other running budgets, so its cause reads
+  `pathBytes resource limit exceeded` instead of `path exceeds pathBytes limit`,
+  as the Go SDK already reported it.
 - TypeScript SDK: the pinned WASI shim is imported through one typed facade
   (`shim.ts` with `shim.d.ts`), and
   `deno check --config sdk/typescript/deno.strict.json` type-checks the SDK and
