@@ -29,6 +29,9 @@ import type {
 } from "./types.ts";
 
 export { supportedDenoWorkerVersion } from "./environment.ts";
+// Shared with the direct compiler since both modes accept it; kept here too
+// for importers of this module.
+export type { JobOptions } from "./types.ts";
 
 export interface WorkerCompilerOptions extends CompilerOptions {
   /** Aborts worker start-up: the worker is terminated and the factory rejects. */
