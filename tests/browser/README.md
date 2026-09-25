@@ -83,7 +83,10 @@ seconds later if it has not exited. Environment variables adjust this:
 For example,
 `CAPNP_BROWSER_STALL="abort recovery cycle 3" CAPNP_BROWSER_DEADLINE_MS=5000 mise run test:browser chromium`
 fails on that step five seconds after it starts. `deadline_test.ts`, part of
-`test:browser-bootstrap`, checks the deadline without a browser.
+`test:browser-bootstrap`, checks the deadline without a browser. The nightly
+browser job sets `CAPNP_BROWSER_JOBS=1` on Linux and macOS: with three engines
+at once on a four-CPU runner, WebKit stalled starting or recovering workers in
+nightlies 36112692524, 36132427000, and 36141746707.
 
 Before compiling, the driver blocks network requests and WebSocket connections,
 closes its asset server, and revokes its own Deno network and process-spawning
