@@ -166,6 +166,27 @@ suite.test("the TypeScript classifier reads CompileError.kind and the innermost 
       }),
       "limit:stdoutBytes",
     ],
+    // A host failure inside an import is a trap whose innermost cause is the
+    // host's error: it matches no row.
+    [
+      wrapped("", "TypeError", "Cannot read properties of undefined"),
+      "error:TypeError",
+    ],
+    // A summary without a usable kind is reported, never guessed.
+    [
+      failure("cpp trapped: WASI command failed: unreachable", "", [
+        { name: "RuntimeError", message: "unreachable" },
+      ], { kind: undefined }),
+      "error:CompileError(kind undefined)",
+    ],
+    [
+      failure("cpp exited with status 1", "fatal", [], { exitCode: 1 }),
+      "error:CompileError(kind fatal)",
+    ],
+    [
+      wrapped("", "LimitError", "stdoutBytes resource limit exceeded", "limit"),
+      "error:CompileError(limit without a name)",
+    ],
   ];
   for (const [summary, expected] of cases) {
     const outcome = classifyError(summary);

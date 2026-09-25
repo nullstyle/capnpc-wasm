@@ -45,22 +45,22 @@ table.
 | `timeout`            | The host deadline stopped the job.                                                                     |
 
 Every TypeScript surface classifies from the error class, the phase that threw
-(only `validation:memoryPages` may fail in a factory), and the innermost cause:
-the engine's or the host's own error, as
+(only `validation:memoryPages` may fail in a factory), `CompileError.kind` and
+`limit`, and the innermost cause: the engine's or the host's own error, as
 [the SDK contract](../../../docs/sdk-contract.md#errors) describes them. It
-never reads guest stderr, which the SDK appends to its wrapper messages: a
-`RuntimeError` is a `trap`, an engine's stack report is `trap:stack`, and an
-unrecognized cause is `error:<name>`, which matches no row. When `CompileError`
-gains `kind` and `limit`, those fields replace the class-based split into exit,
-limit, trap, and protocol, and the table stays as it is; `trap:stack` and
-`policy:output-name` stay derived from the innermost cause, because the planned
-kinds cannot express them. The Go runner derives the same words from
-`Error.Limit`, `Error.ExitCode`, the `validate` and `modules` stages, the
-contract messages, and wazero's own `wasm error:` report. The launcher runner
-reads the exit status and Wasmtime's own report: status 134 is a trap only with
-a `wasm trap:` line in it (`call stack exhausted`, `interrupt`). A row can also
-pin a message fragment (`message`), as the two bare validation rows do with "is
-not a directory in files".
+never reads guest stderr, which the SDK appends to its wrapper messages. Kind
+`exit` is `exit(n)`, `limit` is `limit:<budget>`, and `protocol` is `protocol`;
+a `trap` is refined by its innermost cause, because no kind expresses
+`trap:stack` or `policy:output-name`: a `RuntimeError` is a `trap`, an engine's
+stack report is `trap:stack`, and any other cause is `error:<name>`, which
+matches no row. A missing or unknown kind, or a limit without its name, is an
+`error:CompileError(...)` outcome, which matches no row either. The Go runner
+derives the same words from `Error.Limit`, `Error.ExitCode`, the `validate` and
+`modules` stages, the contract messages, and wazero's own `wasm error:` report.
+The launcher runner reads the exit status and Wasmtime's own report: status 134
+is a trap only with a `wasm trap:` line in it (`call stack exhausted`,
+`interrupt`). A row can also pin a message fragment (`message`), as the two bare
+validation rows do with "is not a directory in files".
 
 ## Surfaces
 
