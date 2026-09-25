@@ -258,9 +258,37 @@ const outcomeWord =
   /^(ok|validation(:\w+)?|exit\(\d+\)|trap(:stack)?|limit:\w+|policy:[\w-]+|protocol|timeout)$/;
 
 /**
+ * The fields of an expectation that checkObservation never reads for the
+ * outcomes it accepts: stage and stderr describe a failure, diagnostics and
+ * outputs a success.
+ */
+function unreadFields(expectation: Expectation): string[] {
+  const words = Array.isArray(expectation.expect)
+    ? expectation.expect
+    : [expectation.expect];
+  const unread: string[] = [];
+  if (!words.includes("ok")) {
+    for (const field of ["diagnostics", "outputs"] as const) {
+      if (expectation[field] !== undefined) {
+        unread.push(`the row accepts no success, so ${field} is never checked`);
+      }
+    }
+  }
+  if (words.every((word) => word === "ok")) {
+    for (const field of ["stage", "stderr"] as const) {
+      if (expectation[field] !== undefined) {
+        unread.push(`the row accepts no failure, so ${field} is never checked`);
+      }
+    }
+  }
+  return unread;
+}
+
+/**
  * Structural checks on expected.json against the corpus: every case has an
- * entry, every entry names a case, outcomes use the vocabulary, and every
- * departure carries a reason (and a finding when it changes the outcome).
+ * entry, every entry names a case, outcomes use the vocabulary, every
+ * departure carries a reason (and a finding when it changes the outcome), and
+ * no row sets a field its accepted outcomes never read.
  */
 export function validateExpected(
   expected: ExpectedFile,
@@ -276,6 +304,10 @@ export function validateExpected(
     const words = Array.isArray(entry.expect) ? entry.expect : [entry.expect];
     for (const word of words) {
       if (!outcomeWord.test(word)) problems.push(`${name}: outcome ${word}`);
+    }
+    const { surfaces: _surfaces, ...reference } = entry;
+    for (const problem of unreadFields(reference)) {
+      problems.push(`${name}: ${problem}`);
     }
     for (const [surface, override] of Object.entries(entry.surfaces ?? {})) {
       const [base, engine] = surface.split("@");
@@ -309,6 +341,17 @@ export function validateExpected(
           if (!outcomeWord.test(word)) {
             problems.push(`${name}/${surface}: outcome ${word}`);
           }
+        }
+      }
+      const effective = expectationFor(
+        expected,
+        name,
+        base as Surface,
+        engine,
+      );
+      if (!("skip" in effective)) {
+        for (const problem of unreadFields(effective)) {
+          problems.push(`${name}/${surface}: ${problem}`);
         }
       }
     }
@@ -350,38 +393,47 @@ export function checkObservation(
       }`,
     );
   }
-  if (
-    expectation.stage !== undefined && observation.stage !== expectation.stage
-  ) {
-    mismatches.push(
-      `stage ${observation.stage}, expected ${expectation.stage}`,
-    );
-  }
-  if (
-    expectation.stderr !== undefined &&
-    observation.stderr !== expectation.stderr
-  ) {
-    mismatches.push(
-      expectation.stderr
-        ? "the failing stage wrote no stderr"
-        : "the failing stage wrote stderr",
-    );
-  }
-  if (
-    expectation.diagnostics !== undefined &&
-    observation.diagnostics !== expectation.diagnostics
-  ) {
-    mismatches.push(
-      `${observation.diagnostics} diagnostics, expected ${expectation.diagnostics}`,
-    );
-  }
-  if (expectation.outputs !== undefined) {
-    const actual = JSON.stringify(
-      Object.entries(observation.outputs ?? {}).sort(),
-    );
-    const wanted = JSON.stringify(Object.entries(expectation.outputs).sort());
-    if (actual !== wanted) {
-      mismatches.push(`outputs ${actual}, expected ${wanted}`);
+  // A row that accepts both a success and a failure (a depth near a stack
+  // limit) describes each: stage and stderr apply to the failure, outputs and
+  // diagnostics to the success.
+  if (observation.outcome !== "ok") {
+    if (
+      expectation.stage !== undefined &&
+      observation.stage !== expectation.stage
+    ) {
+      mismatches.push(
+        `stage ${observation.stage}, expected ${expectation.stage}`,
+      );
+    }
+    if (
+      expectation.stderr !== undefined &&
+      observation.stderr !== expectation.stderr
+    ) {
+      mismatches.push(
+        expectation.stderr
+          ? "the failing stage wrote no stderr"
+          : "the failing stage wrote stderr",
+      );
+    }
+  } else {
+    if (
+      expectation.diagnostics !== undefined &&
+      observation.diagnostics !== expectation.diagnostics
+    ) {
+      mismatches.push(
+        `${observation.diagnostics} diagnostics, expected ${expectation.diagnostics}`,
+      );
+    }
+    if (expectation.outputs !== undefined) {
+      const actual = JSON.stringify(
+        Object.entries(observation.outputs ?? {}).sort(),
+      );
+      const wanted = JSON.stringify(
+        Object.entries(expectation.outputs).sort(),
+      );
+      if (actual !== wanted) {
+        mismatches.push(`outputs ${actual}, expected ${wanted}`);
+      }
     }
   }
   return mismatches;

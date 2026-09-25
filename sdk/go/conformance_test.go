@@ -570,15 +570,20 @@ func (e expectation) check(o observation) []string {
 	if !found {
 		mismatches = append(mismatches, fmt.Sprintf("outcome %s, expected %s", o.outcome, strings.Join(accepted, " or ")))
 	}
-	if e.Stage != nil && o.stage != *e.Stage {
-		mismatches = append(mismatches, fmt.Sprintf("stage %q, expected %q", o.stage, *e.Stage))
-	}
-	if e.Stderr != nil && o.stderr != *e.Stderr {
-		if *e.Stderr {
-			mismatches = append(mismatches, "the failing stage wrote no stderr")
-		} else {
-			mismatches = append(mismatches, "the failing stage wrote stderr")
+	// A row that accepts both a success and a failure describes each: stage
+	// and stderr apply to the failure, outputs and diagnostics to the success.
+	if o.outcome != "ok" {
+		if e.Stage != nil && o.stage != *e.Stage {
+			mismatches = append(mismatches, fmt.Sprintf("stage %q, expected %q", o.stage, *e.Stage))
 		}
+		if e.Stderr != nil && o.stderr != *e.Stderr {
+			if *e.Stderr {
+				mismatches = append(mismatches, "the failing stage wrote no stderr")
+			} else {
+				mismatches = append(mismatches, "the failing stage wrote stderr")
+			}
+		}
+		return mismatches
 	}
 	if e.Diagnostics != nil && o.diagnostics != *e.Diagnostics {
 		mismatches = append(mismatches, fmt.Sprintf("%d diagnostics, expected %d", o.diagnostics, *e.Diagnostics))
@@ -609,6 +614,43 @@ func TestConformanceClassification(t *testing.T) {
 	} {
 		if got := observeGo(test.err, nil, nil).outcome; got != test.want {
 			t.Errorf("%v: %s, want %s", test.err, got, test.want)
+		}
+	}
+}
+
+// TestConformanceCheck pins expectation.check: only validation:memoryPages
+// may fail in New, a pinned message must appear, and a row that accepts a
+// success and a failure checks each with its own fields.
+func TestConformanceCheck(t *testing.T) {
+	text := func(s string) *string { return &s }
+	count := func(n int) *int { return &n }
+	expect := func(outcomes ...string) json.RawMessage {
+		encoded, _ := json.Marshal(outcomes)
+		return encoded
+	}
+	depth := expectation{
+		Expect:      expect("ok", "trap:stack"),
+		Stage:       text("compiler"),
+		Diagnostics: count(0),
+		Outputs:     map[string]int{"cpp": 2, "rust": 1, "zig": 1},
+	}
+	for _, test := range []struct {
+		name       string
+		expected   expectation
+		observed   observation
+		mismatches int
+	}{
+		{"New rejects a module", expectation{Expect: expect("validation")}, observation{outcome: "validation", phase: "factory"}, 1},
+		{"New rejects the memory ceiling", expectation{Expect: expect("validation:memoryPages")}, observation{outcome: "validation:memoryPages", phase: "factory"}, 0},
+		{"message pinned and present", expectation{Expect: expect("validation"), Message: text("is not a directory in files")}, observation{outcome: "validation", message: "importPath is not a directory in files: nope"}, 0},
+		{"message pinned and absent", expectation{Expect: expect("validation"), Message: text("is not a directory in files")}, observation{outcome: "validation", message: "some other input error"}, 1},
+		{"depth ok with every output", depth, observation{outcome: "ok", outputs: map[string]int{"cpp": 2, "rust": 1, "zig": 1}}, 0},
+		{"depth ok that published nothing", depth, observation{outcome: "ok", outputs: map[string]int{}, diagnostics: 3}, 2},
+		{"depth trap:stack at the compiler", depth, observation{outcome: "trap:stack", stage: "compiler"}, 0},
+		{"depth trap:stack in a generator", depth, observation{outcome: "trap:stack", stage: "cpp"}, 1},
+	} {
+		if got := test.expected.check(test.observed); len(got) != test.mismatches {
+			t.Errorf("%s: %d mismatches %q, want %d", test.name, len(got), got, test.mismatches)
 		}
 	}
 }

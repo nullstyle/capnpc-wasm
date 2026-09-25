@@ -13,6 +13,7 @@ import type {
   WorkerCompiler,
 } from "./sdk.ts";
 import { envMilliseconds, stepClock } from "./deadline.ts";
+import { describeObservation } from "../conformance/outcome.ts";
 import {
   type BrowserRow,
   browserSurfaces,
@@ -1255,9 +1256,9 @@ try {
     for (const row of rows) {
       if (row.accepted && row.observation) {
         console.log(
-          `OBSERVED ${engine} ${surface} ${row.name}: ${row.observation.outcome} (accepts ${
-            row.accepted.join(" or ")
-          })`,
+          `OBSERVED ${engine} ${surface} ${row.name}: ${
+            describeObservation(row.observation)
+          } (accepts ${row.accepted.join(" or ")})`,
         );
       }
     }

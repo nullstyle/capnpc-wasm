@@ -18,14 +18,18 @@ import {
 } from "./cases.ts";
 import { driftedGuests, guestsPath } from "./guests.ts";
 import {
+  checkObservation,
   classifyError,
+  describeObservation,
   type ErrorSummary,
+  type Expectation,
+  type ExpectedFile,
   expectedPath,
   loadExpected,
+  type Observation,
   validateExpected,
 } from "./outcome.ts";
 import { classify as classifyLauncherStep } from "./launcher-surface.ts";
-import { describeObservation } from "./outcome.ts";
 import { runTsSurface } from "./ts-surface.ts";
 
 const suite = testSuite("conformance-");
@@ -155,6 +159,119 @@ suite.test("the launcher classifier reads Wasmtime's report, not guest stderr", 
     assert(
       outcome === expected,
       `${JSON.stringify(step)}: ${outcome}, expected ${expected}`,
+    );
+  }
+});
+
+suite.test("checkObservation holds the phase, the message pin, and each outcome's fields", () => {
+  const depth: Expectation = {
+    expect: ["ok", "trap:stack"],
+    stage: "compiler",
+    diagnostics: 0,
+    outputs: { cpp: 2, rust: 1, zig: 1 },
+  };
+  const pinned: Expectation = {
+    expect: "validation",
+    message: "is not a directory in files",
+  };
+  const cases: [string, Expectation, Observation, number][] = [
+    [
+      "a factory that rejected the module set",
+      { expect: "validation" },
+      { outcome: "validation", phase: "factory", message: "x" },
+      1,
+    ],
+    [
+      "the factory's memory ceiling",
+      { expect: "validation:memoryPages" },
+      { outcome: "validation:memoryPages", phase: "factory" },
+      0,
+    ],
+    [
+      "a pinned message that is present",
+      pinned,
+      {
+        outcome: "validation",
+        phase: "job",
+        message: "importPath is not a directory in files: nope",
+      },
+      0,
+    ],
+    [
+      "a harness TypeError on a pinned row",
+      pinned,
+      {
+        outcome: "validation",
+        phase: "job",
+        message: "Cannot read properties of undefined (reading 'compile')",
+      },
+      1,
+    ],
+    [
+      "a depth row that compiled with every output",
+      depth,
+      { outcome: "ok", diagnostics: 0, outputs: { cpp: 2, rust: 1, zig: 1 } },
+      0,
+    ],
+    [
+      "a depth row that compiled and published nothing",
+      depth,
+      { outcome: "ok", diagnostics: 3, outputs: {} },
+      2,
+    ],
+    [
+      "a depth row that ran out of stack in the compiler",
+      depth,
+      { outcome: "trap:stack", stage: "compiler", stderr: false },
+      0,
+    ],
+    [
+      "a depth row that ran out of stack in a generator",
+      depth,
+      { outcome: "trap:stack", stage: "cpp", stderr: true },
+      1,
+    ],
+  ];
+  for (const [label, expectation, observation, count] of cases) {
+    const mismatches = checkObservation(expectation, observation);
+    assert(
+      mismatches.length === count,
+      `${label}: ${JSON.stringify(mismatches)}, expected ${count} mismatches`,
+    );
+  }
+});
+
+suite.test("validateExpected rejects fields no accepted outcome reads", async () => {
+  const expected = await loadExpected(root);
+  const names = (await loadCases(root)).map((spec) => spec.name);
+  const clean = validateExpected(expected, names);
+  assert(clean.length === 0, JSON.stringify(clean));
+  const edited: ExpectedFile = structuredClone(expected);
+  edited.cases["const-chain-4000"].outputs = {};
+  edited.cases["const-chain-25"].stage = "compiler";
+  edited.cases["compiler-trap"].surfaces = {
+    ...edited.cases["compiler-trap"].surfaces,
+    go: { diagnostics: 0, reason: "r" },
+  };
+  edited.cases["import-chain-100"].surfaces!["studio@webkit"] = {
+    expect: "trap:stack",
+    stage: "compiler",
+    outputs: { cpp: 2 },
+    reason: "r",
+    finding: "f",
+  };
+  const problems = validateExpected(edited, names);
+  for (
+    const problem of [
+      "const-chain-4000: the row accepts no success, so outputs is never checked",
+      "const-chain-25: the row accepts no failure, so stage is never checked",
+      "compiler-trap/go: the row accepts no success, so diagnostics is never checked",
+      "import-chain-100/studio@webkit: the row accepts no success, so outputs is never checked",
+    ]
+  ) {
+    assert(
+      problems.includes(problem),
+      `${problem}: ${JSON.stringify(problems)}`,
     );
   }
 });

@@ -1,6 +1,10 @@
 import { fileURLToPath } from "node:url";
 import { type Engine, selectedEngines } from "./engines.ts";
 import { envMilliseconds } from "./deadline.ts";
+import {
+  describeObservation,
+  type Observation,
+} from "../conformance/outcome.ts";
 
 type Receipt = {
   engine: string;
@@ -14,7 +18,7 @@ type Receipt = {
     name: string;
     surface: string;
     accepted?: string[];
-    observation?: { outcome: string };
+    observation?: Observation;
   }[];
   termination?: { verdict: string }[];
 };
@@ -222,9 +226,11 @@ async function runEngine(engine: Engine, receipts: string): Promise<Outcome> {
         ),
         ...(receipt.conformanceRows ?? []).filter((row) => row.accepted).map(
           (row) =>
-            `observed ${row.surface} ${row.name}: ${row.observation?.outcome} (accepts ${
-              row.accepted!.join(" or ")
-            })`,
+            `observed ${row.surface} ${row.name}: ${
+              row.observation
+                ? describeObservation(row.observation)
+                : "no observation"
+            } (accepts ${row.accepted!.join(" or ")})`,
         ),
         ...(receipt.termination ?? []).map((result) => result.verdict),
       ],

@@ -110,7 +110,14 @@
             "ok",
             "trap:stack"
           ],
-          "reason": "measured on macOS only, where WebKit 26.6 workers ran out of stack at about 34 const references and 90 nested imports (macOS secondary threads default to a 512 KiB stack against 8 MiB for the main thread); CI runs WebKit on Linux, whose threads default to 8 MiB, so the Linux outcome is unmeasured",
+          "stage": "compiler",
+          "diagnostics": 0,
+          "outputs": {
+            "cpp": 2,
+            "rust": 1,
+            "zig": 1
+          },
+          "reason": "macOS WebKit 26.6 workers ran out of stack (trap:stack at the compiler) at about 34 const references, and outcomes near that limit vary between runs; on Linux both surfaces compiled this chain (measured on Linux CI, run 36099823012)",
           "finding": "GAP3-02"
         },
         "studio@webkit": {
@@ -118,23 +125,14 @@
             "ok",
             "trap:stack"
           ],
-          "reason": "measured on macOS only, where WebKit 26.6 workers ran out of stack at about 34 const references and 90 nested imports (macOS secondary threads default to a 512 KiB stack against 8 MiB for the main thread); CI runs WebKit on Linux, whose threads default to 8 MiB, so the Linux outcome is unmeasured",
-          "finding": "GAP3-02"
-        },
-        "browser-worker@firefox": {
-          "expect": [
-            "ok",
-            "trap:stack"
-          ],
-          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host, so CI's Linux run records which outcome this engine's worker stack gives",
-          "finding": "GAP3-02"
-        },
-        "studio@firefox": {
-          "expect": [
-            "ok",
-            "trap:stack"
-          ],
-          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host, so CI's Linux run records which outcome this engine's worker stack gives",
+          "stage": "compiler",
+          "diagnostics": 0,
+          "outputs": {
+            "cpp": 2,
+            "rust": 1,
+            "zig": 1
+          },
+          "reason": "macOS WebKit 26.6 workers ran out of stack (trap:stack at the compiler) at about 34 const references, and outcomes near that limit vary between runs; on Linux both surfaces compiled this chain (measured on Linux CI, run 36099823012)",
           "finding": "GAP3-02"
         }
       }
@@ -147,33 +145,6 @@
           "expect": "trap",
           "stage": "compiler",
           "reason": "Wasmtime runs with an 8 MiB call stack, so the guest's 8 MiB linear-memory stack faults first (out-of-bounds memory access)",
-          "finding": "GAP3-02"
-        },
-        "browser-direct@firefox": {
-          "expect": [
-            "trap:stack",
-            "trap"
-          ],
-          "stage": "compiler",
-          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host; which stack ends first (SpiderMonkey's or the guest's 8 MiB linear stack) is recorded by CI's Linux run",
-          "finding": "GAP3-02"
-        },
-        "browser-worker@firefox": {
-          "expect": [
-            "trap:stack",
-            "trap"
-          ],
-          "stage": "compiler",
-          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host; which stack ends first (SpiderMonkey's or the guest's 8 MiB linear stack) is recorded by CI's Linux run",
-          "finding": "GAP3-02"
-        },
-        "studio@firefox": {
-          "expect": [
-            "trap:stack",
-            "trap"
-          ],
-          "stage": "compiler",
-          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host; which stack ends first (SpiderMonkey's or the guest's 8 MiB linear stack) is recorded by CI's Linux run",
           "finding": "GAP3-02"
         }
       }
@@ -192,7 +163,14 @@
             "ok",
             "trap:stack"
           ],
-          "reason": "measured on macOS only, where WebKit 26.6 workers ran out of stack at about 34 const references and 90 nested imports (macOS secondary threads default to a 512 KiB stack against 8 MiB for the main thread); CI runs WebKit on Linux, whose threads default to 8 MiB, so the Linux outcome is unmeasured",
+          "stage": "compiler",
+          "diagnostics": 0,
+          "outputs": {
+            "cpp": 2,
+            "rust": 1,
+            "zig": 1
+          },
+          "reason": "the outcome varies near the WebKit worker stack limit on macOS (about 90 nested imports): in one run the SDK worker failed with trap:stack at the compiler where Studio compiled the same chain with every output; on Linux both surfaces compiled it (measured on Linux CI, run 36099823012)",
           "finding": "GAP3-02"
         },
         "studio@webkit": {
@@ -200,23 +178,14 @@
             "ok",
             "trap:stack"
           ],
-          "reason": "measured on macOS only, where WebKit 26.6 workers ran out of stack at about 34 const references and 90 nested imports (macOS secondary threads default to a 512 KiB stack against 8 MiB for the main thread); CI runs WebKit on Linux, whose threads default to 8 MiB, so the Linux outcome is unmeasured",
-          "finding": "GAP3-02"
-        },
-        "browser-worker@firefox": {
-          "expect": [
-            "ok",
-            "trap:stack"
-          ],
-          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host, so CI's Linux run records which outcome this engine's worker stack gives",
-          "finding": "GAP3-02"
-        },
-        "studio@firefox": {
-          "expect": [
-            "ok",
-            "trap:stack"
-          ],
-          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host, so CI's Linux run records which outcome this engine's worker stack gives",
+          "stage": "compiler",
+          "diagnostics": 0,
+          "outputs": {
+            "cpp": 2,
+            "rust": 1,
+            "zig": 1
+          },
+          "reason": "the outcome varies near the WebKit worker stack limit on macOS (about 90 nested imports): in one run the SDK worker failed with trap:stack at the compiler where Studio compiled the same chain with every output; on Linux both surfaces compiled it (measured on Linux CI, run 36099823012)",
           "finding": "GAP3-02"
         }
       }

@@ -139,9 +139,9 @@ export async function runTsSurface(
           Array.isArray(expectation.expect) && expectation.expect.length > 1
         ) {
           console.log(
-            `OBSERVED ${surface} ${spec.name}: ${observation.outcome} (accepts ${
-              expectation.expect.join(" or ")
-            })`,
+            `OBSERVED ${surface} ${spec.name}: ${
+              describeObservation(observation)
+            } (accepts ${expectation.expect.join(" or ")})`,
           );
         }
         if (mismatches.length > 0) {
