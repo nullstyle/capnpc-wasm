@@ -62,33 +62,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++-14 pkg-config
       # cache: false: unlike CI, no tool cache is restored, so every tool is
-      # downloaded from its locked URL (the pruned Zig build from a community
-      # mirror) and verified against mise.lock by `mise install --locked` in
-      # the next step, which never rewrites the lock. The token is confined to
-      # these two steps.
+      # downloaded from its locked URL (Zig from the project's mirror release)
+      # and verified against mise.lock by `mise install --locked`, which never
+      # rewrites the lock. The token is confined to this step.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
           version: 2026.9.1
-          install: false
           cache: false
-      # Stopgap for the Zig community mirror that serves no .minisig (see
-      # ci.yml): install: false above and this retry go once mise.lock points
-      # at the project's own Zig mirror.
-      - name: Install the locked tools (up to three attempts)
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --locked; then exit 0; fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::mise install --locked failed on attempt $attempt of 3; retrying in 15 s"
-              sleep 15
-            fi
-          done
-          echo "::error::mise install --locked failed three times"
-          exit 1
       - name: Initialize only pinned top-level references
         run: mise run setup
       # The Intel runner (four x86_64 CPUs) is the slowest host, and each
@@ -168,24 +150,7 @@ jobs:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
           version: 2026.9.1
-          install: false
           cache: false
-      # Stopgap for the Zig community mirror that serves no .minisig (see
-      # ci.yml): install: false above and this retry go once mise.lock points
-      # at the project's own Zig mirror.
-      - name: Install the locked tools (up to three attempts)
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --locked; then exit 0; fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::mise install --locked failed on attempt $attempt of 3; retrying in 15 s"
-              sleep 15
-            fi
-          done
-          echo "::error::mise install --locked failed three times"
-          exit 1
       - name: Initialize only pinned top-level references
         run: mise run setup
       # Playwright's system libraries are a Linux concern; macOS runners carry
@@ -254,33 +219,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++-14 pkg-config
       # The cold check is the bootstrap job's; this job may restore the cache.
-      - id: mise
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        with:
-          version: 2026.9.1
-          install: false
-      # Stopgap for the Zig community mirror that serves no .minisig (see
-      # ci.yml): install: false above, this retry, and the cache save below go
-      # once mise.lock points at the project's own Zig mirror.
-      - name: Install the locked tools (up to three attempts)
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --locked; then exit 0; fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::mise install --locked failed on attempt $attempt of 3; retrying in 15 s"
-              sleep 15
-            fi
-          done
-          echo "::error::mise install --locked failed three times"
-          exit 1
-      # install: false skips the action's own cache save; see ci.yml.
-      - name: Save the mise tool cache after a miss
-        if: steps.mise.outputs.cache-hit != 'true'
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
@@ -326,32 +265,15 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      # Only the pinned Deno, which the next step installs; --locked never
-      # rewrites mise.lock. The canary task downloads the newest release itself
-      # from dl.deno.land.
+      # Only the pinned Deno; --locked never rewrites mise.lock. The canary
+      # task downloads the newest release itself from dl.deno.land.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
           version: 2026.9.1
-          install: false
+          install_args: --locked deno
           cache: false
-      # The stopgap retry every job that installs tools shares (see ci.yml),
-      # although this job installs no Zig: install: false above and this retry
-      # go once mise.lock points at the project's own Zig mirror.
-      - name: Install the locked Deno (up to three attempts)
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --locked deno; then exit 0; fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::mise install --locked deno failed on attempt $attempt of 3; retrying in 15 s"
-              sleep 15
-            fi
-          done
-          echo "::error::mise install --locked deno failed three times"
-          exit 1
       - name: Probe worker termination on each Deno runtime
         run: mise run test:termination-canary
       - name: Preserve the canary receipt
@@ -398,33 +320,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++-14 pkg-config
       # The cold check is the bootstrap job's; this job may restore the cache.
-      - id: mise
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        with:
-          version: 2026.9.1
-          install: false
-      # Stopgap for the Zig community mirror that serves no .minisig (see
-      # ci.yml): install: false above, this retry, and the cache save below go
-      # once mise.lock points at the project's own Zig mirror.
-      - name: Install the locked tools (up to three attempts)
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --locked; then exit 0; fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::mise install --locked failed on attempt $attempt of 3; retrying in 15 s"
-              sleep 15
-            fi
-          done
-          echo "::error::mise install --locked failed three times"
-          exit 1
-      # install: false skips the action's own cache save; see ci.yml.
-      - name: Save the mise tool cache after a miss
-        if: steps.mise.outputs.cache-hit != 'true'
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
@@ -521,31 +417,14 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      # Only the pinned Deno, which the next step installs; --locked never
-      # rewrites mise.lock.
+      # Only the pinned Deno; --locked never rewrites mise.lock.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
           version: 2026.9.1
-          install: false
+          install_args: --locked deno
           cache: false
-      # The stopgap retry every job that installs tools shares (see ci.yml),
-      # although this job installs no Zig: install: false above and this retry
-      # go once mise.lock points at the project's own Zig mirror.
-      - name: Install the locked Deno (up to three attempts)
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --locked deno; then exit 0; fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::mise install --locked deno failed on attempt $attempt of 3; retrying in 15 s"
-              sleep 15
-            fi
-          done
-          echo "::error::mise install --locked deno failed three times"
-          exit 1
       - name: Recompute the ledger from this repository's scheduled runs
         env:
           GH_TOKEN: ${{ github.token }}
