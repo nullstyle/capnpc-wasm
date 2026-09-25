@@ -3,6 +3,7 @@ import { chromium, firefox, webkit } from "./playwright.ts";
 import type { Page } from "playwright";
 import { selectedEngines } from "./engines.ts";
 import { checkWorkerRaces } from "./studio-worker-races.js";
+import { scaled } from "../lib/timeout-scale.ts";
 import { unzipSync } from "fflate";
 import { Buffer } from "node:buffer";
 import { securityHeaders, serveStudio } from "../../scripts/serve-example.ts";
@@ -117,8 +118,12 @@ const url = `http://127.0.0.1:${server.addr.port}/`;
 // page an engine loads can outlast Playwright's 30-second navigation default
 // (nightly 36141746707: Firefox on macos-15 timed out loading Studio right
 // after Chromium passed; ledger row 139). Each navigation gets two minutes;
-// a page that never loads still fails, naming the URL.
-const navigationTimeoutMs = 120_000;
+// a page that never loads still fails, naming the URL. Every other action
+// and wait gets 30 seconds. Both scale by CAPNP_TEST_TIMEOUT_SCALE
+// (tests/lib/timeout-scale.ts): at 3, a file input's setInputFiles that took
+// more than 30 seconds on macos-15 (nightly 36168208228) has 90 (row 143).
+const navigationTimeoutMs = scaled(120_000);
+const actionTimeoutMs = scaled(30_000);
 
 // The server's own guards: loopback Host names only, no hidden paths, and the
 // headers a meta tag cannot carry. A raw socket sends the Host header as is.
@@ -255,7 +260,7 @@ try {
         acceptDownloads: true,
       });
       const page = await context.newPage();
-      page.setDefaultTimeout(30_000);
+      page.setDefaultTimeout(actionTimeoutMs);
       const errors: string[] = [];
       const requested: string[] = [];
       page.on("pageerror", (error) => errors.push(error.message));
@@ -623,7 +628,7 @@ try {
       // download says so, restores the controls, and recovers on the next run.
       {
         const fresh = await browser.newPage();
-        fresh.setDefaultTimeout(30_000);
+        fresh.setDefaultTimeout(actionTimeoutMs);
         fresh.on("pageerror", (error) => errors.push(error.message));
         await fresh.goto(url, { timeout: navigationTimeoutMs });
         await badgeIs(fresh, "Up to date");
@@ -837,11 +842,15 @@ try {
         );
         await generateAll(page);
       }
-      const workerRaces = await checkWorkerRaces(browser, url);
+      const workerRaces = await checkWorkerRaces(browser, url, {
+        actionTimeoutMs,
+        navigationTimeoutMs,
+      });
 
       // An engine without standardized exception handling gets a clear
       // unsupported state before any worker starts.
       const unsupported = await browser.newPage();
+      unsupported.setDefaultTimeout(actionTimeoutMs);
       await unsupported.addInitScript(() => {
         WebAssembly.validate = () => false;
         const RealWorker = globalThis.Worker;

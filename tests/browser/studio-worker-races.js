@@ -2,9 +2,14 @@ import { presets } from "../../examples/browser/presets.js";
 
 // Delay real worker messages, never compiler results. The released operation
 // still executes the shipped Wasm modules and exercises SDK cancellation.
-export async function checkWorkerRaces(browser, url) {
+// studio.ts passes its timeouts, which CAPNP_TEST_TIMEOUT_SCALE scales.
+export async function checkWorkerRaces(
+  browser,
+  url,
+  { actionTimeoutMs = 30_000, navigationTimeoutMs = 120_000 } = {},
+) {
   const page = await browser.newPage();
-  page.setDefaultTimeout(30_000);
+  page.setDefaultTimeout(actionTimeoutMs);
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   try {
@@ -56,7 +61,7 @@ export async function checkWorkerRaces(browser, url) {
         terminated: globalThis.studioAudit.terminated,
         heldInits: globalThis.studioAudit.heldInits,
       }));
-    await page.goto(url, { timeout: 120_000 });
+    await page.goto(url, { timeout: navigationTimeoutMs });
     await page.waitForFunction(() => globalThis.studioAudit.heldInits === 1);
     // Cancelling a starting worker terminates it inside the SDK: after every
     // cancellation no worker is alive, and the next Generate starts one.
