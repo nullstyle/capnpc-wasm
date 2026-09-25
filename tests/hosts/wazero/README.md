@@ -44,7 +44,10 @@ statuses. Wasm DWARF debug info is not loaded; the shipped modules carry sysroot
 debug sections that wazero would otherwise walk on every guest exit.
 
 The compiler engine keeps compiled machine code in `build/wazero-cache/`, beside
-the host binary, under a directory keyed by the binary's size and modification
-time, so rebuilding the host (for example after a wazero bump) starts a fresh
-cache. Concurrent hosts share it safely; `mise run clean` removes it with the
-rest of `build/`. The interpreter compiles no machine code and uses no cache.
+the host binary, under a directory keyed by the SHA-256 of the binary. An
+identical rebuild reuses the cache (Go refreshes the output's modification time,
+so the time cannot be the key); a different build, for example after a wazero
+bump, starts a fresh directory and removes the other builds' ones on its first
+run. Concurrent hosts of one build share the cache safely; `mise run clean`
+removes it with the rest of `build/`. The interpreter compiles no machine code
+and uses no cache.

@@ -4,10 +4,13 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -115,21 +118,41 @@ func run() int {
 // compilationCache keeps the compiler engine's machine code in
 // build/wazero-cache, beside build/hosts/wazero-run, so the test suites that
 // run this host hundreds of times compile each module once. The directory is
-// keyed by this binary's size and modification time: a rebuilt host, which
-// may embed another wazero, never reads code that another build compiled.
-// wazero writes each entry to a temporary file and renames it, so concurrent
-// hosts share the directory safely. Any failure only disables the cache.
+// keyed by the SHA-256 of this binary: an identical rebuild (Go refreshes the
+// output's modification time) reuses the cache, and a different build, which
+// may embed another wazero, never reads code another build compiled. The
+// first run of a new build removes the other builds' directories; mise builds
+// the host before any suite runs it, so no other build is using them. wazero
+// writes each entry to a temporary file and renames it, so concurrent hosts
+// of one build share the directory safely. Any failure only disables the
+// cache.
 func compilationCache() wazero.CompilationCache {
 	executable, err := os.Executable()
 	if err != nil {
 		return nil
 	}
-	info, err := os.Stat(executable)
+	binary, err := os.Open(executable)
 	if err != nil {
 		return nil
 	}
-	dir := filepath.Join(filepath.Dir(executable), "..", "wazero-cache",
-		fmt.Sprintf("%x-%x", info.Size(), info.ModTime().UnixNano()))
+	hash := sha256.New()
+	_, err = io.Copy(hash, binary)
+	binary.Close()
+	if err != nil {
+		return nil
+	}
+	key := hex.EncodeToString(hash.Sum(nil))[:32]
+	root := filepath.Join(filepath.Dir(executable), "..", "wazero-cache")
+	dir := filepath.Join(root, key)
+	if _, err := os.Stat(dir); errors.Is(err, fs.ErrNotExist) {
+		if entries, err := os.ReadDir(root); err == nil {
+			for _, entry := range entries {
+				if entry.Name() != key {
+					_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+				}
+			}
+		}
+	}
 	cache, err := wazero.NewCompilationCacheWithDir(dir)
 	if err != nil {
 		return nil
