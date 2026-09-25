@@ -167,6 +167,14 @@ version that ships them.
   exists at another commit, so `release:compiler-host` builds again without
   `--allow-existing-tag`. The launcher's `--version` reads only the packaged
   `package.json`, and the package receipt records the tools archive's version.
+- Documentation: `docs/api-stability.md` lists the stable and experimental
+  interfaces of both SDKs, the archives, and the launcher; states the 0.x
+  version rules (a minor release may break, with a CHANGELOG bullet marked
+  breaking; a patch release never breaks; `X.Y.Z-rc.N` are candidates of one
+  version) and the deprecation window (announced in the CHANGELOG and the
+  documentation comment, removed no earlier than the next minor release); and
+  records the naming rule: `capnp-wasm-<part>` for compiler-only artifacts,
+  `capnpc-wasm` for the full SDK package, its archive, and the Go module tag.
 
 ## capnp-wasm-compiler-host
 

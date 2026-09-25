@@ -14,7 +14,9 @@ code retains the licenses shipped in `licenses/`, listed per archive in
 Releases are built only by the [release workflow](#release-process) from a
 clean, tagged commit. Local preparation (`mise run release:*`) produces
 candidates for inspection and the package tests; nothing built on a workstation
-is uploaded.
+is uploaded. The [API stability policy](api-stability.md) states which
+interfaces a version covers, how versions change, and how packages, archives,
+and tags are named.
 
 ## Public compiler downloads
 
