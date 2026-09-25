@@ -63,6 +63,13 @@ release status; update it instead of restating status here.
   the TypeScript, Go, and browser tests. Read embeds as bytes; compare the
   complete canonical request and every generated source byte with native output
   when adding schema coverage.
+- Error paths share the
+  [failure and limit conformance corpus](tests/fixtures/conformance/README.md).
+  For an error-path change, add a case to `tests/conformance/cases.ts` and its
+  outcome to `tests/fixtures/conformance/expected.json`; a surface's departure
+  needs a `reason` and a `finding`. Regenerate `cases.json` and `guests.json`
+  with the `--write` commands in that README, then run `test:conformance`,
+  `test:sdk-go`, `test:launcher`, and `test:browser`.
 - Test harnesses under `tests/hosts/` stay separate from the SDKs; the Deno host
   alone imports the SDK's shim facade and ABI corrections
   (`sdk/typescript/shim.ts`, `shim-abi.ts`), so its parity rows run the shipped
@@ -83,15 +90,23 @@ release status; update it instead of restating status here.
 
 ## Verification by area
 
-`mise run check` runs `lint` (static checks with no build), `doctor`, and `test`
-(the parity, Zig, SDK, and feature-corpus suites, one `test:<suite>` task each,
-building only what it reads). `test:browser`, `test:studio`, `test:package`,
-`test:launcher`, and `test:deno-worker` are separate and run only when named.
-The CI clean-checkout job (setup, `check`, `test:package`, and the Deno 2.6.8
-lane) took 9 minutes on ubuntu-24.04 and 10 minutes on macos-15
+`mise run check` runs `lint` (static checks with no build, actionlint included),
+`doctor`, and `test`: the parity, Zig, SDK, and feature-corpus suites, the
+conformance corpus (`test:conformance`), and `test:studio-unit`, one
+`test:<suite>` task each, building only what it reads. `test:browser`,
+`test:studio`, `test:package`, `test:launcher`, and `test:deno-worker` are
+separate and run only when named. The CI clean-checkout job (setup, `check`,
+`test:package`, and the Deno 2.6.8 lane) took 9 minutes on ubuntu-24.04 and 10
+minutes on macos-15
 ([run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070));
 a local cold build is comparable. For quick iteration, run one suite task, or
 `mise run --skip-deps test:<suite>` to rerun it without rebuilding.
+
+`test:browser` runs the engines at once and covers the termination acceptance
+and the conformance rows on the direct, worker, and Studio surfaces. Set
+`CAPNP_BROWSER_JOBS=1` to run the engines in turn, and
+`CAPNP_BROWSER_DEADLINE_MS` or `CAPNP_BROWSER_ENGINE_TIMEOUT_MS` to change the
+step or per-engine deadline.
 
 - C++ port, Wasm feature profile, or `scripts/check-wasm-artifacts.ts`:
   `mise run test` (includes `check:wasm-artifacts`).
@@ -135,8 +150,9 @@ run the area's gate from Verification by area. The worker runtime is the locked
 tool `deno-worker` (`deno-worker:install`, a dependency of `test:deno-worker`).
 The scheduled checks `audit:osv`, `audit:govulncheck`, `audit:advisories`, and
 `check:lock-urls`, the soak and floor tasks `test:browser-soak`,
-`test:deno-worker-soak`, and `test:sdk-go-floor`, and the drift signal
-`test:sdk-go-wazero-latest` need the network and run only when named.
+`test:deno-worker-soak`, and `test:sdk-go-floor`, the drift signal
+`test:sdk-go-wazero-latest`, and the canary `test:termination-canary` need the
+network and run only when named; the drift signal and the canary are not gates.
 `audit:nightly` also needs the network (read-only `gh`): it rewrites
 `docs/release-evidence/nightly-confidence.json`, and `-- --check` only compares.
 
