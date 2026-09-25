@@ -124,10 +124,10 @@ jobs:
   # differ between the WASI SDK's Linux and macOS tarballs
   # (sdkBuildPathPrefixes in scripts/check-wasm-artifacts.ts), so its modules
   # are expected to differ; a cpp module that matches is reported as a
-  # notice. A difference in any other module, a module one host lacks, or a
-  # missing digest or class file fails this job without blocking the run, so
-  # the evidence accumulates until the cross-host claim for the generators
-  # can be made or withdrawn.
+  # notice. A difference in any other module, a module one host lacks or the
+  # contract does not list, or a missing digest or class file fails this job
+  # without blocking the run, so the evidence accumulates until the
+  # cross-host claim for the generators can be made or withdrawn.
   wasm-digests:
     name: Wasm modules across Linux and macOS (report only)
     needs: check
@@ -172,6 +172,7 @@ jobs:
                 if (l == "missing" && m == "missing") verdict = "unexpected: built on neither host"
                 else if (l == "missing") verdict = "unexpected: missing on Linux"
                 else if (m == "missing") verdict = "unexpected: missing on macOS"
+                else if (c == "unlisted") verdict = "unexpected: not in the artifact contract"
                 else if (l != m && c == "cpp") verdict = "expected: per-platform WASI SDK strings"
                 else if (l != m) verdict = "unexpected: differs"
                 else if (c == "cpp") verdict = "notice: equal"
@@ -194,8 +195,13 @@ jobs:
               expected:*) expected=$((expected + 1)) ;;
               "notice: equal")
                 echo "::notice::$module is byte-identical across the hosts although its $class class embeds per-platform WASI SDK strings" ;;
+              equal) ;;
               unexpected:*)
                 echo "::warning::$module ($class): $verdict (Linux $l, macOS $m)"
+                status=1 ;;
+              # A row with an empty field shifts the others: never let it pass.
+              *)
+                echo "::warning::unreadable comparison row for $module: class '$class', verdict '$verdict'"
                 status=1 ;;
             esac
           done <<< "$rows"
