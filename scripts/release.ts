@@ -465,39 +465,126 @@ function flavorComponents(
   };
 }
 
-/** True for a syntactically valid SPDX license expression. */
-export function isSpdxExpression(expression: string): boolean {
-  const tokens = expression.match(/\(|\)|[A-Za-z0-9.+-]+/g) ?? [];
-  if (tokens.join("") !== expression.replace(/\s+/g, "")) return false;
+/**
+ * The SPDX license identifiers (https://spdx.org/licenses/) that the
+ * components' license expressions may use. Check a new identifier against
+ * that list, and its text against the component's license files, before
+ * adding it.
+ */
+export const spdxLicenseIds: readonly string[] = [
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "CC0-1.0",
+  "MIT",
+];
+/**
+ * The SPDX license exception identifiers
+ * (https://spdx.org/licenses/exceptions-index.html) the expressions may use.
+ */
+export const spdxExceptionIds: readonly string[] = ["LLVM-exception"];
+
+const spdxOperators = new Set(["AND", "OR", "WITH"]);
+const spdxLookup = (ids: readonly string[]) =>
+  new Map(ids.map((id) => [id.toLowerCase(), id]));
+
+/**
+ * Why `expression` is not an SPDX 2.3 license expression (Annex D) built from
+ * spdxLicenseIds and spdxExceptionIds, or undefined when it is one.
+ * Identifiers match without regard to case and operators (AND, OR, WITH) in
+ * upper case only, as SPDX specifies; `+` may follow a license identifier.
+ * LicenseRef- and DocumentRef- identifiers are rejected, because the SBOM
+ * carries no extracted license texts, and so are NOASSERTION and NONE, which
+ * say that no expression is known.
+ */
+export function spdxExpressionProblem(expression: string): string | undefined {
+  const licenses = spdxLookup(spdxLicenseIds);
+  const exceptions = spdxLookup(spdxExceptionIds);
+  const tokens = expression.match(/\(|\)|[^\s()]+/g) ?? [];
   let index = 0;
-  const identifier = /^[A-Za-z0-9.-]+\+?$/;
-  const simple = (): boolean => {
+  const unknown = (kind: string, id: string, list: string, constant: string) =>
+    `${id} is not an allow-listed SPDX ${kind} identifier; check ${list} and the component's license files, then add it to ${constant} in scripts/release.ts`;
+  const term = (): string | undefined => {
     const token = tokens[index];
+    if (token === undefined) {
+      return tokens.length === 0
+        ? "the expression is empty"
+        : "the expression ends where a license was expected";
+    }
     if (token === "(") {
       index += 1;
-      if (!compound() || tokens[index] !== ")") return false;
+      const problem = compound();
+      if (problem !== undefined) return problem;
+      if (tokens[index] !== ")") return 'a "(" has no matching ")"';
       index += 1;
-      return true;
+      return undefined;
     }
-    if (token === undefined || !identifier.test(token)) return false;
+    if (token === ")") return '")" stands where a license was expected';
+    if (spdxOperators.has(token)) {
+      return `the operator ${token} stands where a license was expected`;
+    }
     index += 1;
+    if (token === "NOASSERTION" || token === "NONE") {
+      return `${token} records that no license expression is known`;
+    }
+    if (/^(?:DocumentRef-|LicenseRef-)/i.test(token)) {
+      return `${token}: LicenseRef identifiers are not accepted, because the SBOM carries no extracted license texts`;
+    }
+    const license = token.endsWith("+") ? token.slice(0, -1) : token;
+    if (!licenses.has(license.toLowerCase())) {
+      return exceptions.has(license.toLowerCase())
+        ? `the exception ${license} stands where a license was expected`
+        : unknown(
+          "license",
+          license,
+          "https://spdx.org/licenses/",
+          "spdxLicenseIds",
+        );
+    }
     if (tokens[index] === "WITH") {
       index += 1;
       const exception = tokens[index];
-      if (exception === undefined || !identifier.test(exception)) return false;
+      if (
+        exception === undefined || exception === "(" || exception === ")" ||
+        spdxOperators.has(exception)
+      ) return "WITH is not followed by an exception identifier";
       index += 1;
+      if (!exceptions.has(exception.toLowerCase())) {
+        return licenses.has(exception.toLowerCase())
+          ? `the license ${exception} stands where an exception was expected`
+          : unknown(
+            "exception",
+            exception,
+            "https://spdx.org/licenses/exceptions-index.html",
+            "spdxExceptionIds",
+          );
+      }
     }
-    return true;
+    return undefined;
   };
-  const compound = (): boolean => {
-    if (!simple()) return false;
+  const compound = (): string | undefined => {
+    const problem = term();
+    if (problem !== undefined) return problem;
     while (tokens[index] === "AND" || tokens[index] === "OR") {
       index += 1;
-      if (!simple()) return false;
+      const next = term();
+      if (next !== undefined) return next;
     }
-    return true;
+    return undefined;
   };
-  return compound() && index === tokens.length;
+  const problem = compound();
+  if (problem !== undefined) return problem;
+  if (index < tokens.length) {
+    return `${
+      tokens[index]
+    } stands where AND, OR, WITH, or the end was expected (operators are upper case)`;
+  }
+  return undefined;
+}
+
+/** True for an SPDX license expression that spdxExpressionProblem accepts. */
+export function isSpdxExpression(expression: string): boolean {
+  return spdxExpressionProblem(expression) === undefined;
 }
 
 /** The [tools] pins in mise.toml, in file order. */
@@ -593,8 +680,11 @@ function componentIdentity(
   const origin = component.origin;
   let match: RegExpExecArray | null;
   if (origin === "this repository") {
+    // The project's own code at the producer commit. The flavor's version
+    // belongs to the archive (the root package): the tools archive at
+    // 0.1.0-rc.3 does not contain a capnpc-wasm 0.1.0-rc.3.
     return {
-      versionInfo: input.version,
+      versionInfo: input.commit,
       downloadLocation: `git+${repositoryUrl}.git@${input.commit}`,
       purl: `pkg:github/${repositorySlug}@${input.commit}`,
     };
@@ -695,11 +785,13 @@ export function spdxDocument(input: SbomInput): string {
   }];
   for (const component of input.components) {
     const identity = componentIdentity(component, input);
-    // An older components.json may still hold prose in `license`; it stays
-    // readable as a comment and is never declared.
+    // A license that fails the gate (test:package rejects it) is never
+    // declared; its text stays readable as a comment.
     const valid = isSpdxExpression(component.license);
     const comments = [
-      ...(valid ? [] : [component.license]),
+      ...(valid || component.license === "NOASSERTION"
+        ? []
+        : [component.license]),
       ...(component.note ? [component.note] : []),
     ].join(" ");
     const pkg: SpdxPackage = {

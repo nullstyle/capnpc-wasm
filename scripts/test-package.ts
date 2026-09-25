@@ -3,7 +3,11 @@
 // asset integrity, extracted into a fresh directory under build/test, and
 // exercised by external Deno and Go consumers, the launcher checks, the
 // packaged README examples, and a link check over the packaged documents.
-import { sha256, verifyRelease } from "./verify-release.ts";
+import {
+  type ReleaseManifest,
+  sha256,
+  verifyRelease,
+} from "./verify-release.ts";
 import {
   archiveStem,
   flavorNamed,
@@ -15,6 +19,7 @@ import {
   refusal,
   type RefusalInput,
   releaseTag,
+  spdxExpressionProblem,
 } from "./release.ts";
 import { checkLauncher } from "../tests/package/launcher.ts";
 
@@ -124,9 +129,46 @@ async function checkAssets(candidate: string, candidateStem: string) {
     sbom.relationships?.[0]?.relationshipType !== "DESCRIBES" ||
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(sbom.creationInfo?.created)
   ) throw new Error(`${candidateStem}: SBOM does not describe the archive`);
-  const names: string[] = sbom.packages.map((pkg: { name: string }) =>
-    pkg.name
+  // The root package is the archive at its flavor's version; the project's
+  // own code is a component at the producer commit (the tools archive at
+  // 0.1.0-rc.3 holds no capnpc-wasm 0.1.0-rc.3); every component's license is
+  // declared.
+  const manifest = JSON.parse(
+    new TextDecoder().decode(manifestAsset),
+  ) as ReleaseManifest;
+  const packages = sbom.packages as {
+    name: string;
+    SPDXID: string;
+    versionInfo?: string;
+    licenseDeclared: string;
+  }[];
+  if (packages[0].versionInfo !== manifest.version) {
+    throw new Error(
+      `${candidateStem}: the SBOM's root package is at ${
+        packages[0].versionInfo
+      }, not ${manifest.version}`,
+    );
+  }
+  const components = packages.filter((pkg) =>
+    pkg.SPDXID.startsWith("SPDXRef-Component-")
   );
+  const project = components.find((pkg) => pkg.name === "capnpc-wasm");
+  if (project?.versionInfo !== manifest.source.commit) {
+    throw new Error(
+      `${candidateStem}: the SBOM's capnpc-wasm component is at ${project?.versionInfo}, not the producer commit ${manifest.source.commit}`,
+    );
+  }
+  const undeclared = components.filter((pkg) =>
+    pkg.licenseDeclared === "NOASSERTION"
+  ).map((pkg) => pkg.name);
+  if (undeclared.length > 0) {
+    throw new Error(
+      `${candidateStem}: the SBOM declares no license for ${
+        undeclared.join(", ")
+      }`,
+    );
+  }
+  const names: string[] = packages.map((pkg) => pkg.name);
   const namespace: string = sbom.documentNamespace;
   return { archiveHash, manifestHash, sbomHash, names, namespace };
 }
@@ -427,6 +469,109 @@ function checkReleaseRules() {
   );
 }
 checkReleaseRules();
+
+/**
+ * The SPDX gate on hand-picked expressions: the grammar of SPDX 2.3 Annex D
+ * with the allow-listed identifiers of release.ts. Some SPDX-valid
+ * expressions are refused on purpose: identifiers the project does not use
+ * (added only after checking spdx.org/licenses) and LicenseRef-, for which
+ * the SBOM carries no extracted license texts.
+ */
+function checkSpdxRules() {
+  const cases: [string, boolean][] = [
+    ["MIT", true],
+    ["mit", true], // identifiers match without regard to case
+    ["MIT OR Apache-2.0", true],
+    ["Apache-2.0+", true],
+    ["(MIT)", true],
+    ["Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT", true],
+    [
+      "(Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) AND MIT AND BSD-2-Clause AND CC0-1.0 AND BSD-3-Clause",
+      true,
+    ],
+    ["GPL-2.0-or-later", false], // valid SPDX, not allow-listed
+    ["GPL-2.0+", false], // valid SPDX, not allow-listed
+    ["LicenseRef-foo", false], // valid SPDX, no extracted texts
+    ["DocumentRef-spdx-tool-1.2:LicenseRef-MIT-Style-2", false], // likewise
+    ["", false],
+    ["AND", false],
+    ["OR", false],
+    ["WITH", false],
+    ["MIT AND AND", false],
+    ["MIT OR WITH", false],
+    ["MIT WITH WITH", false],
+    ["MIT WITH OR", false],
+    ["LicenseRef-", false],
+    ["LicenseRef-foo+", false],
+    ["Apache-2.0 WITH LLVM-exception+", false],
+    ["(MIT) WITH LLVM-exception", false],
+    ["MIT or Apache-2.0", false], // operators are upper case
+    ["MIT/Apache-2.0", false],
+    ["see the listed files", false],
+    ["Foo-1.0", false],
+    ["NOASSERTION", false],
+    ["NONE", false],
+    ["MIT WITH Apache-2.0", false],
+    ["LLVM-exception", false],
+    ["()", false],
+    ["(MIT", false],
+    ["MIT)", false],
+  ];
+  const wrong = cases.filter(([expression, accepted]) =>
+    (spdxExpressionProblem(expression) === undefined) !== accepted
+  );
+  if (wrong.length > 0) {
+    throw new Error(
+      `SPDX gate misjudges: ${
+        wrong.map(([expression, accepted]) =>
+          `${JSON.stringify(expression)} (expected ${
+            accepted ? "accepted" : "refused"
+          })`
+        ).join(", ")
+      }`,
+    );
+  }
+}
+checkSpdxRules();
+
+/**
+ * The license gate: every component of every flavor records an SPDX
+ * expression that the gate accepts, so each SBOM declares every license.
+ * scripts/package-assets.ts only warns, so a dependency update never stops
+ * the build; this check fails every package gate, and the release workflow
+ * runs it before any upload.
+ */
+async function checkComponentLicenses() {
+  const componentsFile = JSON.parse(
+    await Deno.readTextFile("dist/licenses/components.json"),
+  ) as {
+    artifacts: {
+      components: { name: string; license: string; note?: string }[];
+    }[];
+  };
+  const problems = new Map<string, string>();
+  for (const artifact of componentsFile.artifacts) {
+    for (const component of artifact.components) {
+      const problem = spdxExpressionProblem(component.license);
+      if (problem !== undefined) {
+        problems.set(
+          component.name,
+          `${component.name}: license ${
+            JSON.stringify(component.license)
+          }: ${problem}${component.note ? ` (${component.note})` : ""}`,
+        );
+      }
+    }
+  }
+  if (problems.size > 0) {
+    throw new Error(
+      `components without an accepted SPDX license expression; record one in knownLicenses in scripts/package-assets.ts, or allow-list a new identifier in scripts/release.ts after checking it:\n${
+        [...problems.values()].join("\n")
+      }`,
+    );
+  }
+}
+await checkComponentLicenses();
 
 // Candidates: the full SDK twice (with a stale file in between) and the tools
 // archive twice, comparing bytes.
@@ -812,6 +957,7 @@ try {
         toolsArchiveSha256: toolsHash,
         checks: [
           "release.json names one release-candidate version per flavor; each flavor's build refuses only its own tags (the full SDK's also the Go module tag) at another commit",
+          "every component license is an SPDX expression of allow-listed identifiers; each SBOM declares every license, names the archive at its flavor's version, and the project's own code at the producer commit",
           "candidates prepared under build/test, not dist/releases",
           "Apache-2.0 package and Go module licenses, THIRD_PARTY_NOTICES.md, per-flavor license texts",
           "manifest integrity, manifest asset, and SBOM listed in SHA256SUMS; sha256sum -c on the download directory",

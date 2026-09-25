@@ -138,9 +138,30 @@ const manifestHash = await sha256(
 const manifestAssetHash = await sha256(
   await Deno.readFile(`${directory}/${stem}.manifest.json`),
 );
-const sbomHash = await sha256(
-  await Deno.readFile(`${directory}/${stem}.spdx.json`),
+const sbomBytes = await Deno.readFile(`${directory}/${stem}.spdx.json`);
+const sbomHash = await sha256(sbomBytes);
+// The SBOM names the archive at the flavor's version and the project's own
+// code at the producer commit, and declares every component's license.
+const sbomPackages = JSON.parse(new TextDecoder().decode(sbomBytes))
+  .packages as {
+    name: string;
+    SPDXID: string;
+    versionInfo?: string;
+    licenseDeclared: string;
+  }[];
+const sbomComponents = sbomPackages.filter((pkg) =>
+  pkg.SPDXID.startsWith("SPDXRef-Component-")
 );
+if (
+  sbomPackages[0].versionInfo !== manifest.version ||
+  sbomComponents.find((pkg) => pkg.name === "capnpc-wasm")?.versionInfo !==
+    manifest.source.commit ||
+  sbomComponents.some((pkg) => pkg.licenseDeclared === "NOASSERTION")
+) {
+  throw new Error(
+    "compiler-host SBOM misnames the archive or the project's code, or leaves a license undeclared",
+  );
+}
 if (
   manifestAssetHash !== manifestHash ||
   await Deno.readTextFile(`${directory}/SHA256SUMS`) !==
@@ -353,6 +374,7 @@ try {
           "reproducible archive and stale staging cleanup",
           "complete extraction inventory and identity",
           "manifest asset and SBOM listed in SHA256SUMS; verifier --sums, --expect-manifest-sha256, and --expect-commit",
+          "SBOM names the archive at its version and the project's own code at the producer commit, and declares every license",
           "flavor-specific license texts and THIRD_PARTY_NOTICES.md",
           "packaged documents link only inside the package or to the repository at the producer commit",
           "packaged README TypeScript example ran with --check",

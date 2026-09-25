@@ -460,17 +460,20 @@ tag or publish the npm package.
 verifies `SHA256SUMS` with `sha256sum -c` on the candidate directory and with
 `verify-release.ts --sums`, `--expect-manifest-sha256`, `--expect-commit`, and
 `--require-clean`; checks that publish mode refuses the candidate flags and an
-untagged `HEAD`; extracts into a fresh directory under `build/test/`, checks the
-packaged links, notices, and every non-test Go source, runs the README examples,
-then runs an actual Deno consumer through the installed package's npm-style
-exports with strict TypeScript checking, and runs a separate Go module against
-the included SDK. Both compile a schema and generate C++, Rust, Go, and Zig from
-the packaged assets. The Go consumer resolves wazero from its checksum-pinned
-public module version, with no replacement for that dependency. Negative
-controls modify a manifest digest and add a stale file; verification must reject
-both. Both extracted launchers execute the real compiler and C++/Zig generators,
-preserve binary requests and canonicalization bytes, accept paths with spaces,
-and reject malformed inputs, invalid roots, and missing or mismatched runtimes.
+untagged `HEAD`; checks that every component license is an SPDX expression of
+the allow-listed identifiers in `scripts/release.ts` and that each SBOM declares
+it (`build:sdk` only warns, so publication is gated here); extracts into a fresh
+directory under `build/test/`, checks the packaged links, notices, and every
+non-test Go source, runs the README examples, then runs an actual Deno consumer
+through the installed package's npm-style exports with strict TypeScript
+checking, and runs a separate Go module against the included SDK. Both compile a
+schema and generate C++, Rust, Go, and Zig from the packaged assets. The Go
+consumer resolves wazero from its checksum-pinned public module version, with no
+replacement for that dependency. Negative controls modify a manifest digest and
+add a stale file; verification must reject both. Both extracted launchers
+execute the real compiler and C++/Zig generators, preserve binary requests and
+canonicalization bytes, accept paths with spaces, and reject malformed inputs,
+invalid roots, and missing or mismatched runtimes.
 
 Hosted browser/platform checks, nightly fuzz/soak evidence, and application
 validation remain release gates. Successful local packaging alone does not

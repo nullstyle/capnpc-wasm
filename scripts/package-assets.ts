@@ -10,10 +10,14 @@
 // component without a license text fails the staging. Every flavor gets a
 // THIRD_PARTY_NOTICES-<flavor>.md listing its artifacts' components and the
 // files that hold their texts, and components.json records the same map for
-// release packaging. Every component's license is an SPDX expression that the
-// release SBOM declares as is; prose it cannot carry goes in a separate note.
+// release packaging. Each component records its license as an SPDX
+// expression (NOASSERTION when none is recorded) and prose the expression
+// cannot carry in a separate note. A license that spdxExpressionProblem in
+// scripts/release.ts rejects only prints a warning here, so a dependency
+// update never stops the build; `test:package`, which gates every release,
+// fails on it.
 
-import { isSpdxExpression } from "./release.ts";
+import { spdxExpressionProblem } from "./release.ts";
 
 const destination = Deno.args[0] ?? "dist";
 if (
@@ -269,10 +273,12 @@ const wasiLibc: Component = {
   origin: `WebAssembly/wasi-libc at ${
     vendored.sources["wasi-libc"].commit.slice(0, 12)
   }, as recorded by ref/wasi-sdk`,
-  // wasi-libc's LICENSE declares this expression for the library as a whole.
-  license: "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+  // wasi-libc's LICENSE multi-licenses the library as a whole and lists the
+  // portions derived from third-party works under their own licenses.
+  license:
+    "(Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) AND MIT AND BSD-2-Clause AND CC0-1.0 AND BSD-3-Clause",
   note:
-    "Portions keep their own licenses: musl MIT, cloudlibc BSD-2-Clause, dlmalloc CC0-1.0, and musl-fts BSD-3-Clause.",
+    "The first term covers wasi-libc's own code; the others are its portions: musl MIT, cloudlibc BSD-2-Clause, dlmalloc CC0-1.0, and musl-fts BSD-3-Clause.",
   files: await vendoredFiles("wasi-libc"),
 };
 const llvmRuntimes: Component = {
@@ -289,7 +295,7 @@ const llvmRuntimes: Component = {
  * SPDX license expressions for the Go modules the build graph pulls in (by
  * module path; Go records none) and for crates whose Cargo.toml license field
  * is missing or not an SPDX expression (by crate name). Read a new module's
- * license files before adding it.
+ * license files before adding it; test:package fails until it is here.
  */
 const knownLicenses: Record<string, string> = {
   "github.com/colega/zeropool": "Apache-2.0",
@@ -298,16 +304,18 @@ const knownLicenses: Record<string, string> = {
   "golang.org/x/sys": "BSD-3-Clause",
 };
 /**
- * The SPDX expression recorded for a module or crate; a missing or invalid
- * one fails the staging, so every component's license is declarable as is.
+ * A module's or crate's license: its expression, or NOASSERTION with a note
+ * saying how to record one.
  */
-function spdxLicense(license: string | undefined, subject: string): string {
-  if (license === undefined || !isSpdxExpression(license)) {
-    throw new Error(
-      `${subject} has no SPDX license expression; read its license files and add one to knownLicenses in scripts/package-assets.ts`,
-    );
-  }
-  return license;
+function recordedLicense(
+  license: string | null | undefined,
+  subject: string,
+): { license: string; note?: string } {
+  return license ? { license } : {
+    license: "NOASSERTION",
+    note:
+      `No SPDX expression is recorded for ${subject}; read its license files and add one to knownLicenses in scripts/package-assets.ts.`,
+  };
 }
 const licenseFileName = /^(license|licence|copying|notice)(\.|-|$)/i;
 
@@ -356,7 +364,7 @@ async function goModules(
     components.push({
       name: path,
       origin: `Go module ${path}@${version}`,
-      license: spdxLicense(knownLicenses[path], `Go module ${path}@${version}`),
+      ...recordedLicense(knownLicenses[path], `Go module ${path}`),
       // One version per module path in a build graph, so the directory omits
       // the version (a pseudo-version would exceed the archive path limit);
       // the notices and components.json record it.
@@ -443,11 +451,11 @@ async function rustCrates(manifest: string): Promise<Component[]> {
     components.push({
       name: pkg.name,
       origin: `crate ${pkg.name} ${pkg.version} (${pkg.source ?? "path"})`,
-      license: spdxLicense(
-        knownLicenses[pkg.name] ?? pkg.license ?? undefined,
-        `crate ${pkg.name} ${pkg.version} (license field ${
-          JSON.stringify(pkg.license)
-        })`,
+      // Cargo.toml's license field is meant to be an SPDX expression; it is
+      // recorded as declared, and the gate in test:package checks it.
+      ...recordedLicense(
+        knownLicenses[pkg.name] ?? pkg.license,
+        `crate ${pkg.name}`,
       ),
       files: files.map((file) => ({
         source: `${dir}/${file}`,
@@ -551,13 +559,16 @@ const flavors: Record<string, { title: string; artifacts: Artifact[] }> = {
 
 // Staging ---------------------------------------------------------------------
 
+const warned = new Set<string>();
 for (const artifact of artifacts) {
   for (const component of artifact.components) {
-    if (!isSpdxExpression(component.license)) {
-      throw new Error(
-        `${component.name}: license ${
+    const problem = spdxExpressionProblem(component.license);
+    if (problem !== undefined && !warned.has(component.name)) {
+      warned.add(component.name);
+      console.warn(
+        `warning: ${component.name}: license ${
           JSON.stringify(component.license)
-        } is not an SPDX expression; move prose into its note`,
+        } fails the release gate (${problem}); test:package will fail`,
       );
     }
   }
