@@ -6,7 +6,12 @@ import {
   stageStandardIncludes,
 } from "../lib/oracle.ts";
 import { root, wasmBin, zigCacheDir } from "../lib/paths.ts";
-import { decodeText, mustSucceed, run } from "../lib/process.ts";
+import {
+  buildTimeoutMs,
+  decodeText,
+  mustSucceed,
+  run,
+} from "../lib/process.ts";
 import { testSuite } from "../lib/workdir.ts";
 
 const suite = testSuite("reflection-");
@@ -50,7 +55,7 @@ suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic inter
       "-o",
       oracle,
     ]),
-    { label: "C++ reflection oracle build" },
+    { label: "C++ reflection oracle build", timeoutMs: buildTimeoutMs },
   );
   for (const target of ["native", "wasi"]) {
     await t.step(
@@ -74,7 +79,10 @@ suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic inter
           `-Mroot=${root}/tests/reflection/registry_test.zig`,
           `-Mcapnpc-zig=${runtime}`,
           `-femit-bin=${executable}`,
-        ], { label: `${target} registry tests build` });
+        ], {
+          label: `${target} registry tests build`,
+          timeoutMs: buildTimeoutMs,
+        });
         if (target === "wasi") {
           await mustSucceed(["wasmtime", "run", executable], {
             cwd: work,

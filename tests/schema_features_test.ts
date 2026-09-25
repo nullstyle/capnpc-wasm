@@ -8,7 +8,7 @@ import { readTree, writeTree } from "./lib/fs.ts";
 import { guestCommand, wasmHosts } from "./lib/hosts.ts";
 import { canonicalRequest, clangxx, nativeCompile } from "./lib/oracle.ts";
 import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
-import { mustSucceed } from "./lib/process.ts";
+import { buildTimeoutMs, mustSucceed } from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
 
 const suite = testSuite("features-");
@@ -149,7 +149,7 @@ for (const scenario of manifest.scenarios) {
           "-o",
           executable,
         ]),
-        { cwd: work, label: "C++ consumer build" },
+        { cwd: work, label: "C++ consumer build", timeoutMs: buildTimeoutMs },
       );
       await mustSucceed([executable], { cwd: work, label: "C++ consumer" });
     });
@@ -185,7 +185,7 @@ for (const scenario of manifest.scenarios) {
                 : `${output}/root.zig`
             }`,
             `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
-          ], { label: "Zig consumer" });
+          ], { label: "Zig consumer", timeoutMs: buildTimeoutMs });
         },
       );
     }

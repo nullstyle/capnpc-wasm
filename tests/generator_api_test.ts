@@ -1,7 +1,7 @@
 import { assertBytesEqual } from "./lib/assert.ts";
 import { nativeCompile } from "./lib/oracle.ts";
 import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
-import { mustSucceed } from "./lib/process.ts";
+import { buildTimeoutMs, mustSucceed } from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
 
 const suite = testSuite("generator-api-");
@@ -75,7 +75,10 @@ suite.test("Zig concrete generic APIs: native/WASI generation and executable vie
               `-Mroot=${directory}/${fixture.consumer}`,
               `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
               `-femit-bin=${executable}`,
-            ], { label: `${target} consumer build` });
+            ], {
+              label: `${target} consumer build`,
+              timeoutMs: buildTimeoutMs,
+            });
             if (target === "wasi") {
               await mustSucceed(["wasmtime", "run", executable], {
                 label: "wasi consumer",

@@ -8,7 +8,7 @@ import {
   zigCacheDir,
   zigRuntime,
 } from "./lib/paths.ts";
-import { mustSucceed } from "./lib/process.ts";
+import { buildTimeoutMs, mustSucceed } from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
 
 const suite = testSuite("rpc-codegen-");
@@ -116,7 +116,10 @@ suite.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming",
               "capnpc-zig",
               `-Mcapnpc-zig=${zigRuntime}/lib.zig`,
               `-femit-bin=${executable}`,
-            ], { label: `${target} consumer build` });
+            ], {
+              label: `${target} consumer build`,
+              timeoutMs: buildTimeoutMs,
+            });
             if (target === "wasi") {
               await mustSucceed(["wasmtime", "run", executable], {
                 label: "wasi consumer",

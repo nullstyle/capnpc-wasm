@@ -1,6 +1,6 @@
 import { assert, assertBytesEqual } from "./lib/assert.ts";
 import { nativeBin, root, zigCacheDir } from "./lib/paths.ts";
-import { decodeText, mustSucceed, run } from "./lib/process.ts";
+import { buildTimeoutMs, decodeText, mustSucceed, run } from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
 
 const suite = testSuite("wire-conformance-");
@@ -332,7 +332,7 @@ suite.test("Zig wire conformance against reference C++", async (t) => {
           `-Mcapnpc-zig=${root}/${variant.source}/src/lib_core.zig`,
           `-Mprobe-options=${options}`,
           `-femit-bin=${executable}`,
-        ], { label: `${variant.name} probe build` });
+        ], { label: `${variant.name} probe build`, timeoutMs: buildTimeoutMs });
         await mustSucceed(
           variant.wasm
             ? ["wasmtime", "run", `--dir=${directory}::.`, executable]

@@ -119,12 +119,22 @@ export interface RunOptions {
    * stdout and stderr are no longer awaited, so a grandchild that inherited
    * the pipes (a `cargo test` or `zig test` binary, say) cannot hold the call
    * open; the output captured until then is returned with `timedOut` set.
-   * Defaults to 60 s.
+   * Defaults to 60 s; a step that compiles code uses buildTimeoutMs.
    */
   timeoutMs?: number;
   /** Grace between SIGTERM and SIGKILL after a timeout; defaults to 5 s. */
   killAfterMs?: number;
 }
+
+/**
+ * The timeout for a step that builds code rather than exercising behavior (a
+ * generated-code consumer, a probe, an oracle): cold compiler caches on a
+ * loaded runner outlast run()'s 60-second default (nightly 36141746707: the
+ * first cold Zig consumer build on macos-15-intel was killed at 60 s while
+ * the suites ran in parallel; ledger row 139), and a hung compiler still
+ * fails ten minutes in.
+ */
+export const buildTimeoutMs = 10 * 60_000;
 
 /** A command's output; `timedOut` marks a run that hit `timeoutMs`. */
 export interface RunResult extends Deno.CommandOutput {
