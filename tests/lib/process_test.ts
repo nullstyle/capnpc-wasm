@@ -2,7 +2,7 @@
 // (so children get the minimal environment) and --allow-read=tests/lib.
 import { assert, assertBytesEqual } from "./assert.ts";
 import { root } from "./paths.ts";
-import { describeExit, run } from "./process.ts";
+import { describeExit, run, type RunResult } from "./process.ts";
 
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
@@ -10,15 +10,36 @@ const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
  * A child that ignores SIGTERM and spins until SIGKILL, or until this test
  * process is gone: a runner killed before the escalation reaches the child
  * must not leave it spinning (ledger row 119). `kill -0` is a shell builtin,
- * so the loop starts no process, and the child never reads stdin.
+ * so the loop starts no process, and the child never reads stdin. It prints
+ * `armed` once SIGTERM is ignored: on a loaded host a SIGTERM can reach sh
+ * before the trap and end it (ledger row 130), so the tests check the marker
+ * before the signal.
  */
 const ignoresTerm = [
   "sh",
   "-c",
-  'trap "" TERM; while kill -0 "$1" 2>/dev/null; do :; done',
+  'trap "" TERM; echo armed; while kill -0 "$1" 2>/dev/null; do :; done',
   "sh",
   String(Deno.pid),
 ];
+
+/**
+ * The timeout leaves a loaded host two seconds to start sh and install the
+ * trap before SIGTERM; SIGKILL follows 200 ms after it.
+ */
+const escalation = { timeoutMs: 2_000, killAfterMs: 200 };
+
+/** The marker shows the child ignored SIGTERM, so only SIGKILL can end it. */
+function assertArmed(result: RunResult) {
+  assert(
+    text(result.stdout) === "armed\n",
+    `the child was not armed when the timeout fired (stdout ${
+      JSON.stringify(text(result.stdout))
+    }, ${
+      describeExit(result)
+    }): SIGTERM reached sh before trap "" TERM, so this run cannot show the escalation`,
+  );
+}
 
 Deno.test("run captures stdout, stderr and the exit status", async () => {
   const result = await run(["sh", "-c", "printf out; printf err >&2; exit 3"]);
@@ -64,7 +85,8 @@ Deno.test("run stops waiting for pipes a grandchild holds after the timeout", as
 });
 
 Deno.test("run escalates to SIGKILL when the child ignores SIGTERM", async () => {
-  const result = await run(ignoresTerm, { timeoutMs: 200, killAfterMs: 200 });
+  const result = await run(ignoresTerm, escalation);
+  assertArmed(result);
   assert(
     result.timedOut && result.signal === "SIGKILL",
     `unexpected result ${describeExit(result)}`,
@@ -94,19 +116,21 @@ Deno.test("run escalates to SIGKILL while a stalled stdin write is pending", asy
   // A megabyte fills the pipe: the write blocks until the child is gone, and
   // the child ignores SIGTERM and never reads.
   const result = await settlesWithin(
-    run(ignoresTerm, {
-      stdin: new Uint8Array(1 << 20),
-      timeoutMs: 200,
-      killAfterMs: 200,
-    }),
+    run(ignoresTerm, { stdin: new Uint8Array(1 << 20), ...escalation }),
     10_000,
   );
   const elapsed = performance.now() - started;
+  assertArmed(result);
   assert(
     result.timedOut && result.signal === "SIGKILL",
     `unexpected result ${describeExit(result)}`,
   );
-  assert(elapsed < 3_000, `run returned only after ${Math.round(elapsed)} ms`);
+  // The pending write must not hold run() past the kill.
+  const bound = escalation.timeoutMs + escalation.killAfterMs + 2_500;
+  assert(
+    elapsed < bound,
+    `run returned only after ${Math.round(elapsed)} ms (bound ${bound} ms)`,
+  );
 });
 
 Deno.test("run leaves no kill timer behind when the timeout fires after the child exited", async () => {
