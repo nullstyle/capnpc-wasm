@@ -174,7 +174,7 @@ jobs:
           mise exec -- deno run --config tests/browser/deno.json --frozen
           --allow-read --allow-env --allow-sys --allow-run --allow-net
           tests/browser/playwright.ts install-deps chromium firefox webkit
-      - name: Verify the browser bootstrap permission boundary
+      - name: Verify the browser bootstrap boundary, step deadlines, and termination verdicts
         run: mise run test:browser-bootstrap
       # Every archive is verified against the digest recorded in install.ts.
       - name: Install all pinned browser engines
