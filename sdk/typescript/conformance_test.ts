@@ -4,8 +4,29 @@
 // launcher, the browsers, and the Studio adapter run the same corpus against
 // the same expectations.
 import { defaultLimits } from "./mod.ts";
+import type {
+  JobOptions as SdkJobOptions,
+  WorkerCompiler as SdkWorkerCompiler,
+} from "./worker-client.ts";
+import type {
+  JobOptions as HarnessJobOptions,
+  WorkerCompiler as HarnessWorkerCompiler,
+} from "../../tests/browser/sdk.ts";
 import { assert, workerTest } from "./testdata/support.ts";
 import { runTsSurface } from "../../tests/conformance/ts-surface.ts";
+
+// The browser driver declares the worker client's interface itself (its strict
+// check cannot load worker-client.ts); a mismatch fails this file's type
+// check, so the driver cannot drift from the SDK (ARCH-13).
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+const harnessMatchesSdk: [
+  Same<HarnessWorkerCompiler, SdkWorkerCompiler>,
+  Same<HarnessJobOptions, SdkJobOptions>,
+] = [true, true];
+
+Deno.test("the browser driver's worker client types are the SDK's", () => {
+  assert(harnessMatchesSdk.every(Boolean), "type assertion");
+});
 
 Deno.test("SDK defaultLimits match the contract fixture", async () => {
   const contract = JSON.parse(

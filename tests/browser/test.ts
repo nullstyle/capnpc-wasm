@@ -1,6 +1,18 @@
 import { chromium, firefox, webkit } from "./playwright.ts";
+import type { Browser, Page } from "playwright";
 import { selectedEngines } from "./engines.ts";
 import { hostileGuests } from "../../sdk/typescript/testdata/hostile_guests.ts";
+import type {
+  CompileError,
+  Compiler,
+  CompileRequest,
+  CompileResult,
+  CompilerOptions,
+  Language,
+  Modules,
+  WorkerCompiler,
+} from "./sdk.ts";
+import { envMilliseconds, stepClock } from "./deadline.ts";
 
 // This driver deliberately prepares its native oracle before browser execution,
 // then revokes its own process/network permissions for the offline SDK tests.
@@ -13,51 +25,20 @@ if (Deno.args.length < 1 || Deno.args.length > 2 || Deno.args[0] === "all") {
 const engine = selectedEngines(Deno.args.slice(0, 1))[0];
 const browserType = { chromium, firefox, webkit }[engine];
 const languages = ["cpp", "rust", "go", "zig"] as const;
-type Language = typeof languages[number];
 type FileMap = Record<string, string | Uint8Array>;
-type Input = {
-  files: FileMap;
-  includeFiles: FileMap;
-  entrypoints: string[];
-  generators: Language[];
-};
-type GenerationResult = {
-  outputs: Record<Language, Record<string, Uint8Array>>;
-  diagnostics: { stage: string; stderr: string }[];
-};
-type Result = GenerationResult & { request: Uint8Array };
-type GenerationInput = { request: Uint8Array; generators: Language[] };
-type Compiler = {
-  compile(input: Input): Promise<Result>;
-  generate(input: GenerationInput): Promise<GenerationResult>;
-};
-type WorkerCompiler = {
-  compile(
-    input: Input,
-    options?: { signal?: AbortSignal; timeoutMs?: number },
-  ): Promise<Result>;
-  generate(input: GenerationInput): Promise<GenerationResult>;
-  dispose(): void;
-};
-type Modules = {
-  compiler: Uint8Array;
-  generators: Partial<Record<Language, Uint8Array>>;
-};
-type Options = {
-  limits?: {
-    memoryPages?: number;
-    workspaceBytes?: number;
-    outputBytes?: number;
-    stdoutBytes?: number;
-  };
-};
+/** A complete compile request: every scenario names its includes and generators. */
+type Input = CompileRequest & { includeFiles: FileMap; generators: Language[] };
+type Result = CompileResult;
 type SDK = {
-  CompileError: new (...args: never[]) => Error;
-  createCompiler(modules: Modules, options?: Options): Promise<Compiler>;
+  CompileError: new (...args: never[]) => CompileError;
+  createCompiler(
+    modules: Modules,
+    options?: CompilerOptions,
+  ): Promise<Compiler>;
   createWorkerCompiler(
     url: string,
     modules: Modules,
-    options?: Options,
+    options?: CompilerOptions,
   ): Promise<WorkerCompiler>;
 };
 type BrowserState = {
@@ -91,21 +72,38 @@ function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-async function within<T>(pending: Promise<T>, label: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      pending,
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`${label} did not finish within 60 seconds`)),
-          60_000,
-        );
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
+// Every browser step runs under a labelled deadline (TST-07), 60 seconds by
+// default (CAPNP_BROWSER_DEADLINE_MS), so a stalled engine fails with the
+// step's label instead of holding the job until the CI timeout.
+// CAPNP_BROWSER_STALL=<text> makes the first step whose label contains the
+// text hang, which demonstrates the deadline. The running step's label is kept
+// next to the receipt for run.ts, which reports it if it has to stop a driver.
+const receiptPath = Deno.args[1];
+const stepPath = receiptPath ? `${receiptPath}.step` : undefined;
+const clock = stepClock({
+  defaultMs: envMilliseconds("CAPNP_BROWSER_DEADLINE_MS", 60_000),
+  stall: Deno.env.get("CAPNP_BROWSER_STALL") || undefined,
+  onStep(label) {
+    if (!stepPath) return;
+    try {
+      Deno.writeTextFileSync(stepPath, `${label}\n`);
+    } catch {
+      // The step file is a diagnostic; the run does not depend on it.
+    }
+  },
+});
+
+/** page.evaluate under a labelled deadline. */
+function evaluateOn(page: Page) {
+  return <T, A>(
+    fn: (argument: A) => T | Promise<T>,
+    argument: A,
+    label: string,
+    ms?: number,
+  ): Promise<T> =>
+    // Playwright cannot type a page function over a generic argument.
+    // deno-lint-ignore no-explicit-any
+    clock.step(page.evaluate(fn as any, argument) as Promise<T>, label, ms);
 }
 
 function equalOutputs(
@@ -226,21 +224,26 @@ async function writeFiles(directory: string, entries: FileMap): Promise<void> {
   }
 }
 
+/** Assemble tests/browser/<name>.wat with the pinned wasm-tools. */
+async function assemble(work: string, name: string): Promise<Uint8Array> {
+  await native([
+    "wasm-tools",
+    "parse",
+    `${root}/tests/browser/${name}.wat`,
+    "-o",
+    `${work}/${name}.wasm`,
+  ], root);
+  return await Deno.readFile(`${work}/${name}.wasm`);
+}
+
 async function prepare() {
   await Deno.mkdir(`${root}/build/test`, { recursive: true });
   const work = await Deno.makeTempDir({
     dir: `${root}/build/test`,
     prefix: `browser-${engine}-`,
   });
-  for (const name of ["memory-limit", "stream-limit"]) {
-    await native([
-      "wasm-tools",
-      "parse",
-      `${root}/tests/browser/${name}.wat`,
-      "-o",
-      `${work}/${name}.wasm`,
-    ], root);
-  }
+  const memoryGuest = await assemble(work, "memory-limit");
+  const streamGuest = await assemble(work, "stream-limit");
   // The SDK tests embed these guests because they cannot spawn wasm-tools.
   // Assemble every source here and refuse to run if either copy drifted.
   const hostile: Record<string, Uint8Array> = {};
@@ -423,8 +426,8 @@ async function prepare() {
     scenarios,
     invalid,
     invalidNative,
-    memoryGuest: await Deno.readFile(`${work}/memory-limit.wasm`),
-    streamGuest: await Deno.readFile(`${work}/stream-limit.wasm`),
+    memoryGuest,
+    streamGuest,
     hostileGuests: hostile,
   };
 }
@@ -474,53 +477,72 @@ const server = Deno.serve(
       : new Response("Not found", { status: 404 });
   },
 );
-let browser: Awaited<ReturnType<typeof browserType.launch>> | undefined;
+const origin = `http://127.0.0.1:${server.addr.port}`;
+let browser: Browser | undefined;
+// run.ts stops a driver that overruns its engine deadline with SIGTERM: name
+// the step it was on and close the browser before exiting.
+Deno.addSignalListener("SIGTERM", () => {
+  console.error(
+    `FAIL ${engine}: stopped from outside during: ${clock.current}`,
+  );
+  const closing = browser ? browser.close() : Promise.resolve();
+  clock.step(closing, `${engine} close after SIGTERM`, 10_000)
+    .catch(() => {})
+    .finally(() => Deno.exit(1));
+});
+const errors: string[] = [];
 try {
-  browser = await browserType.launch();
+  browser = await clock.step(browserType.launch(), `${engine} launch`);
   console.log(`Testing ${engine} ${browser.version()}`);
   const context = await browser.newContext({ serviceWorkers: "block" });
   const page = await context.newPage();
-  const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.setDefaultTimeout(60_000);
-  await page.goto(`http://127.0.0.1:${server.addr.port}/`);
-  await page.evaluate(async ({ memoryGuest, streamGuest }) => {
-    const sdk = await import(new URL("/sdk/mod.js", location.href).href) as SDK;
-    const read = async (name: string) => {
-      const response = await fetch(`/wasm/${name}.wasm`);
-      if (!response.ok) throw new Error(`failed to load ${name}`);
-      return new Uint8Array(await response.arrayBuffer());
-    };
-    const modules: Modules = {
-      compiler: await read("capnp"),
-      generators: {
-        cpp: await read("capnpc-c++"),
-        rust: await read("capnpc-rust"),
-        go: await read("capnpc-go"),
-        zig: await read("capnpc-zig"),
-      },
-    };
-    const workerSource = await (await fetch("/sdk/worker.js")).text();
-    const workerURL = URL.createObjectURL(
-      new Blob([workerSource], {
-        type: "text/javascript",
-      }),
-    );
-    (globalThis as BrowserGlobal).capnpTest = {
-      direct: await sdk.createCompiler(modules),
-      worker: await sdk.createWorkerCompiler(workerURL, modules),
-      workerURL,
-      sdk,
-      modules,
-      memoryGuest,
-      streamGuest,
-    };
-    for (const name of ["Deno", "process", "require"]) {
-      if (name in globalThis) {
-        throw new Error(`browser exposes native API ${name}`);
+  const evaluate = evaluateOn(page);
+  await clock.step(page.goto(`${origin}/`), `${engine} load page`);
+  await evaluate(
+    async ({ memoryGuest, streamGuest }) => {
+      const sdk = await import(
+        new URL("/sdk/mod.js", location.href).href
+      ) as SDK;
+      const read = async (name: string) => {
+        const response = await fetch(`/wasm/${name}.wasm`);
+        if (!response.ok) throw new Error(`failed to load ${name}`);
+        return new Uint8Array(await response.arrayBuffer());
+      };
+      const modules: Modules = {
+        compiler: await read("capnp"),
+        generators: {
+          cpp: await read("capnpc-c++"),
+          rust: await read("capnpc-rust"),
+          go: await read("capnpc-go"),
+          zig: await read("capnpc-zig"),
+        },
+      };
+      const workerSource = await (await fetch("/sdk/worker.js")).text();
+      const workerURL = URL.createObjectURL(
+        new Blob([workerSource], {
+          type: "text/javascript",
+        }),
+      );
+      (globalThis as BrowserGlobal).capnpTest = {
+        direct: await sdk.createCompiler(modules),
+        worker: await sdk.createWorkerCompiler(workerURL, modules),
+        workerURL,
+        sdk,
+        modules,
+        memoryGuest,
+        streamGuest,
+      };
+      for (const name of ["Deno", "process", "require"]) {
+        if (name in globalThis) {
+          throw new Error(`browser exposes native API ${name}`);
+        }
       }
-    }
-  }, { memoryGuest: data.memoryGuest, streamGuest: data.streamGuest });
+    },
+    { memoryGuest: data.memoryGuest, streamGuest: data.streamGuest },
+    `${engine} load SDK`,
+  );
 
   let networkRequests = 0;
   context.on("request", (request) => {
@@ -554,24 +576,28 @@ try {
 
   for (const host of ["direct", "worker"] as const) {
     for (const scenario of data.scenarios) {
-      const result = await page.evaluate(async ({ host, input }) => {
-        const result = await (globalThis as BrowserGlobal).capnpTest[host]
-          .compile(input);
-        return {
-          request: Array.from(result.request),
-          outputs: Object.fromEntries(
-            Object.entries(result.outputs).map(([language, files]) => [
-              language,
-              Object.fromEntries(
-                Object.entries(files).map((
-                  [path, bytes],
-                ) => [path, Array.from(bytes)]),
-              ),
-            ]),
-          ),
-          diagnostics: result.diagnostics,
-        };
-      }, { host, input: scenario.input });
+      const result = await evaluate(
+        async ({ host, input }) => {
+          const result = await (globalThis as BrowserGlobal).capnpTest[host]
+            .compile(input);
+          return {
+            request: Array.from(result.request),
+            outputs: Object.fromEntries(
+              Object.entries(result.outputs).map(([language, files]) => [
+                language,
+                Object.fromEntries(
+                  Object.entries(files!).map((
+                    [path, bytes],
+                  ) => [path, Array.from(bytes)]),
+                ),
+              ]),
+            ),
+            diagnostics: result.diagnostics,
+          };
+        },
+        { host, input: scenario.input },
+        `${engine} ${host} compile ${scenario.name}`,
+      );
       assert(result.request.length > 0, `${host} produced no request`);
       // The isolated driver never regains process permission. Its parent audits
       // these bytes with the independent native canonicalizer after it exits.
@@ -590,7 +616,7 @@ try {
         }`,
       );
 
-      const replayed = await page.evaluate(
+      const replayed = await evaluate(
         async ({ host, request, generators }) => {
           const result = await (globalThis as BrowserGlobal).capnpTest[host]
             .generate({ request, generators });
@@ -598,7 +624,7 @@ try {
             Object.entries(result.outputs).map(([language, files]) => [
               language,
               Object.fromEntries(
-                Object.entries(files).map((
+                Object.entries(files!).map((
                   [path, bytes],
                 ) => [path, Array.from(bytes)]),
               ),
@@ -610,6 +636,7 @@ try {
           request: scenario.request,
           generators: scenario.input.generators,
         },
+        `${engine} ${host} replay ${scenario.name}`,
       );
       equalOutputs(
         replayed,
@@ -624,33 +651,37 @@ try {
     }
 
     for (const [name, source] of Object.entries(data.invalid)) {
-      const failure = await page.evaluate(async ({ host, name, source }) => {
-        try {
-          await (globalThis as BrowserGlobal).capnpTest[host].compile({
-            files: { [name]: source },
-            includeFiles: {},
-            entrypoints: [name],
-            generators: ["cpp"],
-          });
-          return null;
-        } catch (error) {
-          const failure = error as Error & {
-            stage?: string;
-            exitCode?: number;
-            diagnostics?: { stage: string; stderr: string }[];
-          };
-          return {
-            message: failure.message,
-            stage: failure.stage,
-            exitCode: failure.exitCode,
-            isCompileError: error instanceof
-              (globalThis as BrowserGlobal).capnpTest.sdk.CompileError,
-            causeUndefined: failure.cause === undefined,
-            hasOutputs: "outputs" in (error as object),
-            diagnostics: failure.diagnostics,
-          };
-        }
-      }, { host, name, source });
+      const failure = await evaluate(
+        async ({ host, name, source }) => {
+          try {
+            await (globalThis as BrowserGlobal).capnpTest[host].compile({
+              files: { [name]: source },
+              includeFiles: {},
+              entrypoints: [name],
+              generators: ["cpp"],
+            });
+            return null;
+          } catch (error) {
+            const failure = error as Error & {
+              stage?: string;
+              exitCode?: number;
+              diagnostics?: { stage: string; stderr: string }[];
+            };
+            return {
+              message: failure.message,
+              stage: failure.stage,
+              exitCode: failure.exitCode,
+              isCompileError: error instanceof
+                (globalThis as BrowserGlobal).capnpTest.sdk.CompileError,
+              causeUndefined: failure.cause === undefined,
+              hasOutputs: "outputs" in (error as object),
+              diagnostics: failure.diagnostics,
+            };
+          }
+        },
+        { host, name, source },
+        `${engine} ${host} invalid ${name}`,
+      );
       assert(
         failure && failure.message.length > 0,
         `${host} accepted invalid schema ${name}`,
@@ -700,7 +731,7 @@ try {
           ["twelve-byte prefix", data.scenarios[0].request.slice(0, 12)],
         ] as const
       ) {
-        const failure = await page.evaluate(
+        const failure = await evaluate(
           async ({ host, request, language }) => {
             try {
               await (globalThis as BrowserGlobal).capnpTest[host].generate({
@@ -723,6 +754,7 @@ try {
             }
           },
           { host, request, language },
+          `${engine} ${host} malformed ${language} request: ${name}`,
         );
         assert(
           failure?.stage === language && failure.exitCode === 1 &&
@@ -741,90 +773,94 @@ try {
   }
 
   for (const host of ["direct", "worker"] as const) {
-    const evidence = await page.evaluate(async ({ host, input, request }) => {
-      const state = (globalThis as BrowserGlobal).capnpTest;
-      const create = (modules: Modules, options: Options) =>
-        host === "direct"
-          ? state.sdk.createCompiler(modules, options)
-          : state.sdk.createWorkerCompiler(state.workerURL, modules, options);
-      const close = (compiler: Compiler | WorkerCompiler) => {
-        if ("dispose" in compiler) compiler.dispose();
-      };
-      const rejected = async (run: () => Promise<unknown>) => {
-        try {
-          await run();
-          return null;
-        } catch (error) {
-          return {
-            name: (error as Error).name,
-            message: (error as Error).message,
-            hasOutputs: "outputs" in (error as object),
-          };
-        }
-      };
-      const workspace = await create(state.modules, {
-        limits: { workspaceBytes: 0 },
-      });
-      let workspaceFailure;
-      try {
-        workspaceFailure = await rejected(() => workspace.compile(input));
-        await workspace.generate({ request, generators: ["zig"] });
-      } finally {
-        close(workspace);
-      }
-      const output = await create(state.modules, {
-        limits: { outputBytes: 0 },
-      });
-      let outputFailure;
-      try {
-        outputFailure = await rejected(() =>
-          output.generate({ request, generators: ["zig"] })
-        );
-        await output.compile({ ...input, generators: [] });
-      } finally {
-        close(output);
-      }
-      const memory = await create({
-        compiler: state.memoryGuest,
-        generators: {},
-      }, { limits: { memoryPages: 2 } });
-      try {
-        const result = await memory.compile({
-          files: { "unused.capnp": "" },
-          includeFiles: {},
-          entrypoints: ["unused.capnp"],
-          generators: [],
+    const evidence = await evaluate(
+      async ({ host, input, request }) => {
+        const state = (globalThis as BrowserGlobal).capnpTest;
+        const create = (modules: Modules, options: CompilerOptions) =>
+          host === "direct"
+            ? state.sdk.createCompiler(modules, options)
+            : state.sdk.createWorkerCompiler(state.workerURL, modules, options);
+        const close = (compiler: Compiler | WorkerCompiler) => {
+          if ("dispose" in compiler) compiler.dispose();
+        };
+        const rejected = async (run: () => Promise<unknown>) => {
+          try {
+            await run();
+            return null;
+          } catch (error) {
+            return {
+              name: (error as Error).name,
+              message: (error as Error).message,
+              hasOutputs: "outputs" in (error as object),
+            };
+          }
+        };
+        const workspace = await create(state.modules, {
+          limits: { workspaceBytes: 0 },
         });
-        const stream = await create({
-          compiler: state.streamGuest,
-          generators: {},
-        }, { limits: { stdoutBytes: 6 } });
+        let workspaceFailure;
         try {
-          const streamFailure = await rejected(() =>
-            stream.compile({
-              files: { "unused.capnp": "" },
-              includeFiles: {},
-              entrypoints: ["unused.capnp"],
-              generators: [],
-            })
-          );
-          return {
-            workspaceFailure,
-            outputFailure,
-            streamFailure,
-            memory: [...result.request],
-          };
+          workspaceFailure = await rejected(() => workspace.compile(input));
+          await workspace.generate({ request, generators: ["zig"] });
         } finally {
-          close(stream);
+          close(workspace);
         }
-      } finally {
-        close(memory);
-      }
-    }, {
-      host,
-      input: data.scenarios[0].input,
-      request: data.scenarios[0].request,
-    });
+        const output = await create(state.modules, {
+          limits: { outputBytes: 0 },
+        });
+        let outputFailure;
+        try {
+          outputFailure = await rejected(() =>
+            output.generate({ request, generators: ["zig"] })
+          );
+          await output.compile({ ...input, generators: [] });
+        } finally {
+          close(output);
+        }
+        const memory = await create({
+          compiler: state.memoryGuest,
+          generators: {},
+        }, { limits: { memoryPages: 2 } });
+        try {
+          const result = await memory.compile({
+            files: { "unused.capnp": "" },
+            includeFiles: {},
+            entrypoints: ["unused.capnp"],
+            generators: [],
+          });
+          const stream = await create({
+            compiler: state.streamGuest,
+            generators: {},
+          }, { limits: { stdoutBytes: 6 } });
+          try {
+            const streamFailure = await rejected(() =>
+              stream.compile({
+                files: { "unused.capnp": "" },
+                includeFiles: {},
+                entrypoints: ["unused.capnp"],
+                generators: [],
+              })
+            );
+            return {
+              workspaceFailure,
+              outputFailure,
+              streamFailure,
+              memory: [...result.request],
+            };
+          } finally {
+            close(stream);
+          }
+        } finally {
+          close(memory);
+        }
+      },
+      {
+        host,
+        input: data.scenarios[0].input,
+        request: data.scenarios[0].request,
+      },
+      `${engine} ${host} resource limits`,
+    );
     assert(
       evidence.workspaceFailure?.name === "TypeError" &&
         evidence.workspaceFailure.message.includes("workspaceBytes") &&
@@ -854,79 +890,88 @@ try {
 
   // Hostile and probing guests: every guest-sized host bound, the read-only
   // workspace, and result shapes must hold in each engine and both modes.
-  await page.evaluate((guests) => {
-    (globalThis as BrowserGlobal).capnpTest.hostileGuests = guests;
-  }, data.hostileGuests);
+  await evaluate(
+    (guests) => {
+      (globalThis as BrowserGlobal).capnpTest.hostileGuests = guests;
+    },
+    data.hostileGuests,
+    `${engine} load hostile guests`,
+  );
   for (const host of ["direct", "worker"] as const) {
-    const outcomes = await page.evaluate(async ({ host, stages }) => {
-      const state = (globalThis as BrowserGlobal).capnpTest;
-      const outcomes: Record<string, HostileOutcome> = {};
-      for (const [name, stage] of Object.entries(stages)) {
-        const bytes = state.hostileGuests![name];
-        const modules: Modules = {
-          compiler: bytes,
-          generators: stage === "generator" ? { cpp: bytes } : {},
-        };
-        const started = performance.now();
-        const compiler = host === "direct"
-          ? await state.sdk.createCompiler(modules)
-          : await state.sdk.createWorkerCompiler(state.workerURL, modules);
-        try {
-          const result = stage === "compiler"
-            ? await compiler.compile({
-              files: { a: "x" },
-              includeFiles: {},
-              entrypoints: ["a"],
-              generators: [],
-            })
-            : await compiler.generate({
-              request: new Uint8Array(1),
-              generators: ["cpp"],
-            });
-          const files = result.outputs.cpp as
-            | Record<string, Uint8Array>
-            | undefined;
-          outcomes[name] = {
-            request: stage === "compiler"
-              ? Array.from((result as Result).request)
-              : undefined,
-            outputs: files
-              ? Object.entries(files).map((
-                [path, data],
-              ) => [path, Array.from(data)] as [string, number[]])
-              : undefined,
-            plain: files
-              ? Object.getPrototypeOf(files) === Object.prototype &&
-                Object.getPrototypeOf(result.outputs) === Object.prototype &&
-                Object.keys(files).every((path) => Object.hasOwn(files, path))
-              : undefined,
-            elapsed: performance.now() - started,
+    const outcomes = await evaluate(
+      async ({ host, stages }) => {
+        const state = (globalThis as BrowserGlobal).capnpTest;
+        const outcomes: Record<string, HostileOutcome> = {};
+        for (const [name, stage] of Object.entries(stages)) {
+          const bytes = state.hostileGuests![name];
+          const modules: Modules = {
+            compiler: bytes,
+            generators: stage === "generator" ? { cpp: bytes } : {},
           };
-        } catch (error) {
-          outcomes[name] = {
-            error: {
-              name: (error as Error).name,
-              message: (error as Error).message,
-              isCompileError: error instanceof state.sdk.CompileError,
-              hasOutputs: "outputs" in (error as object),
-              hasCause: (error as Error).cause !== undefined,
-            },
-            elapsed: performance.now() - started,
-          };
-        } finally {
-          if ("dispose" in compiler) compiler.dispose();
+          const started = performance.now();
+          const compiler = host === "direct"
+            ? await state.sdk.createCompiler(modules)
+            : await state.sdk.createWorkerCompiler(state.workerURL, modules);
+          try {
+            const result = stage === "compiler"
+              ? await compiler.compile({
+                files: { a: "x" },
+                includeFiles: {},
+                entrypoints: ["a"],
+                generators: [],
+              })
+              : await compiler.generate({
+                request: new Uint8Array(1),
+                generators: ["cpp"],
+              });
+            const files = result.outputs.cpp as
+              | Record<string, Uint8Array>
+              | undefined;
+            outcomes[name] = {
+              request: stage === "compiler"
+                ? Array.from((result as Result).request)
+                : undefined,
+              outputs: files
+                ? Object.entries(files).map((
+                  [path, data],
+                ) => [path, Array.from(data)] as [string, number[]])
+                : undefined,
+              plain: files
+                ? Object.getPrototypeOf(files) === Object.prototype &&
+                  Object.getPrototypeOf(result.outputs) ===
+                    Object.prototype &&
+                  Object.keys(files).every((path) => Object.hasOwn(files, path))
+                : undefined,
+              elapsed: performance.now() - started,
+            };
+          } catch (error) {
+            outcomes[name] = {
+              error: {
+                name: (error as Error).name,
+                message: (error as Error).message,
+                isCompileError: error instanceof state.sdk.CompileError,
+                hasOutputs: "outputs" in (error as object),
+                hasCause: (error as Error).cause !== undefined,
+              },
+              elapsed: performance.now() - started,
+            };
+          } finally {
+            if ("dispose" in compiler) compiler.dispose();
+          }
         }
-      }
-      return outcomes;
-    }, {
-      host,
-      stages: Object.fromEntries(
-        Object.entries(hostileGuests).map(([name, guest]) => [
-          name,
-          guest.stage,
-        ]),
-      ),
-    });
+        return outcomes;
+      },
+      {
+        host,
+        stages: Object.fromEntries(
+          Object.entries(hostileGuests).map(([name, guest]) => [
+            name,
+            guest.stage,
+          ]),
+        ),
+      },
+      `${engine} ${host} hostile guests`,
+    );
     for (const [name, guest] of Object.entries(hostileGuests)) {
       const outcome = outcomes[name];
       const label = `${host} ${name}`;
@@ -983,8 +1028,8 @@ try {
   // miss. Keep the same compiler client and verify complete output after each.
   for (let iteration = 0; iteration < 20; iteration++) {
     const mode = iteration % 2 === 0 ? "abort" : "timeout";
-    const result = await within(
-      page.evaluate(async ({ mode, input }) => {
+    const result = await evaluate(
+      async ({ mode, input }) => {
         const worker = (globalThis as BrowserGlobal).capnpTest.worker;
         const controller = new AbortController();
         let pending: Promise<Result>;
@@ -1024,7 +1069,7 @@ try {
               Object.entries(result.outputs).map(([language, files]) => [
                 language,
                 Object.fromEntries(
-                  Object.entries(files).map((
+                  Object.entries(files!).map((
                     [path, bytes],
                   ) => [path, Array.from(bytes)]),
                 ),
@@ -1032,7 +1077,8 @@ try {
             ),
           };
         }
-      }, { mode, input: data.scenarios[0].input }),
+      },
+      { mode, input: data.scenarios[0].input },
       `${engine} worker ${mode} recovery cycle ${iteration + 1}`,
     );
     assert(
@@ -1045,7 +1091,7 @@ try {
       `worker recovery after ${mode}`,
     );
     console.log(
-      `PASS ${engine} worker: ${mode} terminates the job and permits reuse (${
+      `PASS ${engine} worker: ${mode} rejects the job and permits reuse (${
         iteration + 1
       }/20)`,
     );
@@ -1056,14 +1102,18 @@ try {
     `SDK attempted ${networkRequests} network requests after loading`,
   );
   assert(errors.length === 0, `uncaught browser errors: ${errors.join("; ")}`);
-  await page.evaluate(() => {
-    const state = (globalThis as BrowserGlobal).capnpTest;
-    state.worker.dispose();
-    URL.revokeObjectURL(state.workerURL);
-  });
-  const receiptPath = Deno.args[1] ?? `${data.work}/requests.json`;
+  await evaluate(
+    () => {
+      const state = (globalThis as BrowserGlobal).capnpTest;
+      state.worker.dispose();
+      URL.revokeObjectURL(state.workerURL);
+    },
+    undefined,
+    `${engine} dispose`,
+  );
+  const receipt = receiptPath ?? `${data.work}/requests.json`;
   await Deno.writeTextFile(
-    receiptPath,
+    receipt,
     JSON.stringify(
       {
         engine,
@@ -1081,7 +1131,7 @@ try {
     ) + "\n",
   );
   console.log(
-    `${engine} execution passed offline with process spawning disabled; canonical audit receipt: ${receiptPath}`,
+    `${engine} execution passed offline with process spawning disabled; canonical audit receipt: ${receipt}`,
   );
 } catch (error) {
   // Report before shutting down an unhealthy browser so cleanup cannot hide
@@ -1091,6 +1141,16 @@ try {
   );
   throw error;
 } finally {
-  await browser?.close();
+  // A stalled engine may not close either; bound the wait for it.
+  try {
+    await clock.step(
+      browser ? browser.close() : Promise.resolve(),
+      `${engine} close`,
+      30_000,
+    );
+  } catch (error) {
+    console.error(`FAIL ${engine}: ${(error as Error).message}`);
+    Deno.exit(1);
+  }
   await server.shutdown();
 }
