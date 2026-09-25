@@ -254,9 +254,10 @@ language generators with explicit filesystem roots, preserving binary streams
 and exit statuses. `mise run release:tools` prepares a compiler-only candidate
 for consumers that pin their own generators; `mise run test:package` checks both
 archive variants with real external consumers, and `mise run test:launcher`
-checks the launcher alone. Published assets come only from the
-[release workflow](docs/releases.md#release-process). Each archive flavor has
-its own version in `release.json`, and the
+checks the launcher alone. From now on, only the
+[release workflow](docs/releases.md#release-process) builds releases; the three
+published prereleases were built by hand before it existed. Each archive flavor
+has its own version in `release.json`, and the
 [API stability policy](docs/api-stability.md) states what a version change means
 for each interface and how packages and tags are named. See the
 [launcher contract and examples](docs/releases.md#repository-toolchain-launcher).
