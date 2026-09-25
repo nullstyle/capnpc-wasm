@@ -5,6 +5,12 @@ import {
   describeObservation,
   type Observation,
 } from "../conformance/outcome.ts";
+import {
+  readStalls,
+  type SoakStall,
+  stallJob,
+  stallWarning,
+} from "./soak-stalls.ts";
 
 type Receipt = {
   engine: string;
@@ -21,6 +27,7 @@ type Receipt = {
     observation?: Observation;
   }[];
   termination?: { verdict: string }[];
+  soakStalls?: SoakStall[];
 };
 
 async function verifyRequests(receiptPath: string, engine: string) {
@@ -124,6 +131,10 @@ function lastStep(receiptPath: string): string {
   } catch {
     return "unknown (no step recorded)";
   }
+}
+
+function stallLine(stall: SoakStall): string {
+  return `tolerated soak recovery stall in cycle ${stall.cycle} (${stall.mode}), attributed to the engine: ${stall.summary}`;
 }
 
 interface Outcome {
@@ -233,6 +244,7 @@ async function runEngine(engine: Engine, receipts: string): Promise<Outcome> {
             } (accepts ${row.accepted!.join(" or ")})`,
         ),
         ...(receipt.termination ?? []).map((result) => result.verdict),
+        ...(receipt.soakStalls ?? []).map((stall) => stallLine(stall)),
       ],
     };
   } catch (error) {
@@ -246,6 +258,8 @@ async function runEngine(engine: Engine, receipts: string): Promise<Outcome> {
 }
 
 await Deno.mkdir("build/test", { recursive: true });
+// Soak stalls that the drivers record from now on (soak-stalls.ts).
+const runStarted = new Date().toISOString();
 const receipts = await Deno.makeTempDir({
   dir: "build/test",
   prefix: "browser-verification-",
@@ -259,6 +273,9 @@ await Promise.all(
     }
   }),
 );
+const stalls = (await readStalls()).filter((stall) =>
+  stall.job === stallJob() && stall.at >= runStarted
+);
 console.log(`Browser verification (receipts in ${receipts}):`);
 for (const outcome of outcomes) {
   console.log(
@@ -267,5 +284,15 @@ for (const outcome of outcomes) {
     } ${outcome.engine} (${outcome.seconds} s)`,
   );
   for (const line of outcome.summary) console.log(`  ${line}`);
+  // A failed driver wrote no receipt; its recorded stalls come from the ledger.
+  if (!outcome.passed) {
+    for (const stall of stalls) {
+      if (stall.engine === outcome.engine) console.log(`  ${stallLine(stall)}`);
+    }
+  }
+}
+// Unprefixed, so GitHub turns each stall into a warning annotation.
+if (Deno.env.get("GITHUB_ACTIONS")) {
+  for (const stall of stalls) console.log(stallWarning(stall));
 }
 if (outcomes.some((outcome) => !outcome.passed)) Deno.exit(1);

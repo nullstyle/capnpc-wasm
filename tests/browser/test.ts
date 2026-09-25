@@ -17,6 +17,13 @@ import type {
 } from "./sdk.ts";
 import { envMilliseconds, stepClock } from "./deadline.ts";
 import { type TracedWorker, traceWorkerTemplate } from "./worker-trace.ts";
+import {
+  recordStall,
+  type SoakStall,
+  stallBudget,
+  stallJob,
+  stallLedgerPath,
+} from "./soak-stalls.ts";
 import { describeObservation } from "../conformance/outcome.ts";
 import {
   type BrowserRow,
@@ -1289,7 +1296,10 @@ try {
     { spinGuest: data.spinGuest, template: traceWorkerTemplate },
     `${engine} create the recovery soak client`,
   );
-  let soakStalls = 0;
+  // Tolerated stalls: recorded in this engine's receipt and in the job's
+  // ledger, which holds the stall budget (soak-stalls.ts).
+  const soakStalls: SoakStall[] = [];
+  const soakStallBudget = stallBudget();
   for (let iteration = 0; iteration < 20; iteration++) {
     const mode = iteration % 2 === 0 ? "abort" : "timeout";
     const result = await evaluate(
@@ -1349,12 +1359,20 @@ try {
         let stall: Record<string, unknown> | undefined;
         if (!recovery.ok) {
           const stalled = trace.workers.at(-1);
-          const worker = stalled
-            ? {
-              events: stalled.events.slice(-16),
-              terminated: stalled.terminated,
-            }
-            : null;
+          // Counted before the health checks, whose workers are traced too.
+          const workersStarted = trace.workers.length;
+          const events = stalled?.events ?? [];
+          // The last job the stalled worker received, if it never answered it.
+          const jobs = events.flatMap((event) => {
+            const id = /^\d+:message:(?:compile|generate):(\d+)$/.exec(event)
+              ?.[1];
+            return id === undefined ? [] : [id];
+          });
+          const lastJob = jobs.at(-1);
+          const unanswered = lastJob !== undefined &&
+            !events.some((event) =>
+              new RegExp(`^\\d+:reply:${lastJob}(?::error)?$`).test(event)
+            );
           // Does the engine itself still start workers and compile Wasm?
           const within = (ms: number, promise: Promise<string>) =>
             Promise.race([
@@ -1370,70 +1388,85 @@ try {
               ),
             );
           // A module with one empty function.
-          const tiny = [
-            0,
-            97,
-            115,
-            109,
-            1,
-            0,
-            0,
-            0,
-            1,
-            4,
-            1,
-            96,
-            0,
-            0,
-            3,
-            2,
-            1,
-            0,
-            10,
-            4,
-            1,
-            2,
-            0,
-            11,
-          ];
+          const tiny = Uint8Array.from(
+            "0061736d01000000010401600000030201000a040102000b".match(/../g)!,
+            (byte) => parseInt(byte, 16),
+          );
           let started = performance.now();
           const plain = blobWorker("postMessage('up')");
-          const plainWorker = `${await within(
+          const plainAnswer = await within(
             5000,
             new Promise((resolve) => (plain.onmessage = () => resolve("up"))),
-          )} after ${Math.round(performance.now() - started)} ms`;
+          );
+          const plainWorker = `${plainAnswer} after ${
+            Math.round(performance.now() - started)
+          } ms`;
           plain.terminate();
           started = performance.now();
           const compiling = blobWorker(
             `WebAssembly.compile(new Uint8Array(${
-              JSON.stringify(tiny)
+              JSON.stringify(Array.from(tiny))
             })).then(() => postMessage("compiled"), (e) => postMessage("error " + e))`,
           );
-          const workerCompile = `${await within(
+          const workerAnswer = await within(
             5000,
-            new Promise((
-              resolve,
-            ) => (compiling.onmessage = (event) =>
-              resolve(String(event.data)))
-            ),
-          )} after ${Math.round(performance.now() - started)} ms`;
+            new Promise((resolve) => {
+              compiling.onmessage = (event) => resolve(String(event.data));
+            }),
+          );
+          const workerCompile = `${workerAnswer} after ${
+            Math.round(performance.now() - started)
+          } ms`;
           compiling.terminate();
           started = performance.now();
-          const pageCompile = `${await within(
+          const pageAnswer = await within(
             5000,
-            WebAssembly.compile(new Uint8Array(tiny)).then(() => "compiled"),
-          )} after ${Math.round(performance.now() - started)} ms`;
+            WebAssembly.compile(tiny).then(() => "compiled"),
+          );
+          const pageCompile = `${pageAnswer} after ${
+            Math.round(performance.now() - started)
+          } ms`;
+          const healthy = plainAnswer === "up" &&
+            workerAnswer === "compiled" && pageAnswer === "compiled";
+          // The retry replaces the stalled worker; its trace is the second.
+          const before = trace.workers.length;
+          started = performance.now();
+          const retried = await recover();
+          const suspect = unanswered && healthy ? "sdk" : "engine";
           stall = {
             error: recovery.error,
             afterMs: recovery.afterMs,
-            worker,
-            workersStarted: trace.workers.length,
+            suspect,
+            unansweredJob: unanswered ? lastJob : null,
+            worker: stalled
+              ? { events: events.slice(-16), terminated: stalled.terminated }
+              : null,
+            workersStarted,
             health: { plainWorker, workerCompile, pageCompile },
+            retry: {
+              ok: retried.ok,
+              ms: Math.round(performance.now() - started),
+              error: retried.ok ? null : retried.error,
+              // The workers the retry started, or the stalled one if it reused it.
+              workers: (trace.workers.length > before
+                ? trace.workers.slice(before)
+                : stalled
+                ? [stalled]
+                : []).map((worker) =>
+                  worker.events.slice(-16)
+                ),
+            },
           };
-          const retried = await recover();
+          if (suspect === "sdk") {
+            throw new Error(
+              `soak recovery after ${mode} stalled although the engine is healthy: the worker received job ${lastJob} and never answered it, which points at the SDK; ${
+                JSON.stringify(stall)
+              }`,
+            );
+          }
           if (!retried.ok) {
             throw new Error(
-              `worker recovery after ${mode} failed twice (${retried.error} after ${retried.afterMs} ms); the first stall: ${
+              `worker recovery after ${mode} failed twice (${retried.error} after ${retried.afterMs} ms): ${
                 JSON.stringify(stall)
               }`,
             );
@@ -1479,17 +1512,39 @@ try {
       `worker recovery after ${mode}`,
     );
     if (result.stall) {
-      soakStalls++;
+      const detail = result.stall as {
+        error: string;
+        afterMs: number;
+        worker: { events: string[] } | null;
+        health: Record<string, string>;
+        retry: { ms: number };
+      };
+      const lastEvent = detail.worker?.events.at(-1);
+      const stall: SoakStall = {
+        job: stallJob(),
+        engine,
+        os: Deno.build.os,
+        cycle: iteration + 1,
+        mode,
+        at: new Date().toISOString(),
+        summary:
+          `${detail.error} after ${detail.afterMs} ms; the stalled worker's last event: ${
+            lastEvent ?? "none (it never started)"
+          }; fresh worker ${detail.health.plainWorker}, Wasm in a worker ${detail.health.workerCompile}, Wasm on the page ${detail.health.pageCompile}; the retry recovered in ${detail.retry.ms} ms`,
+        detail,
+      };
+      soakStalls.push(stall);
+      const total = await recordStall(stall);
       console.log(
         `OBSERVED ${engine} soak recovery stall in cycle ${
           iteration + 1
-        } (${mode}), recovered on retry: ${JSON.stringify(result.stall)}`,
+        } (${mode}), attributed to the engine and recovered on retry: ${
+          JSON.stringify(detail)
+        }`,
       );
       assert(
-        soakStalls <= 1,
-        `${engine}: a second soak recovery stalled (cycle ${
-          iteration + 1
-        }); the OBSERVED stall lines carry both traces`,
+        total <= soakStallBudget,
+        `${engine}: soak recovery stall ${total} of this job exceeds its budget of ${soakStallBudget} (CAPNP_SOAK_STALL_BUDGET; the ledger ${stallLedgerPath} is cleared by mise run clean:test): ${stall.summary}`,
       );
     }
     console.log(
@@ -1587,6 +1642,7 @@ try {
         conformance,
         conformanceRows,
         termination,
+        soakStalls,
       },
       null,
       2,
