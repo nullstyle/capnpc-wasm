@@ -89,6 +89,14 @@ A push-triggered verification run of the held workflow
 2026-09-25) failed on macOS at the Wasm artifact check, a false positive fixed
 in `c74a7aa`, and in the Linux cold bootstrap at the Zig community mirror, which
 lacks the `.minisig` file; that waits on the upload of the project's own mirror.
+A second verification run, on the throwaway branch `verify/held-nightly`
+([36106633950](https://github.com/nullstyle/capnpc-wasm/actions/runs/36106633950),
+2026-09-25: `55e8e2d` from `main` plus the held workflows), passed every job but
+one, including the cold bootstrap on ubuntu-24.04, ubuntu-24.04-arm, macos-15,
+and macos-15-intel, the Go SDK on Windows, the termination canary, the ledger,
+and browsers and soak on Linux. "Browsers and soak (macos-15)" failed at
+Firefox's worker abort recovery cycle 5, where the job finished before the abort
+took effect: a race in the test, fixed on T08's branch but not yet on `main`.
 
 The ledger, [nightly-confidence.json](release-evidence/nightly-confidence.json),
 is generated. `mise run audit:nightly` reads the gitlink from the index and the

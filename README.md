@@ -80,8 +80,10 @@ directory, and the project redirects build output and working caches below this
 checkout. Initial installation and reference fetching need network access.
 
 Prerequisites, on macOS and Linux, arm64 and x64 (CI tests Linux x64 and macOS
-arm64 on every push; the nightly legs for the other two are held and have never
-run; Windows supports only the Go SDK, not development):
+arm64 on every push; the nightly legs for the other two are held, verified once
+on a throwaway branch
+([run 36106633950](https://github.com/nullstyle/capnpc-wasm/actions/runs/36106633950)),
+with no scheduled run yet; Windows supports only the Go SDK, not development):
 
 - Run `mise trust` once in every new clone or worktree; mise refuses untrusted
   configuration, and a non-interactive session stops there.
