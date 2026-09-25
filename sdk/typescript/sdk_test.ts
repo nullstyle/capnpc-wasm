@@ -5,7 +5,6 @@ import {
   createWorkerCompiler,
   type Files,
   type Modules,
-  supportedDenoWorkerVersion,
 } from "./mod.ts";
 import { runCommand } from "./runtime.ts";
 import { compileBounded } from "./wasm.ts";
@@ -35,16 +34,6 @@ import {
   workerURL,
   writeX,
 } from "./testdata/support.ts";
-
-Deno.test("SDK rejects unverified Deno worker runtimes before executing guests", async () => {
-  if (Deno.version.deno === supportedDenoWorkerVersion) return;
-  await rejects(
-    () =>
-      createWorkerCompiler(workerURL, { compiler: loopGuest, generators: {} }),
-    "Error",
-    `use Deno ${supportedDenoWorkerVersion}`,
-  );
-});
 
 Deno.test("SDK confines compiler source prefixes and ordered import roots", async () => {
   const compiler = await createCompiler({

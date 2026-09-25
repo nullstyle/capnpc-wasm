@@ -1,10 +1,5 @@
 /** Helpers, fixtures and tiny guest modules shared by the SDK test files. */
-import {
-  type CompileRequest,
-  type CompileResult,
-  type Modules,
-  supportedDenoWorkerVersion,
-} from "../mod.ts";
+import type { CompileRequest, CompileResult, Modules } from "../mod.ts";
 
 export const root = new URL("../../../", import.meta.url);
 export const workerURL = new URL("../worker.ts", import.meta.url);
@@ -100,13 +95,12 @@ export async function rejectsWith<T extends Error>(
   throw new Error(`expected ${constructor.name} rejection`);
 }
 
-/** Worker execution is verified on one Deno release; skip elsewhere. */
+/**
+ * A worker-client test. Worker execution runs on every Deno release: guests
+ * stop themselves, so no test depends on the host's Worker.terminate().
+ */
 export function workerTest(name: string, fn: Deno.TestDefinition["fn"]) {
-  Deno.test({
-    name,
-    fn,
-    ignore: Deno.version.deno !== supportedDenoWorkerVersion,
-  });
+  Deno.test({ name, fn });
 }
 
 export function wasm(hex: string): Uint8Array {

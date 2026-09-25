@@ -218,6 +218,19 @@ every flavor it applies to has shipped it.
   modes; a direct guest past its deadline traps and the job rejects with a
   `TimeoutError`, and invalid options reject with `TypeError` before the request
   is validated.
+- TypeScript SDK: worker cancellation stops the guest inside the worker instead
+  of relying on `Worker.terminate()`, which does not stop a running Wasm guest
+  in WebKit, Bun, or Deno 2.7.6 and later: a timeout, an abort, or `dispose()`
+  rejects at once and traps the guest at its next check through a shared cell
+  (where `SharedArrayBuffer` reaches the worker) or the deadline the worker
+  enforces itself, and the worker survives and serves the next job;
+  `terminate()` is a fallback, and without cross-origin isolation an aborted
+  guest is bounded by its `timeoutMs`.
+- TypeScript SDK: `createWorkerCompiler` runs on every Deno release and on Bun
+  (verified locally on 1.3.14, not in CI); Node.js (no Web `Worker`) and
+  unrecognized hosts are still rejected, and `isBoundedWorkerSupported()`
+  follows. `supportedDenoWorkerVersion` is deprecated and no longer checked, and
+  the 2.1 s Deno restart grace is gone. The worker tests run on the pinned Deno.
 
 ## capnp-wasm-compiler-host
 

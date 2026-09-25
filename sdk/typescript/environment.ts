@@ -1,10 +1,17 @@
 /**
  * Engine and host-runtime checks shared by both compiler factories. Failing
- * early here turns opaque engine parse errors and unverified worker
- * termination into actionable TypeErrors before any module is compiled.
+ * early here turns opaque engine parse errors and hosts without a usable
+ * Worker into actionable errors before any module is compiled.
  */
 
-/** Deno worker termination is verified only on this runtime revision. */
+/**
+ * The one Deno release whose `Worker.terminate()` stopped a running guest,
+ * which worker execution required before guests were instrumented with
+ * interruption checks.
+ * @deprecated Worker execution no longer depends on the Deno release: every
+ * guest stops itself at its deadline or when its job is cancelled. Nothing
+ * checks this value; it will be removed.
+ */
 export const supportedDenoWorkerVersion = "2.6.8";
 
 // A minimal module using the standardized exception-handling instructions:
@@ -84,51 +91,38 @@ export function detectWorkerRuntime(
 }
 
 const directAdvice =
-  "use createCompiler for direct execution without a hard deadline";
+  "use createCompiler, whose jobs run on the calling thread with the same in-guest deadline";
 
 /**
- * Admit worker execution only where cancellation is verified to stop guest
- * CPU: browsers and the verified Deno release. Returns the restart grace the
- * client must wait after terminate() on that runtime.
+ * Admit worker execution where a module Worker runs the SDK's worker script:
+ * browsers, Deno and Bun. Cancellation does not depend on the host's
+ * `terminate()`: every guest stops itself at its deadline or, where a
+ * SharedArrayBuffer reaches the worker, when its job is cancelled.
  */
 export function checkWorkerRuntime(
   globals?: Record<string, unknown>,
-): { runtime: WorkerRuntime; terminationGraceMs: number } {
+): { runtime: WorkerRuntime } {
   const runtime = detectWorkerRuntime(globals);
   switch (runtime.kind) {
     case "deno":
-      if (runtime.version !== supportedDenoWorkerVersion) {
-        throw new Error(
-          `Deno ${runtime.version} worker termination is not supported; use Deno ${supportedDenoWorkerVersion} for bounded worker compilation, or ${directAdvice}`,
-        );
-      }
-      // Deno 2.6.8 requests forced isolate termination after a two-second
-      // grace; keep restarts outside it so repeated cancellation cannot
-      // accumulate still-running guests. Browsers get no wait here, although
-      // terminate() is not immediate everywhere: Chromium stops a running
-      // guest after about two seconds and WebKit never stops it (see the SDK
-      // README); a later track addresses that.
-      return { runtime, terminationGraceMs: 2100 };
     case "browser":
-      return { runtime, terminationGraceMs: 0 };
     case "bun":
+      return { runtime };
     case "node":
       throw new Error(
-        `${
-          runtime.kind === "bun" ? "Bun" : "Node.js"
-        } worker termination is not verified to stop a running Wasm guest, so createWorkerCompiler is unavailable there; ${directAdvice}`,
+        `Node.js has no Web Worker, so createWorkerCompiler is unavailable there; ${directAdvice}`,
       );
     default:
       throw new Error(
-        `worker compilation is supported in browsers and on Deno ${supportedDenoWorkerVersion} only; ${directAdvice}`,
+        `worker compilation is supported in browsers, Deno and Bun only; ${directAdvice}`,
       );
   }
 }
 
 /**
- * Whether createWorkerCompiler would be admitted on this host: browsers and
- * the verified Deno release. Applications use it to choose between bounded
- * worker execution and createCompiler without rehearsing the rejection.
+ * Whether createWorkerCompiler would be admitted on this host: browsers, Deno
+ * and Bun. Applications use it to choose between worker execution and
+ * createCompiler without rehearsing the rejection.
  */
 export function isBoundedWorkerSupported(
   globals?: Record<string, unknown>,

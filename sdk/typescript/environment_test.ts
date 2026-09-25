@@ -63,34 +63,27 @@ Deno.test("SDK classifies worker runtimes from their globals", () => {
   );
 });
 
-Deno.test("SDK admits worker execution in browsers and on the verified Deno only", () => {
-  const supported = checkWorkerRuntime({
-    Deno: { version: { deno: supportedDenoWorkerVersion } },
-  });
-  assert(
-    supported.runtime.kind === "deno" && supported.terminationGraceMs === 2100,
-    "verified Deno was not admitted with its termination grace",
-  );
-  const browser = checkWorkerRuntime({
-    Worker: class {},
-    navigator: {},
-    document: {},
-  });
-  assert(
-    browser.runtime.kind === "browser" && browser.terminationGraceMs === 0,
-    "browser was not admitted",
-  );
+Deno.test("SDK admits worker execution in browsers, on every Deno release, and on Bun", () => {
+  const admitted: [Record<string, unknown>, string][] = [
+    [{ Deno: { version: { deno: "2.6.8" } } }, "deno"],
+    [{ Deno: { version: { deno: "2.9.6" } } }, "deno"],
+    [{ Deno: { version: { deno: "3.0.0" } } }, "deno"],
+    [{ Worker: class {}, navigator: {}, document: {} }, "browser"],
+    [{ Bun: {} }, "bun"],
+  ];
+  for (const [globals, kind] of admitted) {
+    const { runtime } = checkWorkerRuntime(globals);
+    assert(
+      runtime.kind === kind,
+      `${JSON.stringify(globals)} was not admitted`,
+    );
+  }
   const rejections: [Record<string, unknown>, string][] = [
     [
-      { Deno: { version: { deno: "2.9.6" } } },
-      `use Deno ${supportedDenoWorkerVersion}`,
-    ],
-    [{ Bun: {} }, "Bun worker termination is not verified"],
-    [
       { process: { versions: { node: "24.0.0" } } },
-      "Node.js worker termination is not verified",
+      "Node.js has no Web Worker",
     ],
-    [{}, "supported in browsers and on Deno"],
+    [{}, "supported in browsers, Deno and Bun only"],
   ];
   for (const [globals, expected] of rejections) {
     let thrown: unknown;
@@ -105,10 +98,15 @@ Deno.test("SDK admits worker execution in browsers and on the verified Deno only
       `${JSON.stringify(globals)}: ${thrown}`,
     );
   }
+  // Deprecated, kept for existing importers; nothing checks it.
+  assert(supportedDenoWorkerVersion === "2.6.8", "deprecated export changed");
 });
 
-Deno.test("SDK worker factory rejects Bun and Node before creating a worker", async () => {
+Deno.test("SDK worker factory rejects Node.js and unknown hosts before creating a worker", async () => {
   const deno = Object.getOwnPropertyDescriptor(globalThis, "Deno")!;
+  // Deno's `process` is a lazy getter that reads Deno.build; shadow it
+  // before hiding Deno, and restore both descriptors afterwards.
+  const process = Object.getOwnPropertyDescriptor(globalThis, "process");
   const RealWorker = globalThis.Worker;
   let constructions = 0;
   globalThis.Worker = class extends RealWorker {
@@ -118,34 +116,32 @@ Deno.test("SDK worker factory rejects Bun and Node before creating a worker", as
     }
   };
   const modules = { compiler: trapGuest, generators: {} };
+  const host = (value: unknown) =>
+    Object.defineProperty(globalThis, "process", {
+      value,
+      configurable: true,
+      writable: true,
+    });
   try {
+    host(undefined);
     Object.defineProperty(globalThis, "Deno", {
       value: undefined,
       configurable: true,
     });
-    Object.defineProperty(globalThis, "Bun", {
-      value: { version: "1.3.14" },
-      configurable: true,
-    });
     await rejects(
       () => createWorkerCompiler(workerURL, modules),
       "Error",
-      "Bun worker termination is not verified",
+      "supported in browsers, Deno and Bun only",
     );
-    delete (globalThis as { Bun?: unknown }).Bun;
-    Object.defineProperty(globalThis, "process", {
-      value: { versions: { node: "24.0.0" } },
-      configurable: true,
-      writable: true,
-    });
+    host({ versions: { node: "24.0.0" } });
     await rejects(
       () => createWorkerCompiler(workerURL, modules),
       "Error",
-      "Node.js worker termination is not verified",
+      "Node.js has no Web Worker",
     );
   } finally {
-    delete (globalThis as { Bun?: unknown }).Bun;
-    delete (globalThis as { process?: unknown }).process;
+    if (process) Object.defineProperty(globalThis, "process", process);
+    else delete (globalThis as { process?: unknown }).process;
     Object.defineProperty(globalThis, "Deno", deno);
     globalThis.Worker = RealWorker;
   }
@@ -177,18 +173,16 @@ Deno.test("SDK detects standardized Wasm exception handling before compiling", a
         direct.message.includes("update"),
       direct.message,
     );
-    if (Deno.version.deno === supportedDenoWorkerVersion) {
-      await rejectsWith(
-        () =>
-          createWorkerCompiler(workerURL, {
-            compiler: trapGuest,
-            generators: {},
-          }),
-        TypeError,
-        direct.message,
-      );
-      assert(constructions === 0, "a worker was created on an old engine");
-    }
+    await rejectsWith(
+      () =>
+        createWorkerCompiler(workerURL, {
+          compiler: trapGuest,
+          generators: {},
+        }),
+      TypeError,
+      direct.message,
+    );
+    assert(constructions === 0, "a worker was created on an old engine");
     WebAssembly.validate = () => {
       throw new Error("validate unavailable");
     };
@@ -202,27 +196,20 @@ Deno.test("SDK detects standardized Wasm exception handling before compiling", a
 
 Deno.test("SDK reports bounded worker support as a predicate", () => {
   assert(
-    isBoundedWorkerSupported({
-      Deno: { version: { deno: supportedDenoWorkerVersion } },
-    }) && isBoundedWorkerSupported({
-      Worker: class {},
-      navigator: {},
-      document: {},
-    }),
-    "verified runtimes were not reported as supported",
+    isBoundedWorkerSupported({ Deno: { version: { deno: "2.9.6" } } }) &&
+      isBoundedWorkerSupported({ Bun: {} }) &&
+      isBoundedWorkerSupported({
+        Worker: class {},
+        navigator: {},
+        document: {},
+      }),
+    "worker hosts were not reported as supported",
   );
   assert(
-    !isBoundedWorkerSupported({ Deno: { version: { deno: "2.9.6" } } }) &&
-      !isBoundedWorkerSupported({ Bun: {} }) &&
-      !isBoundedWorkerSupported({
-        process: { versions: { node: "24.0.0" } },
-      }) &&
-      !isBoundedWorkerSupported({}),
-    "unverified runtimes were reported as supported",
+    !isBoundedWorkerSupported({
+      process: { versions: { node: "24.0.0" } },
+    }) && !isBoundedWorkerSupported({}),
+    "hosts without a module Worker were reported as supported",
   );
-  assert(
-    isBoundedWorkerSupported() ===
-      (Deno.version.deno === supportedDenoWorkerVersion),
-    "the test host was misclassified",
-  );
+  assert(isBoundedWorkerSupported(), "the test host was not admitted");
 });

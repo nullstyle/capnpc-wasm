@@ -221,15 +221,18 @@ running Wasm guest (WebKit never does, Chromium does after about 2 s, and Deno
 `Cross-Origin-Embedder-Policy: require-corp` so that aborts stop guests at once,
 and keep `timeoutMs` short where they cannot.
 
-Runtime policy: worker execution is admitted only in browsers and on exactly
-**Deno 2.6.8** (exported as `supportedDenoWorkerVersion`), where `terminate()`
-was verified to stop a running Wasm guest. Other Deno versions, Bun, Node.js,
-and unrecognized hosts are rejected before any worker is created, with an
-`Error` that points to `createCompiler`; `isBoundedWorkerSupported()` answers
-the same question as a predicate. The
-[runtime evidence](../../docs/deno-worker-termination.md) records a real shared
-counter that stops within the grace on 2.6.8 and continues on newer tested
-engines.
+Runtime policy: worker execution is admitted in browsers, on every Deno release,
+and on Bun (verified locally on Bun 1.3.14; CI does not run Bun). Node.js has no
+Web `Worker`; it and unrecognized hosts are rejected before any worker is
+created, with an `Error` that points to `createCompiler`, whose jobs enforce the
+same in-guest deadline on the calling thread. `isBoundedWorkerSupported()`
+answers the same question as a predicate. `supportedDenoWorkerVersion` is
+deprecated: it names the one Deno release that worker execution required while
+cancellation relied on `terminate()`, and nothing checks it any more. The
+[termination evidence](../../docs/deno-worker-termination.md) records how
+`terminate()` behaves on each engine. Direct compilation is tested on the pinned
+Deno 2.9.6. Direct execution on Node.js and Bun is best effort: expected to work
+but not tested.
 
 Worker initialization accepts `{ signal, initTimeoutMs }` alongside `limits`:
 the default deadline is 30 seconds, and aborting terminates the starting worker
@@ -238,6 +241,32 @@ action: to restart completely offline, fetch `worker.js` in advance and use a
 blob URL, as the browser test does. Keep that URL alive until the client is
 disposed. The SDK does not inject CSP exceptions; the application controls where
 workers can be loaded.
+
+### Interruption
+
+Before it compiles a guest, the SDK rewrites the module in the same pass that
+bounds its memory. The rewrite adds one import, `capnp_wasm.interrupt`, and a
+countdown that ticks at every loop header, at the entry of every function that
+can call guest code, and after every call to an import. Every 65,536 ticks (a
+fraction of a millisecond of guest execution) the guest asks the host whether to
+stop, and the host checks the job's deadline, its abort signal, and the shared
+cell. A stop executes `unreachable`, a trap, which guest exception handlers
+(`try_table`, C++ `catch (...)`, and cleanup code) cannot intercept, so no guest
+code runs after a stop. The host stops a guest the same way after `proc_exit`,
+after a budget overrun, and after any host error inside a WASI import; it never
+throws into the guest. A guest sleeping in `poll_oneoff` waits with
+`Atomics.wait` instead of spinning where the thread may block, and wakes at the
+deadline or on cancellation.
+
+The rewrite renumbers function indices, including the `name` section's function
+names, so trap backtraces keep naming the right functions. It drops other custom
+sections that hold code offsets or indices (the `name` section too, when it has
+label names), and it rejects module features it cannot rewrite exactly, such as
+GC types, table initializers, and unknown instructions, with a `TypeError`.
+Generated output is byte-identical with and without the checks. On the pinned
+Deno they cost about 15 to 17 percent of end-to-end job time (rpc.capnp with C++
+generation, and a workspace generating all four languages), and rewriting the
+five toolchain modules adds about 70 ms to factory start-up.
 
 ## Engine requirements
 
@@ -326,25 +355,30 @@ installed browsers. Validate the browser versions your application supports.
 ## Verification
 
 `mise run test:sdk-ts` runs every test file under `sdk/typescript/` on the
-pinned Deno using only read permission: direct execution, explicit rejection of
-unsupported worker runtimes, exact resource boundaries, oversized sparse output
-writes, descriptor renumbering, guest memory growth, input-shape and import-root
-validation, engine capability detection (`environment_test.ts`), and hostile
-one-page guests that ask the host for oversized reads, random fills, descriptor
-floods, out-of-range pointers, and read-only mutations (`host_bounds_test.ts`,
-using guests embedded from `tests/browser/guests/`). `mise run test` runs
-`sdk_test.ts` as part of the full suite. Running the same command with Deno
-2.6.8 enables the worker tests, including `worker_test.ts`: no restart after
+pinned Deno using only read permission, worker tests included, and
+`mise run test` runs it as part of the full suite. It covers direct execution,
+exact resource boundaries, oversized sparse output writes, descriptor
+renumbering, guest memory growth, input-shape and import-root validation, and
+engine capability detection with the rejection of Node.js and unknown worker
+hosts (`environment_test.ts`); hostile one-page guests that ask the host for
+oversized reads, random fills, descriptor floods, out-of-range pointers, and
+read-only mutations (`host_bounds_test.ts`, using guests embedded from
+`tests/browser/guests/`); the interruption rewriter and deadlines
+(`interrupt_test.ts`: instruction coverage, renumbering and trap backtraces,
+fail-closed rejections, guests that loop, sleep, or tail-call forever, and
+guests that catch every exception, which must not run their handlers after an
+exit, a budget overrun, or a host error); and the worker client
+(`worker_test.ts`: cancellation that stops the guest and keeps the worker, the
+path without `SharedArrayBuffer`, the `terminate()` fallback, no restart after
 ordinary errors, identical error classes and messages in both modes, result
 shapes, script load and initialization failures, aborted initialization, and
-disposal during the restart wait. CI additionally runs the same suite on Deno
-2.6.8 with worker tests enabled plus the external compiler-host package
-consumer; the exact lanes are listed in
-[CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes). Worker tests
-are explicitly ignored on unsupported Deno versions; that does not replace the
-required supported-runtime lane. `mise run browser:install` installs the pinned
-browsers, then `mise run test:browser` compares every generated byte with native
-output in all three engines, blocks network and revokes process permissions
-after loading assets, runs the same hostile guests in both modes, and tests
-worker cancellation and reuse. See `tests/browser/README.md` for test-host
+disposal of a running job). CI also runs the suite on Deno 2.6.8 with the
+external compiler-host package consumer (`mise run test:deno-worker`), a lane
+kept from when worker execution required that release; the exact lanes are
+listed in [CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes).
+`mise run browser:install` installs the pinned browsers, then
+`mise run test:browser` compares every generated byte with native output in all
+three engines, blocks network and revokes process permissions after loading
+assets, runs the same hostile guests in both modes, and tests worker
+cancellation and reuse. See `tests/browser/README.md` for test-host
 requirements.
