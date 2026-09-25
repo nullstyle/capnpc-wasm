@@ -106,15 +106,19 @@
       "diagnostics": 0,
       "surfaces": {
         "browser-worker@webkit": {
-          "expect": "trap:stack",
-          "stage": "compiler",
-          "reason": "WebKit 26.6 workers exhaust their stack at about 34 const references and 90 nested imports; Chromium workers reach 275 and 744, main threads about 500 and 1,000 (measured on macOS arm64)",
+          "expect": [
+            "ok",
+            "trap:stack"
+          ],
+          "reason": "measured on macOS only, where WebKit 26.6 workers ran out of stack at about 34 const references and 90 nested imports (macOS secondary threads default to a 512 KiB stack against 8 MiB for the main thread); CI runs WebKit on Linux, whose threads default to 8 MiB, so the Linux outcome is unmeasured",
           "finding": "GAP3-02"
         },
         "studio@webkit": {
-          "expect": "trap:stack",
-          "stage": "compiler",
-          "reason": "WebKit 26.6 workers exhaust their stack at about 34 const references and 90 nested imports; Chromium workers reach 275 and 744, main threads about 500 and 1,000 (measured on macOS arm64)",
+          "expect": [
+            "ok",
+            "trap:stack"
+          ],
+          "reason": "measured on macOS only, where WebKit 26.6 workers ran out of stack at about 34 const references and 90 nested imports (macOS secondary threads default to a 512 KiB stack against 8 MiB for the main thread); CI runs WebKit on Linux, whose threads default to 8 MiB, so the Linux outcome is unmeasured",
           "finding": "GAP3-02"
         },
         "browser-worker@firefox": {
@@ -145,31 +149,31 @@
           "reason": "Wasmtime runs with an 8 MiB call stack, so the guest's 8 MiB linear-memory stack faults first (out-of-bounds memory access)",
           "finding": "GAP3-02"
         },
-        "browser-direct": {
+        "browser-direct@firefox": {
           "expect": [
             "trap:stack",
             "trap"
           ],
           "stage": "compiler",
-          "reason": "which stack ends first depends on the engine's thread stack against the guest's 8 MiB linear stack",
+          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host; which stack ends first (SpiderMonkey's or the guest's 8 MiB linear stack) is recorded by CI's Linux run",
           "finding": "GAP3-02"
         },
-        "browser-worker": {
+        "browser-worker@firefox": {
           "expect": [
             "trap:stack",
             "trap"
           ],
           "stage": "compiler",
-          "reason": "which stack ends first depends on the engine's worker stack against the guest's 8 MiB linear stack",
+          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host; which stack ends first (SpiderMonkey's or the guest's 8 MiB linear stack) is recorded by CI's Linux run",
           "finding": "GAP3-02"
         },
-        "studio": {
+        "studio@firefox": {
           "expect": [
             "trap:stack",
             "trap"
           ],
           "stage": "compiler",
-          "reason": "which stack ends first depends on the engine's worker stack against the guest's 8 MiB linear stack",
+          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host; which stack ends first (SpiderMonkey's or the guest's 8 MiB linear stack) is recorded by CI's Linux run",
           "finding": "GAP3-02"
         }
       }
@@ -184,15 +188,19 @@
       "diagnostics": 0,
       "surfaces": {
         "browser-worker@webkit": {
-          "expect": "trap:stack",
-          "stage": "compiler",
-          "reason": "WebKit 26.6 workers exhaust their stack at about 34 const references and 90 nested imports; Chromium workers reach 275 and 744, main threads about 500 and 1,000 (measured on macOS arm64)",
+          "expect": [
+            "ok",
+            "trap:stack"
+          ],
+          "reason": "measured on macOS only, where WebKit 26.6 workers ran out of stack at about 34 const references and 90 nested imports (macOS secondary threads default to a 512 KiB stack against 8 MiB for the main thread); CI runs WebKit on Linux, whose threads default to 8 MiB, so the Linux outcome is unmeasured",
           "finding": "GAP3-02"
         },
         "studio@webkit": {
-          "expect": "trap:stack",
-          "stage": "compiler",
-          "reason": "WebKit 26.6 workers exhaust their stack at about 34 const references and 90 nested imports; Chromium workers reach 275 and 744, main threads about 500 and 1,000 (measured on macOS arm64)",
+          "expect": [
+            "ok",
+            "trap:stack"
+          ],
+          "reason": "measured on macOS only, where WebKit 26.6 workers ran out of stack at about 34 const references and 90 nested imports (macOS secondary threads default to a 512 KiB stack against 8 MiB for the main thread); CI runs WebKit on Linux, whose threads default to 8 MiB, so the Linux outcome is unmeasured",
           "finding": "GAP3-02"
         },
         "browser-worker@firefox": {

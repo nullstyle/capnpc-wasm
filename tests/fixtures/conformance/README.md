@@ -82,7 +82,7 @@ Measured ceilings, in const references and nested imports:
 
 | Surface                               | Const chain | Import chain |
 | ------------------------------------- | ----------- | ------------ |
-| WebKit 26.6 worker (and Studio)       | 34          | 90           |
+| WebKit 26.6 worker on macOS (Studio)  | 34          | 90           |
 | wazero interpreter (Go SDK default)   | 179         | 487          |
 | Chromium 153 worker (and Studio)      | 275         | 744          |
 | Chromium 153 main thread              | 506         | 1,014        |
@@ -92,16 +92,20 @@ Measured ceilings, in const references and nested imports:
 
 The browser and Go figures were measured on macOS arm64 on 2026-09-24 (the
 import chains above about 1,000 end in a compiler exit, not a stack fault); the
-Deno and launcher figures come from GAP3-02. The corpus pins chains every
-surface must compile, WebKit workers included (`const-chain-25`,
-`import-chain-60`), chains every surface but a WebKit worker compiles
-(`const-chain-100`, `import-chain-100`, recorded as `trap:stack` for
-`browser-worker@webkit` and `studio@webkit`), and a chain no stack holds
-(`const-chain-4000`). Which stack ends first differs: V8 and JavaScriptCore
-report their own stack (`trap:stack`), while Wasmtime's 8 MiB call stack
-outlives the guest's 8 MiB linear-memory stack, which then faults (`trap`).
-`compiler-stack-overflow` and `generator-stack-overflow` use a synthetic
-recursion guest so that the stack kind itself is pinned on every surface.
+Deno and launcher figures come from GAP3-02. The WebKit worker figure is a macOS
+figure: secondary threads there default to a 512 KiB stack against 8 MiB for the
+main thread, and the 552/34 ratio matches. Linux threads default to 8 MiB, and
+CI runs WebKit only on Linux, where the worker ceiling is unmeasured. The corpus
+pins chains every surface must compile, macOS WebKit workers included
+(`const-chain-25`, `import-chain-60`), chains every other measured surface
+compiles (`const-chain-100`, `import-chain-100`, which `browser-worker@webkit`
+and `studio@webkit` may compile or fail as `trap:stack`), and a chain no stack
+holds (`const-chain-4000`). Which stack ends first differs: V8 and
+JavaScriptCore report their own stack (`trap:stack`), while Wasmtime's 8 MiB
+call stack outlives the guest's 8 MiB linear-memory stack, which then faults
+(`trap`). `compiler-stack-overflow` and `generator-stack-overflow` use a
+synthetic recursion guest so that the stack kind itself is pinned on every
+surface.
 
 ## Divergences
 
@@ -112,10 +116,10 @@ recorded:
 | Case                                               | Surface                   | Departure                                                                                            |
 | -------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------- |
 | `missing-import-root`, `missing-source-prefix`     | `launcher`                | `exit(1)`: the launcher passes the arguments through and the compiler reports the missing directory. |
-| `const-chain-100`, `import-chain-100`              | WebKit worker and Studio  | `trap:stack`: WebKit's worker stack holds about 34 const references and 90 nested imports.           |
+| `const-chain-100`, `import-chain-100`              | WebKit worker and Studio  | `ok` or `trap:stack`: `trap:stack` on macOS (a 512 KiB worker stack); unmeasured on Linux.           |
 | `const-chain-100`, `import-chain-100`              | Firefox worker and Studio | `ok` or `trap:stack`: unmeasured, since Firefox cannot launch on the development host.               |
 | `const-chain-4000`                                 | `launcher`                | `trap`: the guest's linear-memory stack faults before Wasmtime's call stack ends.                    |
-| `const-chain-4000`                                 | browsers                  | `trap:stack` or `trap`: which stack ends first depends on the engine's thread stack.                 |
+| `const-chain-4000`                                 | Firefox                   | `trap:stack` or `trap`: unmeasured; Chromium and WebKit report their own stack (`trap:stack`).       |
 | `generator-bad-name`                               | `go`                      | `exit(70)`: the memory filesystem refuses the name at creation with `EPERM`, and the guest exits.    |
 | `generator-bad-name`                               | `launcher`                | `ok`, one file: the launcher applies no output-name policy, and the host filesystem accepts `a\b`.   |
 | `generator-stderr-flood`, `generator-stdout-flood` | `launcher`                | `ok`: the launcher has no stream budgets; the streams pass through to the caller.                    |

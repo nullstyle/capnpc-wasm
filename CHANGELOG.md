@@ -131,8 +131,8 @@ version that ships them.
   termination acceptance under COOP/COEP shows that timeout, abort, and dispose
   stop a running guest: Chromium after about 2 s; WebKit only when the guest
   next enters JavaScript, so a Wasm loop is an expected failure until in-guest
-  interruption lands. WebKit workers compile only about 34 nested const
-  references and 90 nested imports.
+  interruption lands. On macOS, WebKit workers compile only about 34 nested
+  const references and 90 nested imports.
 - Deno: the worker termination probe also spins in Wasm and in a Wasm catch_all
   handler, and `test:termination-canary` (nightly, not a gate) compares the
   worker runtime, the pinned Deno, and the newest release with the recorded
