@@ -455,7 +455,7 @@ run = "deno run --allow-read --allow-write=build,mise.lock --allow-net scripts/m
 # Scheduled verification (.github/workflows/nightly.yml and supply-chain.yml).
 # The tasks also run locally; they need network access.
 [tasks."check:lock-urls"]
-description = "HEAD-request every download URL recorded in mise.lock; a pruned ziglang.org build passes with a warning while a community mirror serves it"
+description = "HEAD-request every download URL recorded in mise.lock, and the .minisig beside each minisign-verified one"
 run = "bash scripts/check-lock-urls.sh"
 
 [tasks."test:browser-soak"]
