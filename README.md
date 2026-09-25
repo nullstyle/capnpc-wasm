@@ -116,13 +116,15 @@ the defaults.
 mise run build        # native reference tools, WASI modules, and the dist/ SDK bundle
 mise run test         # builds what each suite reads, then runs every suite in parallel
 mise run check        # lint (static checks, no build) + doctor + test
-mise run ci           # the CI check job: check, package gates, Deno worker lane, clean tree
-mise run test:browser # Chromium, Firefox, WebKit: offline execution and cancellation
+mise run ci           # the CI check job: check, package gates, Deno worker lane,
+                      # test:sdk-go-race, test:browser-bootstrap, clean tree
+mise run test:browser # Chromium, Firefox, WebKit: offline execution, cancellation,
+                      # the termination acceptance, and the conformance corpus
 ```
 
 | Task                                                                     | Checks                                                                                                                                                | Builds first                                  |
 | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `lint`, `fmt`                                                            | shellcheck, formatting, `deno lint`/`check`, `go vet`, clippy, `zig fmt`, Markdown links, workflow linting (actionlint); `fmt` applies the formatters | nothing                                       |
+| `lint`, `fmt`                                                            | shellcheck, formatting, `deno lint`/`check`, `go vet`, clippy, `zig fmt`, Markdown links, actionlint, and `check:evidence`; `fmt` runs the formatters | nothing                                       |
 | `test:zig-unit`                                                          | capnp-zig unit tests                                                                                                                                  | Zig generator                                 |
 | `test:toolchain`                                                         | compiler and generators in Wasmtime, wazero, and Deno against native output                                                                           | everything                                    |
 | `test:wire`, `test:reflection`, `test:generator-api`, `test:rpc-codegen` | Zig wire conformance, reflection, generator API, RPC codegen                                                                                          | native tools, Zig generator                   |
@@ -133,7 +135,7 @@ mise run test:browser # Chromium, Firefox, WebKit: offline execution and cancell
 | `test:deno-worker`                                                       | `sdk/typescript/` and the compiler-host gate on Deno 2.6.8, including worker termination                                                              | native tools, SDK bundle                      |
 | `test:package`, `test:compiler-host-package`                             | release archives and external consumers                                                                                                               | native tools, SDK bundle                      |
 | `test:launcher`                                                          | the packaged Wasmtime launcher                                                                                                                        | SDK bundle                                    |
-| `test:browser-bootstrap`                                                 | Playwright permission boundary, no browser launched                                                                                                   | nothing                                       |
+| `test:browser-bootstrap`                                                 | Playwright permission boundary, browser step deadlines, and termination verdicts, with no browser launched                                            | nothing                                       |
 | `test:browser`, `test:studio`                                            | SDK and Schema Studio in real browsers (`browser:install` first)                                                                                      | native tools, SDK bundle, and the Studio site |
 | `test:termination-canary`                                                | canary, not a gate: whether `Worker.terminate()` stops a spinning guest on each Deno runtime it tests; the newest release needs the network           | nothing                                       |
 | `clean:test`, `clean`, `clean:all`                                       | remove `build/test` and the Zig test scratch; `build/` and `dist/`; those plus `.cache/`                                                              |                                               |
@@ -316,6 +318,7 @@ publish the output only after success.
 | Zig                                        | Existing `capnp-zig` generator's exact development toolchain                 |
 | wasm-tools, Wasmtime                       | Wasm inspection, validation, and command smoke tests                         |
 | ShellCheck                                 | Setup script validation                                                      |
+| actionlint 1.7.12                          | GitHub Actions workflow validation, run by `lint`                            |
 
 The SDK's Clang is intentionally kept off `PATH` so native bootstrap builds use
 native Clang. Resolve the cross-toolchain explicitly:
