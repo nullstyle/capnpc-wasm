@@ -3,7 +3,6 @@ import {
   type CompileRequest,
   createCompiler,
   createWorkerCompiler,
-  supportedDenoWorkerVersion,
 } from "@nullstyle/capnp-wasm-compiler-host";
 import { compilerPathFixture } from "./compiler-path-fixture.ts";
 
@@ -84,41 +83,29 @@ assert(
   await digest(pathResult.request) !== await digest(reversedPaths.request),
   "include order was ignored",
 );
-const worker = Deno.version.deno === supportedDenoWorkerVersion
-  ? await createWorkerCompiler(workerURL, {
-    ...modules,
-    generators: { cpp: loopGuest },
-  })
-  : undefined;
-if (!worker) {
-  const error = await rejects(
-    () => createWorkerCompiler(workerURL, modules),
-    "Error",
+// Worker execution runs on every Deno release; cancellation stops the guest
+// inside the worker, which then serves the next job.
+const worker = await createWorkerCompiler(workerURL, {
+  ...modules,
+  generators: { cpp: loopGuest },
+});
+try {
+  assert(
+    await digest((await worker.compile(compilerPathFixture)).request) ===
+      await digest(pathResult.request),
+    "worker did not preserve sourcePrefix/importPaths",
   );
   assert(
-    error.message.includes(`use Deno ${supportedDenoWorkerVersion}`),
-    "runtime guidance lost",
+    await digest((await worker.compile(request)).request) === expectedHash,
+    "direct and worker requests differ",
   );
-}
-try {
-  if (worker) {
-    assert(
-      await digest((await worker.compile(compilerPathFixture)).request) ===
-        await digest(pathResult.request),
-      "worker did not preserve sourcePrefix/importPaths",
-    );
-    assert(
-      await digest((await worker.compile(request)).request) === expectedHash,
-      "direct and worker requests differ",
-    );
-  }
   const invalid = {
     ...request,
     files: { "broken.capnp": "@0xece4bf9c1f867623; struct Broken { invalid" },
     entrypoints: ["broken.capnp"],
   };
   const failure = await rejects(
-    () => (worker ?? compiler).compile(invalid),
+    () => worker.compile(invalid),
     "CompileError",
   );
   assert(failure instanceof CompileError, "structured compiler error lost");
@@ -129,35 +116,31 @@ try {
     "source diagnostic lost",
   );
   assert(!("outputs" in failure), "failed compilation exposed outputs");
-  if (worker) {
+  assert(
+    await digest((await worker.compile(request)).request) === expectedHash,
+    "worker did not recover from malformed input",
+  );
+  for (const mode of ["timeout", "abort"] as const) {
+    const controller = new AbortController();
+    const pending = worker.compile({ ...request, generators: ["cpp"] }, {
+      timeoutMs: mode === "timeout" ? 100 : 5000,
+      signal: controller.signal,
+    });
+    const timer = mode === "abort"
+      ? setTimeout(() => controller.abort(), 100)
+      : undefined;
+    try {
+      await rejects(
+        () => pending,
+        mode === "timeout" ? "TimeoutError" : "AbortError",
+      );
+    } finally {
+      clearTimeout(timer);
+    }
     assert(
       await digest((await worker.compile(request)).request) === expectedHash,
-      "worker did not recover from malformed input",
+      `worker did not recover after ${mode}`,
     );
-  }
-  if (worker) {
-    for (const mode of ["timeout", "abort"] as const) {
-      const controller = new AbortController();
-      const pending = worker.compile({ ...request, generators: ["cpp"] }, {
-        timeoutMs: mode === "timeout" ? 100 : 5000,
-        signal: controller.signal,
-      });
-      const timer = mode === "abort"
-        ? setTimeout(() => controller.abort(), 100)
-        : undefined;
-      try {
-        await rejects(
-          () => pending,
-          mode === "timeout" ? "TimeoutError" : "AbortError",
-        );
-      } finally {
-        clearTimeout(timer);
-      }
-      assert(
-        await digest((await worker.compile(request)).request) === expectedHash,
-        `worker did not recover after ${mode}`,
-      );
-    }
   }
   const limited = await createCompiler(modules, {
     limits: { requestBytes: 1 },
@@ -186,24 +169,18 @@ try {
     ),
     checks: [
       "external npm exports and TypeScript declarations",
-      ...(worker
-        ? ["direct and worker compiler request parity"]
-        : ["unsupported Deno worker version rejected before execution"]),
+      "direct and worker compiler request parity",
       "imports, spaces, binary embeds and bundled streaming schema",
       "ordered include roots, source prefix and parent imports/embeds",
       "no process or network permission; read revoked before execution",
       "malformed input diagnostics",
-      ...(worker
-        ? [
-          "worker recovery and offline restart after termination grace",
-          "active guest timeout and abort",
-        ]
-        : []),
+      "worker recovery after malformed input",
+      "active guest timeout and abort stopped inside the reused worker",
       "request resource limit and standard include isolation",
       "missing generator rejection",
     ],
   }));
 } finally {
-  worker?.dispose();
+  worker.dispose();
   URL.revokeObjectURL(workerURL);
 }

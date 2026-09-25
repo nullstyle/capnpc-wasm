@@ -333,30 +333,6 @@ try {
   result.checks.push(
     "complete canonical request parity with native compiler for both include orders",
   );
-  if (result.deno === "2.6.8") {
-    const termination = JSON.parse(
-      await command(
-        [
-          deno,
-          "run",
-          "--no-config",
-          "--no-prompt",
-          `--allow-read=${repository}/tests/hosts/deno`,
-          `${repository}/tests/hosts/deno/worker-termination-probe.ts`,
-        ],
-        repository,
-        undefined,
-        8000,
-      ),
-    );
-    if (
-      termination.continuedAfterThreeSeconds ||
-      termination.afterThreeSeconds <= termination.atTermination
-    ) throw new Error("Deno worker failed the bounded termination probe");
-    result.checks.push(
-      "Deno worker counter stopped within the engine termination grace",
-    );
-  }
   const receiptPath = `build/test/compiler-host-package-${result.deno}.json`;
   await Deno.writeTextFile(
     receiptPath,
