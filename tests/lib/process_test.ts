@@ -6,6 +6,20 @@ import { describeExit, run } from "./process.ts";
 
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
+/**
+ * A child that ignores SIGTERM and spins until SIGKILL, or until this test
+ * process is gone: a runner killed before the escalation reaches the child
+ * must not leave it spinning (ledger row 119). `kill -0` is a shell builtin,
+ * so the loop starts no process, and the child never reads stdin.
+ */
+const ignoresTerm = [
+  "sh",
+  "-c",
+  'trap "" TERM; while kill -0 "$1" 2>/dev/null; do :; done',
+  "sh",
+  String(Deno.pid),
+];
+
 Deno.test("run captures stdout, stderr and the exit status", async () => {
   const result = await run(["sh", "-c", "printf out; printf err >&2; exit 3"]);
   assert(
@@ -50,10 +64,7 @@ Deno.test("run stops waiting for pipes a grandchild holds after the timeout", as
 });
 
 Deno.test("run escalates to SIGKILL when the child ignores SIGTERM", async () => {
-  const result = await run(["sh", "-c", 'trap "" TERM; sleep 5'], {
-    timeoutMs: 200,
-    killAfterMs: 200,
-  });
+  const result = await run(ignoresTerm, { timeoutMs: 200, killAfterMs: 200 });
   assert(
     result.timedOut && result.signal === "SIGKILL",
     `unexpected result ${describeExit(result)}`,
@@ -83,10 +94,11 @@ Deno.test("run escalates to SIGKILL while a stalled stdin write is pending", asy
   // A megabyte fills the pipe: the write blocks until the child is gone, and
   // the child ignores SIGTERM and never reads.
   const result = await settlesWithin(
-    run(
-      ["sh", "-c", 'trap "" TERM; while :; do :; done'],
-      { stdin: new Uint8Array(1 << 20), timeoutMs: 200, killAfterMs: 200 },
-    ),
+    run(ignoresTerm, {
+      stdin: new Uint8Array(1 << 20),
+      timeoutMs: 200,
+      killAfterMs: 200,
+    }),
     10_000,
   );
   const elapsed = performance.now() - started;

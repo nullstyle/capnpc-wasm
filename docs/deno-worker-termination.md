@@ -15,7 +15,9 @@ increments a shared atomic counter continuously, calls `terminate()`, and
 compares the counter three and four seconds later. Run it with read access to
 its directory under an externally bounded process, for example an eight-second
 subprocess timeout. The timeout must kill the child; affected Deno processes may
-not exit.
+not exit. If the process that bounds it dies first, the probe exits within about
+100 ms of being orphaned (its parent process ID changes), so an affected release
+cannot keep spinning unattended.
 
 | Deno  | Counter stable between 3s and 4s | Child exited before 8s |
 | ----- | -------------------------------- | ---------------------- |

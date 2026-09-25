@@ -12,6 +12,15 @@ const mode = Deno.args[0] ?? "js";
 if (!modes.includes(mode)) {
   throw new TypeError(`mode must be one of ${modes.join(", ")}: ${mode}`);
 }
+// The runner bounds this process by killing it at its deadline. A release
+// whose worker keeps spinning never exits on its own, so if the runner dies
+// first, exit once this process is orphaned (ledger row 119). The timer is
+// unref'd: it does not keep a release that stops the worker from exiting.
+const parent = Deno.ppid;
+Deno.unrefTimer(setInterval(() => {
+  if (Deno.ppid !== parent) Deno.exit(2);
+}, 100));
+
 const worker = new Worker(
   new URL("./worker-termination-child.ts", import.meta.url),
   { type: "module" },
