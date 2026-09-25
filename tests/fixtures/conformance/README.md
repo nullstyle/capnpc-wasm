@@ -64,6 +64,10 @@ status and Wasmtime's trap text (`call stack exhausted`, `interrupt`).
 | `browser-worker` | `tests/browser/test.ts`, `createWorkerCompiler` in each engine         | `test:browser`                    |
 | `studio`         | `tests/browser/test.ts`, `examples/browser/compiler.js` in each engine | `test:browser`                    |
 
+A `surfaces` key of the form `<surface>@<engine>` (`browser-worker@webkit`)
+holds a departure of one browser engine; the browser driver looks for it before
+the plain surface key.
+
 Each runner produces the "valid" generation request by compiling the same
 one-struct schema on its own surface; the malformed variants (`half`, `one`,
 `zeros8`, `pattern4k`) derive from it identically. Deadline rows run only where
@@ -73,16 +77,31 @@ the surface has a deadline (`timeoutMs`, a `context` deadline,
 ## Depth rows
 
 The recursion a compile needs grows with const-reference and import chains, and
-the ceiling depends on the engine's stack and even on the thread (GAP3-02):
-about 179 const references on wazero's interpreter, 267 in a Chromium worker,
-486 on Chromium's main thread, 555 on Deno, and about 2,700 under the launcher's
-8 MiB Wasm stack. The corpus pins a depth every surface must compile
-(`const-chain-100`, `import-chain-100`) and a chain no stack holds
-(`const-chain-4000`). Which stack ends first differs: V8 reports its own stack
-(`trap:stack`), while Wasmtime's 8 MiB call stack outlives the guest's 8 MiB
-linear-memory stack, which then faults (`trap`). `compiler-stack-overflow` and
-`generator-stack-overflow` use a synthetic recursion guest so that the stack
-kind itself is pinned on every surface.
+the ceiling depends on the engine's stack and even on the thread (GAP3-02).
+Measured ceilings, in const references and nested imports:
+
+| Surface                               | Const chain | Import chain |
+| ------------------------------------- | ----------- | ------------ |
+| WebKit 26.6 worker (and Studio)       | 34          | 90           |
+| wazero interpreter (Go SDK default)   | 179         | 487          |
+| Chromium 153 worker (and Studio)      | 275         | 744          |
+| Chromium 153 main thread              | 506         | 1,014        |
+| WebKit 26.6 main thread               | 552         | 1,014        |
+| Deno 2.9.6, direct                    | about 555   | about 1,500  |
+| Launcher (Wasmtime, 8 MiB Wasm stack) | about 2,700 |              |
+
+The browser and Go figures were measured on macOS arm64 on 2026-09-24 (the
+import chains above about 1,000 end in a compiler exit, not a stack fault); the
+Deno and launcher figures come from GAP3-02. The corpus pins chains every
+surface must compile, WebKit workers included (`const-chain-25`,
+`import-chain-60`), chains every surface but a WebKit worker compiles
+(`const-chain-100`, `import-chain-100`, recorded as `trap:stack` for
+`browser-worker@webkit` and `studio@webkit`), and a chain no stack holds
+(`const-chain-4000`). Which stack ends first differs: V8 and JavaScriptCore
+report their own stack (`trap:stack`), while Wasmtime's 8 MiB call stack
+outlives the guest's 8 MiB linear-memory stack, which then faults (`trap`).
+`compiler-stack-overflow` and `generator-stack-overflow` use a synthetic
+recursion guest so that the stack kind itself is pinned on every surface.
 
 ## Divergences
 
@@ -90,15 +109,17 @@ Every departure in `expected.json` carries a `reason` and a `finding`, and every
 case a surface cannot express carries a `skip` reason. The departures as
 recorded:
 
-| Case                                               | Surface    | Departure                                                                                            |
-| -------------------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------- |
-| `missing-import-root`, `missing-source-prefix`     | `launcher` | `exit(1)`: the launcher passes the arguments through and the compiler reports the missing directory. |
-| `const-chain-4000`                                 | `launcher` | `trap`: the guest's linear-memory stack faults before Wasmtime's call stack ends.                    |
-| `const-chain-4000`                                 | browsers   | `trap:stack` or `trap`: which stack ends first depends on the engine's thread stack.                 |
-| `generator-bad-name`                               | `go`       | `exit(70)`: the memory filesystem refuses the name at creation with `EPERM`, and the guest exits.    |
-| `generator-bad-name`                               | `launcher` | `ok`, one file: the launcher applies no output-name policy, and the host filesystem accepts `a\b`.   |
-| `generator-stderr-flood`, `generator-stdout-flood` | `launcher` | `ok`: the launcher has no stream budgets; the streams pass through to the caller.                    |
-| `generator-many-files`, `generator-big-file`       | `launcher` | `ok`: the launcher has no output budgets; 5,000 files and a 65 MiB file are published.               |
+| Case                                               | Surface                   | Departure                                                                                            |
+| -------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `missing-import-root`, `missing-source-prefix`     | `launcher`                | `exit(1)`: the launcher passes the arguments through and the compiler reports the missing directory. |
+| `const-chain-100`, `import-chain-100`              | WebKit worker and Studio  | `trap:stack`: WebKit's worker stack holds about 34 const references and 90 nested imports.           |
+| `const-chain-100`, `import-chain-100`              | Firefox worker and Studio | `ok` or `trap:stack`: unmeasured, since Firefox cannot launch on the development host.               |
+| `const-chain-4000`                                 | `launcher`                | `trap`: the guest's linear-memory stack faults before Wasmtime's call stack ends.                    |
+| `const-chain-4000`                                 | browsers                  | `trap:stack` or `trap`: which stack ends first depends on the engine's thread stack.                 |
+| `generator-bad-name`                               | `go`                      | `exit(70)`: the memory filesystem refuses the name at creation with `EPERM`, and the guest exits.    |
+| `generator-bad-name`                               | `launcher`                | `ok`, one file: the launcher applies no output-name policy, and the host filesystem accepts `a\b`.   |
+| `generator-stderr-flood`, `generator-stdout-flood` | `launcher`                | `ok`: the launcher has no stream budgets; the streams pass through to the caller.                    |
+| `generator-many-files`, `generator-big-file`       | `launcher`                | `ok`: the launcher has no output budgets; 5,000 files and a 65 MiB file are published.               |
 
 Cases a surface skips: the budget rows and `generator-long-name` on the launcher
 (no configurable budgets) and in Studio (fixed budgets); the custom guests in

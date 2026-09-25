@@ -135,12 +135,20 @@ export const standardIncludes: Record<string, string> = {
 const goAnnotated =
   `@0xece4bf9c1f867624;\nusing Go = import "/go.capnp";\n$Go.package("a");\n$Go.import("example.com/a");\nstruct A { x @0 :UInt8; }\n`;
 
-/** The ceiling below which every surface, worker threads included, must compile a const-reference chain. */
-export const passingConstChainDepth = 100;
+/**
+ * Chains every surface compiles, WebKit workers included: measured ceilings
+ * there are about 34 const references and 90 nested imports (GAP3-02).
+ */
+export const universalConstChainDepth = 25;
+export const universalImportChainDepth = 60;
+/**
+ * Chains every surface but a WebKit worker compiles: Chromium workers reach
+ * 275 and 744, main threads about 500 and 1,000, wazero's interpreter 179 and
+ * 487, and the launcher about 2,700 const references.
+ */
+export const commonChainDepth = 100;
 /** A const-reference chain no surface's stack holds. */
 export const failingConstChainDepth = 4000;
-/** An import chain every surface must compile. */
-export const passingImportChainDepth = 100;
 
 const text = (value: string): FileSpec => ({ text: value });
 const simpleWorkspace = {
@@ -245,10 +253,26 @@ export const cases: CaseSpec[] = [
     generators: [],
   },
   {
-    name: `const-chain-${passingConstChainDepth}`,
+    name: `const-chain-${universalConstChainDepth}`,
     op: "compile",
     files: {
-      "c.capnp": { recipe: "constChain", depth: passingConstChainDepth },
+      "c.capnp": { recipe: "constChain", depth: universalConstChainDepth },
+    },
+    entrypoints: ["c.capnp"],
+    generators: [],
+  },
+  {
+    name: `import-chain-${universalImportChainDepth}`,
+    op: "compile",
+    filesRecipe: { recipe: "importChain", depth: universalImportChainDepth },
+    entrypoints: ["f0.capnp"],
+    generators: [],
+  },
+  {
+    name: `const-chain-${commonChainDepth}`,
+    op: "compile",
+    files: {
+      "c.capnp": { recipe: "constChain", depth: commonChainDepth },
     },
     entrypoints: ["c.capnp"],
     generators: ["cpp", "rust", "zig"],
@@ -263,9 +287,9 @@ export const cases: CaseSpec[] = [
     generators: [],
   },
   {
-    name: `import-chain-${passingImportChainDepth}`,
+    name: `import-chain-${commonChainDepth}`,
     op: "compile",
-    filesRecipe: { recipe: "importChain", depth: passingImportChainDepth },
+    filesRecipe: { recipe: "importChain", depth: commonChainDepth },
     entrypoints: ["f0.capnp"],
     generators: ["cpp", "rust", "zig"],
   },

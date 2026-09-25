@@ -164,8 +164,12 @@ export interface SurfaceOverride extends Partial<Expectation> {
   finding?: string;
 }
 
+/** The browser engines a `<surface>@<engine>` key can name. */
+export const engineNames = ["chromium", "firefox", "webkit"] as const;
+
 export interface CaseExpectation extends Expectation {
-  surfaces?: Partial<Record<Surface, SurfaceOverride>>;
+  /** Keyed by surface, or by `<surface>@<engine>` for one browser engine. */
+  surfaces?: Record<string, SurfaceOverride>;
 }
 
 export interface ExpectedFile {
@@ -190,10 +194,14 @@ export function expectationFor(
   expected: ExpectedFile,
   name: string,
   surface: Surface,
+  engine?: string,
 ): { skip: string } | Expectation {
   const entry = expected.cases[name];
   if (!entry) throw new Error(`expected.json has no entry for ${name}`);
-  const override = entry.surfaces?.[surface];
+  const override =
+    (engine !== undefined
+      ? entry.surfaces?.[`${surface}@${engine}`]
+      : undefined) ?? entry.surfaces?.[surface];
   if (override?.skip) return { skip: override.skip };
   const { surfaces: _surfaces, ...reference } = entry;
   if (!override) return reference;
@@ -227,7 +235,13 @@ export function validateExpected(
       if (!outcomeWord.test(word)) problems.push(`${name}: outcome ${word}`);
     }
     for (const [surface, override] of Object.entries(entry.surfaces ?? {})) {
-      if (!surfaces.includes(surface as Surface)) {
+      const [base, engine] = surface.split("@");
+      if (
+        !surfaces.includes(base as Surface) ||
+        (engine !== undefined &&
+          (!engineNames.includes(engine as typeof engineNames[number]) ||
+            !base.startsWith("browser-") && base !== "studio"))
+      ) {
         problems.push(`${name}: unknown surface ${surface}`);
       }
       if (override.skip !== undefined) {

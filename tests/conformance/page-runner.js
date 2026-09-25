@@ -297,6 +297,7 @@ export async function runStudioCase(spec, inputs, studio, CompileError) {
           entrypoints: spec.entrypoints,
           generators: [],
         }),
+        spec.generators,
         signal,
         status,
       );

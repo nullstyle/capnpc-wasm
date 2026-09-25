@@ -128,6 +128,34 @@
     "sha256": "4f130970c6dc9e520cd19edf37b38661da67f936428775e6efc2705716a894c9"
   },
   {
+    "name": "const-chain-25",
+    "op": "compile",
+    "files": {
+      "c.capnp": {
+        "recipe": "constChain",
+        "depth": 25
+      }
+    },
+    "entrypoints": [
+      "c.capnp"
+    ],
+    "generators": [],
+    "sha256": "960f5350e50a575f4422543e0307d8646ba4d756ce364ae1c3e1a512f335e042"
+  },
+  {
+    "name": "import-chain-60",
+    "op": "compile",
+    "filesRecipe": {
+      "recipe": "importChain",
+      "depth": 60
+    },
+    "entrypoints": [
+      "f0.capnp"
+    ],
+    "generators": [],
+    "sha256": "57cd1dd064a901eb8ed904bba321dc9839f486a33736cc0893a45831688c0ff9"
+  },
+  {
     "name": "const-chain-100",
     "op": "compile",
     "files": {

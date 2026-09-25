@@ -14,6 +14,15 @@ import type {
 } from "./sdk.ts";
 import { envMilliseconds, stepClock } from "./deadline.ts";
 import {
+  type BrowserRow,
+  browserSurfaces,
+  bundleStudioAdapter,
+  loadBrowserCorpus,
+  runBrowserSurface,
+  setupConformance,
+  teardownConformance,
+} from "./conformance.ts";
+import {
   checkIsolatedTermination,
   checkPlainTermination,
   isolationHeaders,
@@ -88,16 +97,21 @@ function assert(condition: unknown, message: string): asserts condition {
 // next to the receipt for run.ts, which reports it if it has to stop a driver.
 const receiptPath = Deno.args[1];
 const stepPath = receiptPath ? `${receiptPath}.step` : undefined;
+/** Once a step fails, cleanup steps no longer replace its label. */
+let failedStep: string | undefined;
+function recordStep(label: string) {
+  if (!stepPath) return;
+  try {
+    Deno.writeTextFileSync(stepPath, `${label}\n`);
+  } catch {
+    // The step file is a diagnostic; the run does not depend on it.
+  }
+}
 const clock = stepClock({
   defaultMs: envMilliseconds("CAPNP_BROWSER_DEADLINE_MS", 60_000),
   stall: Deno.env.get("CAPNP_BROWSER_STALL") || undefined,
   onStep(label) {
-    if (!stepPath) return;
-    try {
-      Deno.writeTextFileSync(stepPath, `${label}\n`);
-    } catch {
-      // The step file is a diagnostic; the run does not depend on it.
-    }
+    if (failedStep === undefined) recordStep(label);
   },
 });
 
@@ -292,6 +306,10 @@ async function prepare() {
   for (const name of Object.keys(hostileGuests)) {
     assert(name in hostile, `embedded guest ${name} has no .wat source`);
   }
+  // The failure and limit corpus, and the Schema Studio adapter bundled with
+  // the pinned Deno for the Studio rows.
+  const corpus = await loadBrowserCorpus(new URL(`file://${root}/`));
+  await bundleStudioAdapter(root, `${work}/studio-adapter.js`);
   // Native diagnostics for the invalid fixtures, staged like the SDK's /src,
   // so both browser modes can be held to the native compiler's exact text.
   const invalid = await files(`${root}/tests/fixtures/invalid`);
@@ -441,6 +459,7 @@ async function prepare() {
     spinGuest,
     spinCounter,
     hostileGuests: hostile,
+    corpus,
   };
 }
 
@@ -464,11 +483,34 @@ for (
     "capnpc-zig",
   ]
 ) {
-  assets.set(`/wasm/${name}.wasm`, {
-    bytes: await Deno.readFile(`${root}/dist/wasm/${name}.wasm`),
+  const bytes = await Deno.readFile(`${root}/dist/wasm/${name}.wasm`);
+  assets.set(`/wasm/${name}.wasm`, { bytes, type: "application/wasm" });
+  // The Studio adapter loads the same shipped modules by its own asset paths.
+  assets.set(`/studio/assets/wasm/${name}.wasm`, {
+    bytes,
     type: "application/wasm",
   });
 }
+assets.set(
+  "/studio/assets/typescript/worker.js",
+  assets.get("/sdk/worker.js")!,
+);
+for (
+  const [path, bytes] of Object.entries(await files(`${root}/dist/include`))
+) {
+  assets.set(`/studio/assets/include/${path}`, {
+    bytes: bytes as Uint8Array,
+    type: "text/plain",
+  });
+}
+assets.set("/studio/adapter.js", {
+  bytes: await Deno.readFile(`${data.work}/studio-adapter.js`),
+  type: "text/javascript",
+});
+assets.set("/conformance/page-runner.js", {
+  bytes: await Deno.readFile(`${root}/tests/conformance/page-runner.js`),
+  type: "text/javascript",
+});
 const server = Deno.serve(
   { hostname: "127.0.0.1", port: 0, onListen() {} },
   (request) => {
@@ -559,6 +601,13 @@ try {
     },
     { memoryGuest: data.memoryGuest, streamGuest: data.streamGuest },
     `${engine} load SDK`,
+  );
+  // The conformance rows import the shared runner and the Studio adapter,
+  // and prime the adapter with every language, while the server is up.
+  const valid = await setupConformance(
+    evaluate,
+    data.corpus.guests,
+    `${engine} load the conformance runner and the Studio adapter`,
   );
 
   // The termination acceptance (TST-04) runs a spinning guest on two more
@@ -1156,6 +1205,30 @@ try {
     );
   }
 
+  // The failure and limit corpus on the three browser surfaces (GAP3-01).
+  // Each surface runs its deadline rows last: in WebKit every timed-out guest
+  // keeps spinning until the browser closes.
+  const conformance: Record<string, { observed: number; skipped: number }> = {};
+  const conformanceRows: BrowserRow[] = [];
+  for (const surface of browserSurfaces) {
+    const rows = await runBrowserSurface(
+      engine,
+      surface,
+      data.corpus,
+      valid,
+      evaluate,
+    );
+    conformanceRows.push(...rows);
+    const skipped = rows.filter((row) => row.skipped).length;
+    conformance[surface] = { observed: rows.length - skipped, skipped };
+    console.log(
+      `PASS ${engine} ${surface}: ${
+        rows.length - skipped
+      } conformance rows match tests/fixtures/conformance/expected.json (${skipped} not expressible)`,
+    );
+  }
+  await teardownConformance(evaluate, `${engine} dispose conformance clients`);
+
   // Termination acceptance, last: in WebKit a guest that outlives its
   // cancellation keeps a core busy until the browser closes.
   const termination: TerminationResult[] = [];
@@ -1195,6 +1268,8 @@ try {
             path: `${scenario.directory}/${host}-request.bin`,
           })),
         })),
+        conformance,
+        conformanceRows,
         termination,
       },
       null,
@@ -1205,6 +1280,8 @@ try {
     `${engine} execution passed offline with process spawning disabled; canonical audit receipt: ${receipt}`,
   );
 } catch (error) {
+  failedStep = clock.current;
+  recordStep(failedStep);
   // Report before shutting down an unhealthy browser so cleanup cannot hide
   // the failing operation or the host-side recovery deadline.
   console.error(

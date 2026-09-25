@@ -16,7 +16,7 @@
     "go": "sdk/go with default options (the compiler on wazero's interpreter)",
     "launcher": "bin/capnp-wasm under Wasmtime; compiler guests run as generator modules",
     "browser-direct": "createCompiler in Chromium, Firefox, and WebKit",
-    "browser-worker": "createWorkerCompiler in Chromium, Firefox, and WebKit",
+    "browser-worker": "createWorkerCompiler in Chromium, Firefox, and WebKit; `browser-worker@<engine>` keys hold one engine's departures",
     "studio": "examples/browser/compiler.js in Chromium, Firefox, and WebKit"
   },
   "cases": {
@@ -84,6 +84,16 @@
       "stage": "compiler",
       "stderr": true
     },
+    "const-chain-25": {
+      "expect": "ok",
+      "outputs": {},
+      "diagnostics": 0
+    },
+    "import-chain-60": {
+      "expect": "ok",
+      "outputs": {},
+      "diagnostics": 0
+    },
     "const-chain-100": {
       "expect": "ok",
       "outputs": {
@@ -91,7 +101,37 @@
         "rust": 1,
         "zig": 1
       },
-      "diagnostics": 0
+      "diagnostics": 0,
+      "surfaces": {
+        "browser-worker@webkit": {
+          "expect": "trap:stack",
+          "stage": "compiler",
+          "reason": "WebKit 26.6 workers exhaust their stack at about 34 const references and 90 nested imports; Chromium workers reach 275 and 744, main threads about 500 and 1,000 (measured on macOS arm64)",
+          "finding": "GAP3-02"
+        },
+        "studio@webkit": {
+          "expect": "trap:stack",
+          "stage": "compiler",
+          "reason": "WebKit 26.6 workers exhaust their stack at about 34 const references and 90 nested imports; Chromium workers reach 275 and 744, main threads about 500 and 1,000 (measured on macOS arm64)",
+          "finding": "GAP3-02"
+        },
+        "browser-worker@firefox": {
+          "expect": [
+            "ok",
+            "trap:stack"
+          ],
+          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host, so CI's Linux run records which outcome this engine's worker stack gives",
+          "finding": "GAP3-02"
+        },
+        "studio@firefox": {
+          "expect": [
+            "ok",
+            "trap:stack"
+          ],
+          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host, so CI's Linux run records which outcome this engine's worker stack gives",
+          "finding": "GAP3-02"
+        }
+      }
     },
     "const-chain-4000": {
       "expect": "trap:stack",
@@ -139,7 +179,37 @@
         "rust": 1,
         "zig": 1
       },
-      "diagnostics": 0
+      "diagnostics": 0,
+      "surfaces": {
+        "browser-worker@webkit": {
+          "expect": "trap:stack",
+          "stage": "compiler",
+          "reason": "WebKit 26.6 workers exhaust their stack at about 34 const references and 90 nested imports; Chromium workers reach 275 and 744, main threads about 500 and 1,000 (measured on macOS arm64)",
+          "finding": "GAP3-02"
+        },
+        "studio@webkit": {
+          "expect": "trap:stack",
+          "stage": "compiler",
+          "reason": "WebKit 26.6 workers exhaust their stack at about 34 const references and 90 nested imports; Chromium workers reach 275 and 744, main threads about 500 and 1,000 (measured on macOS arm64)",
+          "finding": "GAP3-02"
+        },
+        "browser-worker@firefox": {
+          "expect": [
+            "ok",
+            "trap:stack"
+          ],
+          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host, so CI's Linux run records which outcome this engine's worker stack gives",
+          "finding": "GAP3-02"
+        },
+        "studio@firefox": {
+          "expect": [
+            "ok",
+            "trap:stack"
+          ],
+          "reason": "unmeasured: Firefox cannot launch on the macOS 27 development host, so CI's Linux run records which outcome this engine's worker stack gives",
+          "finding": "GAP3-02"
+        }
+      }
     },
     "path-4096": {
       "expect": "ok",
