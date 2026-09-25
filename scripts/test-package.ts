@@ -507,6 +507,10 @@ try {
   });
   await checkLauncher(toolsInstalled, installed);
   await Deno.copyFile("tests/package/consumer.ts", `${consumer}/consumer.ts`);
+  await Deno.copyFile(
+    "tests/package/compiler-path-fixture.ts",
+    `${consumer}/compiler-path-fixture.ts`,
+  );
   await Deno.copyFile("tests/package/main.go", `${consumer}/main.go`);
   await Deno.writeTextFile(
     `${consumer}/schema.capnp`,
@@ -526,7 +530,7 @@ try {
     "--cached-only",
     "--no-prompt",
     `--allow-read=${consumer}`,
-    `--allow-write=${consumer}/deno-result.json`,
+    `--allow-write=${consumer}/deno-result.json,${consumer}/deno-paths.json`,
     "consumer.ts",
   ], { cwd: consumer });
   await Deno.writeTextFile(
@@ -572,6 +576,25 @@ try {
       "external Go and Deno package consumers produced different bytes",
     );
   }
+  // The compiler-path fixture (ordered import roots and a source prefix) in
+  // both root orders: the two SDKs must emit byte-identical requests.
+  const denoPaths = JSON.parse(
+    await Deno.readTextFile(`${consumer}/deno-paths.json`),
+  );
+  const goPaths = JSON.parse(
+    await Deno.readTextFile(`${consumer}/go-paths.json`),
+  );
+  if (
+    Object.keys(denoPaths).length !== 2 ||
+    JSON.stringify(Object.entries(denoPaths).sort()) !==
+      JSON.stringify(Object.entries(goPaths).sort())
+  ) {
+    throw new Error(
+      `external Go and Deno package consumers compiled the compiler-path fixture differently: ${
+        JSON.stringify({ deno: denoPaths, go: goPaths })
+      }`,
+    );
+  }
   await Deno.writeTextFile(
     "build/test/package-receipt.json",
     JSON.stringify(
@@ -604,8 +627,10 @@ try {
           "external Go compile/replay",
           "public pinned wazero without replacement",
           "cross-SDK generated-byte parity",
+          "cross-SDK compiler-path fixture request parity in both import root orders",
         ],
         generated: deno,
+        paths: denoPaths,
       },
       null,
       2,

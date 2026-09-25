@@ -4,6 +4,7 @@ import {
   defaultLimits,
   supportedDenoWorkerVersion,
 } from "@nullstyle/capnpc-wasm";
+import { compilerPathFixture } from "./compiler-path-fixture.ts";
 
 const root = new URL("./node_modules/@nullstyle/capnpc-wasm/", import.meta.url);
 const read = (path: string) => Deno.readFile(new URL(path, root));
@@ -83,6 +84,23 @@ try {
 } finally {
   worker?.dispose();
 }
+// The shared compiler-path fixture in both import root orders; the package
+// gate compares these digests with the Go consumer's go-paths.json.
+const paths: Record<string, string> = {};
+for (
+  const [key, importPaths] of [
+    ["paths/request", compilerPathFixture.importPaths],
+    ["paths/request-reversed", [...compilerPathFixture.importPaths].reverse()],
+  ] as const
+) {
+  paths[key] = await digest(
+    (await compiler.compile({ ...compilerPathFixture, importPaths })).request,
+  );
+}
+await Deno.writeTextFile(
+  new URL("./deno-paths.json", import.meta.url),
+  JSON.stringify(paths),
+);
 await Deno.writeTextFile(
   new URL("./deno-result.json", import.meta.url),
   JSON.stringify(hashes),

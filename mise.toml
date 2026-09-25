@@ -440,7 +440,7 @@ run = [
 [tasks."test:sdk-go-race"]
 description = "Run the Go SDK concurrency, cancellation, and Close tests under the race detector"
 depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:zig"]
-run = "go -C sdk/go test -race -count=1 -mod=readonly -run 'TestCompiler|TestGenerate|TestCancellation|TestClose|TestSleeping|TestFilesystem|TestNew|TestEngine|TestStdio|TestMemory|TestCompilationCache' ./..."
+run = "go -C sdk/go test -race -count=1 -mod=readonly -run 'TestCompiler|TestGenerate|TestCancellation|TestClose|TestSleeping|TestFilesystem|TestNew|TestEngine|TestStdio|TestMemory|TestCompilationCache|TestMaxConcurrentJobs|TestPreStartLimits|TestRequestBytes|TestOutput|TestStdioBudgets|TestErrorKeeps' ./..."
 
 [tasks."test:cli-parity"]
 description = "Compare the non-compile CLI (upstream capnp-test.sh, conversions, eval) with native on the launcher, Wasmtime, wazero, and the Deno host"
