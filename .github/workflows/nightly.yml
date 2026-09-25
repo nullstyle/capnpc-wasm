@@ -91,6 +91,16 @@ jobs:
           exit 1
       - name: Initialize only pinned top-level references
         run: mise run setup
+      # The Intel runner (four x86_64 CPUs) is the slowest host, and each
+      # load failure so far came from it running mise's default of eight tasks
+      # at once: the harness's SIGTERM race (nightly 36120138448), an SDK
+      # cancellation grace (36132427000), and a cold Zig consumer build past
+      # its timeout (36141746707). With two tasks at once its check, about 17
+      # minutes now, takes an estimated 25 to 45 (the tasks' logged durations
+      # sum to 78 to 94 minutes), well inside the job's 90.
+      - name: Run two mise tasks at once on the Intel runner
+        if: matrix.os == 'macos-15-intel'
+        run: echo "MISE_JOBS=2" >> "$GITHUB_ENV"
       - name: Check native and Wasm parity, generated consumers, and SDKs
         run: mise run check
       - name: Verify release archives and external package consumers
