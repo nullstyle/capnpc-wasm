@@ -120,10 +120,31 @@ identical output. Each cancels a compile for a zig generator that spins forever
 the workspace with the real compiler and the C++, Rust, and Go generators, whose
 files are checked against the native oracle. On this page, which is not
 cross-origin isolated, each abort replaces the worker and each timeout keeps it.
-The step deadlines detect a stalled browser without changing the SDK's
-cancellation or its normal 30-second recovery budget. Native output and
-temporary browser profiles stay under `build/test/browser-*`; the output remains
-available for inspection.
+Native output and temporary browser profiles stay under `build/test/browser-*`;
+the output remains available for inspection.
+
+Every soak worker is traced (`worker-trace.ts`): it reports its start, each
+message, each Wasm compile and instantiate, and each reply. A recovery gets 20
+seconds, over six times the slowest one measured in CI. One that does not finish
+in time prints an `OBSERVED <engine> soak recovery stall` line with its worker's
+last events and whether a fresh worker and Wasm compilation still respond, and
+is retried once on the same client, which replaces the stalled worker as it
+would for an application. One such stall per run is tolerated; a second one, or
+a retry that fails too, fails the run.
+
+One recovery stall has been seen. In the nightly run
+[36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524),
+WebKit on Linux did not finish the recovery after the fifth cycle's abort within
+its 30 seconds, in the suite's second run, with three engines in parallel on a
+4-CPU runner; the first run in the same job passed all twenty cycles. A
+diagnostic run
+([36117453491](https://github.com/nullstyle/capnpc-wasm/actions/runs/36117453491))
+repeated 120 soak cycles per engine on Linux with every worker traced and found
+no stall: recoveries took up to 3.1 s in WebKit and up to 1.4 s in Chromium and
+Firefox, fresh workers started and compiled Wasm, and a terminated worker's
+guest stopped within 50 ms in WebKit, at once in Firefox, and at its own
+2-second deadline in Chromium. The cause of the stall is unknown; the next one
+reports its own trace.
 
 Direct and worker clients also reject aggregate workspace and output overages
 without returning partial output, then successfully execute another permitted

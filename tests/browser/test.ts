@@ -16,6 +16,7 @@ import type {
   WorkerCompiler,
 } from "./sdk.ts";
 import { envMilliseconds, stepClock } from "./deadline.ts";
+import { type TracedWorker, traceWorkerTemplate } from "./worker-trace.ts";
 import { describeObservation } from "../conformance/outcome.ts";
 import {
   type BrowserRow,
@@ -71,8 +72,14 @@ type BrowserState = {
   memoryGuest: Uint8Array;
   streamGuest: Uint8Array;
   hostileGuests?: Record<string, Uint8Array>;
-  /** The recovery soak's client: a spinning compiler and the real generators. */
+  /** The recovery soak's client: the real compiler and a spinning zig generator. */
   soak?: WorkerCompiler;
+  /** The soak's traced workers, the page's own Worker, and the traced script. */
+  soakTrace?: {
+    workers: TracedWorker[];
+    RealWorker: typeof Worker;
+    url: string;
+  };
 };
 type BrowserGlobal = typeof globalThis & { capnpTest: BrowserState };
 type HostileOutcome = {
@@ -1230,25 +1237,66 @@ try {
   // compile then runs the real compiler and the C++, Rust, and Go generators.
   // On this page, which is not cross-origin isolated, an abort replaces the
   // worker and a timeout keeps it. The abort fires at 50 ms, before the job's
-  // 2 s deadline, which bounds a spinning guest that terminate() leaves
-  // running.
+  // 2 s deadline.
+  //
+  // Every soak worker is traced (worker-trace.ts). A recovery gets 20 s, over
+  // six times the slowest one measured in CI (WebKit on Linux, 3.1 s). One that
+  // does not finish in time is reported with its worker's trace and whether a
+  // fresh worker and Wasm compilation still respond, then retried once on the
+  // same client, which replaces the stalled worker as it would for an
+  // application. One such stall per run is tolerated and reported
+  // (tests/browser/README.md records the one seen so far); a second one, or a
+  // retry that fails too, fails the run.
   const soakLanguages = ["cpp", "rust", "go"] as const;
+  const soakRecoveryMs = 20_000;
   await evaluate(
-    async ({ spinGuest }) => {
+    async ({ spinGuest, template }) => {
       const state = (globalThis as BrowserGlobal).capnpTest;
-      state.soak = await state.sdk.createWorkerCompiler(state.workerURL, {
+      const workers: TracedWorker[] = [];
+      const byWorker = new WeakMap<Worker, TracedWorker>();
+      const RealWorker = globalThis.Worker;
+      globalThis.Worker = class extends RealWorker {
+        constructor(url: string | URL, options?: WorkerOptions) {
+          super(url, options);
+          const traced: TracedWorker = { events: [], terminated: false };
+          workers.push(traced);
+          byWorker.set(this, traced);
+          this.addEventListener("message", (event: MessageEvent) => {
+            const message = event.data;
+            if (message && message.kind === "capnpTrace") {
+              traced.events.push(`${message.t}:${message.event}`);
+              if (traced.events.length > 60) traced.events.splice(0, 20);
+            }
+          });
+        }
+        override terminate() {
+          const traced = byWorker.get(this);
+          if (traced) traced.terminated = true;
+          super.terminate();
+        }
+      } as typeof Worker;
+      const url = URL.createObjectURL(
+        new Blob([template.replace("__REAL_WORKER_URL__", state.workerURL)], {
+          type: "text/javascript",
+        }),
+      );
+      state.soakTrace = { workers, RealWorker, url };
+      state.soak = await state.sdk.createWorkerCompiler(url, {
         ...state.modules,
         generators: { ...state.modules.generators, zig: spinGuest },
       });
     },
-    { spinGuest: data.spinGuest },
+    { spinGuest: data.spinGuest, template: traceWorkerTemplate },
     `${engine} create the recovery soak client`,
   );
+  let soakStalls = 0;
   for (let iteration = 0; iteration < 20; iteration++) {
     const mode = iteration % 2 === 0 ? "abort" : "timeout";
     const result = await evaluate(
-      async ({ mode, input, recovered }) => {
-        const soak = (globalThis as BrowserGlobal).capnpTest.soak!;
+      async ({ mode, input, recovered, recoveryMs }) => {
+        const state = (globalThis as BrowserGlobal).capnpTest;
+        const soak = state.soak!;
+        const trace = state.soakTrace!;
         const controller = new AbortController();
         const spinning = { ...input, generators: ["zig" as const] };
         let pending: Promise<Result>;
@@ -1261,51 +1309,160 @@ try {
         } else {
           pending = soak.compile(spinning, { timeoutMs: 100 });
         }
+        let cancellation: Error | undefined;
         try {
           await pending;
-          return { name: "unexpected success", outputs: {} };
         } catch (error) {
-          const expectedName = mode === "abort" ? "AbortError" : "TimeoutError";
-          if ((error as Error).name !== expectedName) {
-            throw new Error(
-              `${mode} expected ${expectedName}, received ${
-                (error as Error).name
-              }: ${(error as Error).message}`,
-              { cause: error },
-            );
-          }
-          let result: Result;
-          try {
-            result = await soak.compile({ ...input, generators: recovered });
-          } catch (cause) {
-            throw new Error(
-              `worker recovery after ${mode} failed: ${
-                (cause as Error).name
-              }: ${(cause as Error).message}`,
-              { cause },
-            );
-          }
-          return {
-            name: (error as Error).name,
-            outputs: Object.fromEntries(
-              Object.entries(result.outputs).map(([language, files]) => [
-                language,
-                Object.fromEntries(
-                  Object.entries(files!).map((
-                    [path, bytes],
-                  ) => [path, Array.from(bytes)]),
-                ),
-              ]),
-            ),
-          };
+          cancellation = error as Error;
         }
+        if (!cancellation) {
+          return { name: "unexpected success", outputs: {}, stall: undefined };
+        }
+        const expectedName = mode === "abort" ? "AbortError" : "TimeoutError";
+        if (cancellation.name !== expectedName) {
+          throw new Error(
+            `${mode} expected ${expectedName}, received ${cancellation.name}: ${cancellation.message}`,
+            { cause: cancellation },
+          );
+        }
+        type Recovery =
+          | { ok: true; result: Result }
+          | { ok: false; error: string; afterMs: number };
+        const recover = async (): Promise<Recovery> => {
+          const started = performance.now();
+          try {
+            return {
+              ok: true,
+              result: await soak.compile({ ...input, generators: recovered }, {
+                timeoutMs: recoveryMs,
+              }),
+            };
+          } catch (error) {
+            return {
+              ok: false,
+              error: `${(error as Error).name}: ${(error as Error).message}`,
+              afterMs: Math.round(performance.now() - started),
+            };
+          }
+        };
+        let recovery = await recover();
+        let stall: Record<string, unknown> | undefined;
+        if (!recovery.ok) {
+          const stalled = trace.workers.at(-1);
+          const worker = stalled
+            ? {
+              events: stalled.events.slice(-16),
+              terminated: stalled.terminated,
+            }
+            : null;
+          // Does the engine itself still start workers and compile Wasm?
+          const within = (ms: number, promise: Promise<string>) =>
+            Promise.race([
+              promise,
+              new Promise<string>((resolve) =>
+                setTimeout(() => resolve(`no answer in ${ms} ms`), ms)
+              ),
+            ]).catch((error) => `error: ${error}`);
+          const blobWorker = (source: string) =>
+            new Worker(
+              URL.createObjectURL(
+                new Blob([source], { type: "text/javascript" }),
+              ),
+            );
+          // A module with one empty function.
+          const tiny = [
+            0,
+            97,
+            115,
+            109,
+            1,
+            0,
+            0,
+            0,
+            1,
+            4,
+            1,
+            96,
+            0,
+            0,
+            3,
+            2,
+            1,
+            0,
+            10,
+            4,
+            1,
+            2,
+            0,
+            11,
+          ];
+          let started = performance.now();
+          const plain = blobWorker("postMessage('up')");
+          const plainWorker = `${await within(
+            5000,
+            new Promise((resolve) => (plain.onmessage = () => resolve("up"))),
+          )} after ${Math.round(performance.now() - started)} ms`;
+          plain.terminate();
+          started = performance.now();
+          const compiling = blobWorker(
+            `WebAssembly.compile(new Uint8Array(${
+              JSON.stringify(tiny)
+            })).then(() => postMessage("compiled"), (e) => postMessage("error " + e))`,
+          );
+          const workerCompile = `${await within(
+            5000,
+            new Promise((
+              resolve,
+            ) => (compiling.onmessage = (event) =>
+              resolve(String(event.data)))
+            ),
+          )} after ${Math.round(performance.now() - started)} ms`;
+          compiling.terminate();
+          started = performance.now();
+          const pageCompile = `${await within(
+            5000,
+            WebAssembly.compile(new Uint8Array(tiny)).then(() => "compiled"),
+          )} after ${Math.round(performance.now() - started)} ms`;
+          stall = {
+            error: recovery.error,
+            afterMs: recovery.afterMs,
+            worker,
+            workersStarted: trace.workers.length,
+            health: { plainWorker, workerCompile, pageCompile },
+          };
+          const retried = await recover();
+          if (!retried.ok) {
+            throw new Error(
+              `worker recovery after ${mode} failed twice (${retried.error} after ${retried.afterMs} ms); the first stall: ${
+                JSON.stringify(stall)
+              }`,
+            );
+          }
+          recovery = retried;
+        }
+        return {
+          name: cancellation.name,
+          outputs: Object.fromEntries(
+            Object.entries(recovery.result.outputs).map(([language, files]) => [
+              language,
+              Object.fromEntries(
+                Object.entries(files!).map((
+                  [path, bytes],
+                ) => [path, Array.from(bytes)]),
+              ),
+            ]),
+          ),
+          stall,
+        };
       },
       {
         mode,
         input: data.scenarios[0].input,
         recovered: [...soakLanguages],
+        recoveryMs: soakRecoveryMs,
       },
       `${engine} worker ${mode} recovery cycle ${iteration + 1}`,
+      3 * soakRecoveryMs + 30_000,
     );
     assert(
       result.name === (mode === "abort" ? "AbortError" : "TimeoutError"),
@@ -1321,6 +1478,20 @@ try {
       ),
       `worker recovery after ${mode}`,
     );
+    if (result.stall) {
+      soakStalls++;
+      console.log(
+        `OBSERVED ${engine} soak recovery stall in cycle ${
+          iteration + 1
+        } (${mode}), recovered on retry: ${JSON.stringify(result.stall)}`,
+      );
+      assert(
+        soakStalls <= 1,
+        `${engine}: a second soak recovery stalled (cycle ${
+          iteration + 1
+        }); the OBSERVED stall lines carry both traces`,
+      );
+    }
     console.log(
       `PASS ${engine} worker: ${mode} rejects the job and permits reuse (${
         iteration + 1
@@ -1328,7 +1499,12 @@ try {
     );
   }
   await evaluate(
-    () => (globalThis as BrowserGlobal).capnpTest.soak!.dispose(),
+    () => {
+      const state = (globalThis as BrowserGlobal).capnpTest;
+      state.soak!.dispose();
+      globalThis.Worker = state.soakTrace!.RealWorker;
+      URL.revokeObjectURL(state.soakTrace!.url);
+    },
     undefined,
     `${engine} dispose the recovery soak client`,
   );
