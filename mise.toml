@@ -434,7 +434,7 @@ run = "deno run --allow-read scripts/check-links.ts"
 description = "Self-check the shared Deno test harness under tests/lib (no build; the process test may run sh)"
 run = [
   "deno test tests/lib/harness_test.ts",
-  "deno test --allow-run=sh --allow-env --allow-read=tests/lib tests/lib/process_test.ts",
+  "deno test --allow-run=sh --allow-env={{vars.suite_env}} --allow-read=tests/lib tests/lib/process_test.ts",
 ]
 
 [tasks."test:sdk-go-race"]

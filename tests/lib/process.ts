@@ -171,6 +171,10 @@ export async function run(
   }).spawn();
   const stdoutBytes = collect(child.stdout, stop);
   const stderrBytes = collect(child.stderr, stop);
+  // Arm the SIGKILL escalation before writing stdin: a child that ignores
+  // SIGTERM and stops reading would otherwise block the write, and the run,
+  // forever.
+  const exit = waitForExit(child, controller.signal, killAfterMs);
   try {
     if (stdin) {
       const writer = child.stdin.getWriter();
@@ -185,7 +189,7 @@ export async function run(
         writer.releaseLock();
       }
     }
-    const status = await waitForExit(child, controller.signal, killAfterMs);
+    const status = await exit;
     exited = true;
     if (timedOut) stopReading();
     return {

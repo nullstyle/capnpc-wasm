@@ -31,7 +31,7 @@ Deno.test("run stops waiting for pipes a grandchild holds after the timeout", as
   const started = performance.now();
   // The backgrounded sleep inherits stdout and stderr and outlives sh.
   const result = await run(
-    ["sh", "-c", "sleep 30 & printf partial; sleep 30"],
+    ["sh", "-c", "sleep 5 & printf partial; sleep 5"],
     { timeoutMs: 300 },
   );
   const elapsed = performance.now() - started;
@@ -42,7 +42,7 @@ Deno.test("run stops waiting for pipes a grandchild holds after the timeout", as
       JSON.stringify(text(result.stdout))
     }`,
   );
-  assert(elapsed < 5_000, `run returned only after ${Math.round(elapsed)} ms`);
+  assert(elapsed < 3_000, `run returned only after ${Math.round(elapsed)} ms`);
   assert(
     describeExit(result) === "timed out and was killed by SIGTERM",
     describeExit(result),
@@ -50,7 +50,7 @@ Deno.test("run stops waiting for pipes a grandchild holds after the timeout", as
 });
 
 Deno.test("run escalates to SIGKILL when the child ignores SIGTERM", async () => {
-  const result = await run(["sh", "-c", 'trap "" TERM; sleep 30'], {
+  const result = await run(["sh", "-c", 'trap "" TERM; sleep 5'], {
     timeoutMs: 200,
     killAfterMs: 200,
   });
@@ -58,4 +58,20 @@ Deno.test("run escalates to SIGKILL when the child ignores SIGTERM", async () =>
     result.timedOut && result.signal === "SIGKILL",
     `unexpected result ${describeExit(result)}`,
   );
+});
+
+Deno.test("run escalates to SIGKILL while a stalled stdin write is pending", async () => {
+  const started = performance.now();
+  // A megabyte fills the pipe: the write blocks until the child is gone, and
+  // the child ignores SIGTERM and never reads.
+  const result = await run(
+    ["sh", "-c", 'trap "" TERM; while :; do :; done'],
+    { stdin: new Uint8Array(1 << 20), timeoutMs: 200, killAfterMs: 200 },
+  );
+  const elapsed = performance.now() - started;
+  assert(
+    result.timedOut && result.signal === "SIGKILL",
+    `unexpected result ${describeExit(result)}`,
+  );
+  assert(elapsed < 3_000, `run returned only after ${Math.round(elapsed)} ms`);
 });
