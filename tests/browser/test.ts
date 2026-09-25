@@ -2,6 +2,9 @@ import { chromium, firefox, webkit } from "./playwright.ts";
 import type { Browser, BrowserContext, Page } from "playwright";
 import { selectedEngines } from "./engines.ts";
 import { hostileGuests } from "../../sdk/typescript/testdata/hostile_guests.ts";
+import { interruptGuests } from "../../sdk/typescript/testdata/interrupt_guests.ts";
+import { instrument } from "../../sdk/typescript/rewriter.ts";
+import { defaultLimits } from "../../sdk/typescript/types.ts";
 import type {
   CompileError,
   Compiler,
@@ -306,6 +309,63 @@ async function prepare() {
   }
   for (const name of Object.keys(hostileGuests)) {
     assert(name in hostile, `embedded guest ${name} has no .wat source`);
+  }
+  // The same for the interruption guests in guests/interrupt; named-trap
+  // keeps the name section `wasm-tools parse` emits.
+  const interruptDirectory = `${root}/tests/browser/guests/interrupt`;
+  const interruptSources = new Set<string>();
+  await Deno.mkdir(`${work}/guests/interrupt`);
+  for await (const entry of Deno.readDir(interruptDirectory)) {
+    if (!entry.name.endsWith(".wat")) continue;
+    const name = entry.name.slice(0, -".wat".length);
+    const embedded = interruptGuests[name];
+    assert(
+      embedded,
+      `tests/browser/guests/interrupt/${entry.name} has no embedded copy in sdk/typescript/testdata/interrupt_guests.ts`,
+    );
+    const assembled = `${work}/guests/interrupt/${name}.wasm`;
+    const parsed = embedded.keepNames ? assembled : `${assembled}.named`;
+    await native([
+      "wasm-tools",
+      "parse",
+      `${interruptDirectory}/${entry.name}`,
+      "-o",
+      parsed,
+    ], root);
+    if (!embedded.keepNames) {
+      await native(
+        ["wasm-tools", "strip", "--all", parsed, "-o", assembled],
+        root,
+      );
+    }
+    const bytes = await Deno.readFile(assembled);
+    assert(
+      bytes.length === embedded.bytes.length &&
+        bytes.every((byte, index) => byte === embedded.bytes[index]),
+      `tests/browser/guests/interrupt/${entry.name} no longer matches its embedded bytes; regenerate sdk/typescript/testdata/interrupt_guests.ts`,
+    );
+    interruptSources.add(name);
+  }
+  for (const name of Object.keys(interruptGuests)) {
+    assert(
+      interruptSources.has(name),
+      `embedded interruption guest ${name} has no .wat source`,
+    );
+  }
+  // Every shipped module stays valid after the SDK's interruption rewrite by
+  // the pinned wasm-tools too, not only by the engines under test.
+  await Deno.mkdir(`${work}/instrumented`);
+  for await (const entry of Deno.readDir(`${root}/dist/wasm`)) {
+    if (!entry.name.endsWith(".wasm")) continue;
+    const instrumented = `${work}/instrumented/${entry.name}`;
+    await Deno.writeFile(
+      instrumented,
+      instrument(
+        await Deno.readFile(`${root}/dist/wasm/${entry.name}`),
+        defaultLimits.memoryPages,
+      ).bytes,
+    );
+    await native(["wasm-tools", "validate", instrumented], root);
   }
   // The failure and limit corpus, and the Schema Studio adapter bundled with
   // the pinned Deno for the Studio rows.

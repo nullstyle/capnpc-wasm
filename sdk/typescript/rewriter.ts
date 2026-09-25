@@ -42,6 +42,19 @@ class Reader {
     }
     throw new TypeError("invalid Wasm u32 encoding");
   }
+  /** A signed LEB128 i32 of at most five bytes, for `i32.const` values. */
+  s32(): number {
+    let value = 0;
+    let shift = 0;
+    let byte;
+    do {
+      if (shift >= 35) throw new TypeError("invalid Wasm integer encoding");
+      byte = this.byte();
+      value |= (byte & 127) << shift;
+      shift += 7;
+    } while (byte & 128);
+    return shift < 32 && byte & 64 ? value | (-1 << shift) : value;
+  }
   /**
    * Skip a LEB128 integer of at most `limit` bytes. Only immediates copied
    * verbatim are skipped this way; the engine validates their values.
@@ -108,6 +121,17 @@ class Writer {
     this.#flush();
     for (const part of other.parts) this.parts.push(part);
     this.length += other.length;
+  }
+  /** Reserve a place for output that is only known later; see fill(). */
+  slot(): number {
+    this.#flush();
+    this.parts.push(new Uint8Array(0));
+    return this.parts.length - 1;
+  }
+  fill(slot: number, content: Writer): void {
+    const bytes = content.finish();
+    this.length += bytes.length - this.parts[slot].length;
+    this.parts[slot] = bytes;
   }
   finish(): Uint8Array<ArrayBuffer> {
     this.#flush();
@@ -316,8 +340,33 @@ function tableType(reader: Reader): void {
   if (flags === 1) reader.u32();
 }
 
-// SIMD sub-opcodes with immediates. Every other one up to the last relaxed
-// SIMD instruction (0x113) has none; larger sub-opcodes are rejected.
+// SIMD sub-opcodes up to the last relaxed SIMD instruction (0x113) that no
+// instruction uses, as the pinned wasm-tools decodes them.
+const unassignedSimd = new Set([
+  0x9a,
+  0xa2,
+  0xa5,
+  0xa6,
+  0xaf,
+  0xb0,
+  0xb2,
+  0xb3,
+  0xb4,
+  0xbb,
+  0xc2,
+  0xc5,
+  0xc6,
+  0xcf,
+  0xd0,
+  0xd2,
+  0xd3,
+  0xd4,
+  0xe2,
+  0xee,
+]);
+
+// SIMD sub-opcodes with immediates. Every other assigned one up to 0x113 has
+// none; unassigned and larger sub-opcodes are rejected.
 function simdImmediates(reader: Reader, code: number): void {
   if (code <= 0x0b || code === 0x5c || code === 0x5d) memoryArgument(reader);
   else if (code === 0x0c || code === 0x0d) reader.skip(16);
@@ -325,10 +374,20 @@ function simdImmediates(reader: Reader, code: number): void {
   else if (code >= 0x54 && code <= 0x5b) {
     memoryArgument(reader);
     reader.skip(1);
-  } else if (code > 0x113) {
+  } else if (code > 0x113 || unassignedSimd.has(code)) {
     throw new TypeError(`unsupported Wasm instruction 0xfd ${code}`);
   }
 }
+
+// Bulk sub-opcodes of 0xfc whose cost grows with their size operand, which is
+// an i32 on top of the stack: memory.init, memory.copy and memory.fill, and
+// table.init, table.copy, table.grow and table.fill. Each is charged against
+// the countdown by size, one tick per KiB or per 16 table entries, so a loop
+// of large copies polls as often as one of plain instructions.
+const memoryBulk = new Set([8, 10, 11]);
+const tableBulk = new Set([12, 14, 15, 17]);
+const memoryChargeShift = 10;
+const tableChargeShift = 4;
 
 /** The stack-neutral check: poll every `interval` ticks, trap on a nonzero answer. */
 function checkSequence(
@@ -363,6 +422,69 @@ function checkSequence(
   return check.finish();
 }
 
+/**
+ * The charge before a bulk operation, stack-neutral around its i32 size
+ * operand, which it keeps in the local `scratch`. A size of at least one tick
+ * (`1 << shift`) polls first when its ticks reach the remaining countdown, and
+ * is subtracted otherwise, so the countdown never goes below zero and the
+ * plain check's `i32.eqz` still sees every expiry. A smaller size costs
+ * nothing, like any straight-line instruction.
+ */
+function chargeSequence(
+  counter: number,
+  scratch: number,
+  interrupt: number,
+  interval: number,
+  shift: number,
+): Uint8Array {
+  const charge = new Writer();
+  const ticks = () => {
+    charge.byte(0x20); // local.get $scratch
+    charge.u32(scratch);
+    charge.byte(0x41); // i32.const shift
+    charge.s32(shift);
+    charge.byte(0x76); // i32.shr_u
+  };
+  charge.byte(0x22); // local.tee $scratch: the size operand
+  charge.u32(scratch);
+  charge.byte(0x41); // i32.const 1 << shift
+  charge.s32(1 << shift);
+  charge.byte(0x4f); // i32.ge_u
+  charge.byte(0x04); // if
+  charge.byte(0x40);
+  ticks();
+  charge.byte(0x23); //   global.get $countdown
+  charge.u32(counter);
+  charge.byte(0x4f); //   i32.ge_u
+  charge.byte(0x04); //   if
+  charge.byte(0x40);
+  charge.byte(0x10); //     call $interrupt
+  charge.u32(interrupt);
+  charge.byte(0x04); //     if
+  charge.byte(0x40);
+  charge.byte(0x00); //       unreachable
+  charge.byte(0x0b); //     end
+  charge.byte(0x41); //     i32.const interval
+  charge.s32(interval);
+  charge.byte(0x24); //     global.set $countdown
+  charge.u32(counter);
+  charge.byte(0x05); //   else
+  charge.byte(0x23); //     global.get $countdown
+  charge.u32(counter);
+  ticks();
+  charge.byte(0x6b); //     i32.sub
+  charge.byte(0x24); //     global.set $countdown
+  charge.u32(counter);
+  charge.byte(0x0b); //   end
+  charge.byte(0x0b); // end
+  charge.byte(0x20); // local.get $scratch: the size operand again
+  charge.u32(scratch);
+  return charge.finish();
+}
+
+/** Parameters plus locals per function in every engine (V8, SpiderMonkey, JSC). */
+const maxLocals = 50_000;
+
 export interface Instrumented {
   /** The instrumented module, its memory bounded. */
   bytes: Uint8Array<ArrayBuffer>;
@@ -371,6 +493,14 @@ export interface Instrumented {
   entryChecks: number;
   loopChecks: number;
   importChecks: number;
+  /** Bulk memory and table operations charged by size. */
+  bulkChecks: number;
+  /**
+   * Imported functions that escape as references (element segments, `ref.func`,
+   * exports), each now reached through an added function that calls it and
+   * then checks.
+   */
+  thunks: number;
   /** The name section's fate: indices renumbered, dropped, or none present. */
   names: "renumbered" | "dropped" | "absent";
 }
@@ -385,14 +515,26 @@ export interface Instrumented {
  * global's export. Every defined function index shifts up by one: calls,
  * `ref.func`, exports, the start function, element segments, constant
  * expressions, and the name section's function and local names are
- * renumbered. The name section is dropped whole when it cannot be renumbered
- * exactly: label names (the injected blocks shift label indices), unknown
- * subsections, or malformed contents. Other custom sections except `producers`
- * and `target_features` are dropped, because they may hold code offsets or
- * indices. All other instruction and data bytes are copied verbatim.
+ * renumbered. A function with a charged bulk operation gains one i32 local
+ * after its others, for the size. The name section is dropped whole when it
+ * cannot be renumbered exactly: label names (the injected blocks shift label
+ * indices), unknown subsections, or malformed contents. Other custom sections
+ * except `producers` and `target_features` are dropped, because they may hold
+ * code offsets or indices. All other instruction and data bytes are copied
+ * verbatim.
+ *
+ * An imported function used as a value (in an element segment, a global's or
+ * a segment's `ref.func`, or an export, which may declare one for code) gets a
+ * thunk appended after the defined functions: it calls the import and then
+ * checks, so a call through a table or reference, tail calls included, is
+ * checked like a direct one. Values and table entries name the thunk; exports
+ * and the start function keep the import, which only the host calls. One
+ * added declarative element segment declares the thunks for `ref.func`.
  *
  * It fails closed: an opcode, type form, section or table initializer it
- * cannot parse exactly is a TypeError, never a guess.
+ * cannot parse exactly is a TypeError, never a guess. It does not validate:
+ * compileBounded validates the original first, because an invalid original
+ * could name the added type or globals by index.
  */
 export function instrument(
   module: unknown,
@@ -410,26 +552,63 @@ export function instrument(
     entryChecks: 0,
     loopChecks: 0,
     importChecks: 0,
+    bulkChecks: 0,
+    thunks: 0,
     names: "absent",
   };
 
   let lastOrder = 0;
   let typeCount = 0;
+  const paramCounts: number[] = [];
   let importedFunctions = 0;
+  const importTypes: number[] = [];
   let importedGlobals = 0;
   let definedGlobals = 0;
+  let definedFunctions = 0;
+  const functionTypes: number[] = [];
   let exitFunction = -1;
   let memorySeen = false;
+  let codeSeen = false;
   const pending = { type: true, import: true, global: true, export: true };
+  // The function section waits in `slot` until the thunks are known.
+  let functions: { entries: number; end: number; slot: number } | undefined;
+  const thunkOf = new Map<number, number>();
+  const thunkImports: number[] = [];
+  let elementsSeen = false;
+  let sealed = false;
 
   const shift = (index: number) =>
     index >= importedFunctions ? index + 1 : index;
   const countdown = () => importedGlobals + definedGlobals;
 
+  /**
+   * A function index used as a value. Imports escape through their thunks
+   * once guest code exists to call them; every thunk is assigned before the
+   * code section, since only elements, globals and exports declare a
+   * `ref.func` target.
+   */
+  function reference(index: number): number {
+    if (index >= importedFunctions) return index + 1;
+    if (definedFunctions === 0) return index;
+    let thunk = thunkOf.get(index);
+    if (thunk === undefined) {
+      if (sealed) throw new TypeError("undeclared Wasm function reference");
+      thunk = importedFunctions + 1 + definedFunctions + thunkImports.length;
+      thunkOf.set(index, thunk);
+      thunkImports.push(index);
+    }
+    return thunk;
+  }
+
+  function framed(id: number, payload: Writer): Writer {
+    const framedSection = new Writer();
+    framedSection.byte(id);
+    framedSection.u32(payload.length);
+    framedSection.append(payload);
+    return framedSection;
+  }
   function emit(id: number, payload: Writer): void {
-    output.byte(id);
-    output.u32(payload.length);
-    output.append(payload);
+    output.append(framed(id, payload));
   }
   function verbatim(start: number, end: number): Writer {
     const payload = new Writer();
@@ -461,6 +640,37 @@ export function instrument(
     payload.s32(interval);
     payload.byte(0x0b);
   }
+  /** A declarative segment of every thunk: valid `ref.func` targets in code. */
+  function declareThunks(payload: Writer): void {
+    payload.u32(3);
+    payload.byte(0); // funcref
+    payload.u32(thunkImports.length);
+    for (const index of thunkImports) payload.u32(thunkOf.get(index)!);
+  }
+  /**
+   * Fix the thunk set: write the function section with one entry per thunk,
+   * and declare the thunks in an element section of their own when the
+   * module has none.
+   */
+  function seal(): void {
+    if (sealed) return;
+    sealed = true;
+    result.thunks = thunkImports.length;
+    if (!elementsSeen && thunkImports.length) {
+      elementsSeen = true;
+      const payload = new Writer();
+      payload.u32(1);
+      declareThunks(payload);
+      emit(9, payload);
+    }
+    if (functions) {
+      const payload = new Writer();
+      payload.u32(definedFunctions + thunkImports.length);
+      payload.bytes(bytes.subarray(functions.entries, functions.end));
+      for (const index of thunkImports) payload.u32(importTypes[index]);
+      output.fill(functions.slot, framed(3, payload));
+    }
+  }
   function countdownEntry(payload: Writer): void {
     payload.name(countdownExport);
     payload.byte(3);
@@ -491,6 +701,8 @@ export function instrument(
       pending.export = false;
       single(7, countdownEntry);
     }
+    // Data count, code and data follow the element section.
+    if (order > 10) seal();
   }
 
   /** Copy a constant expression, renumbering `ref.func`. */
@@ -504,7 +716,7 @@ export function instrument(
           return;
         case 0xd2:
           payload.byte(op);
-          payload.u32(shift(reader.u32()));
+          payload.u32(reference(reader.u32()));
           continue;
         case 0x41:
           reader.leb(5);
@@ -557,6 +769,7 @@ export function instrument(
       }
       for (let side = 0; side < 2; side++) {
         const length = reader.u32();
+        if (side === 0) paramCounts.push(length);
         for (let j = 0; j < length; j++) valueType(reader);
       }
     }
@@ -578,22 +791,29 @@ export function instrument(
       const fieldName = reader.name();
       const kind = reader.byte();
       switch (kind) {
-        case 0:
-          reader.u32();
+        case 0: {
+          const type = reader.u32();
+          // An index past the original types would name the added one.
+          if (type >= typeCount) throw new TypeError("invalid Wasm type index");
+          importTypes.push(type);
           if (
             moduleName === "wasi_snapshot_preview1" &&
             fieldName === "proc_exit"
           ) exitFunction = importedFunctions;
           importedFunctions++;
           break;
+        }
         case 1:
           tableType(reader);
           break;
         case 2: {
-          // compileBounded rejects imported memories with a dedicated
-          // message; any limits are parsed here.
+          // compileBounded rejects every imported memory with a dedicated
+          // message. Shared memories (whose waits block without polling) and
+          // 64-bit ones (whose bulk sizes are i64) cannot be instrumented.
           const flags = reader.byte();
-          if (flags > 15) throw new TypeError("unsupported Wasm memory import");
+          if (flags > 15 || flags & 6) {
+            throw new TypeError("unsupported Wasm memory import");
+          }
           reader.leb(10);
           if (flags & 1) reader.leb(10);
           if (flags & 8) reader.u32();
@@ -669,6 +889,9 @@ export function instrument(
       const kind = reader.byte();
       if (kind > 4) throw new TypeError(`unsupported Wasm export kind ${kind}`);
       const index = reader.u32();
+      // An exported import stays the host's function, but the export also
+      // lets code take it with `ref.func`, which must then reach its thunk.
+      if (kind === 0) reference(index);
       payload.byte(kind);
       payload.u32(kind === 0 ? shift(index) : index);
     }
@@ -680,39 +903,46 @@ export function instrument(
 
   function elements(reader: Reader): void {
     const count = reader.u32();
-    const payload = new Writer();
-    payload.u32(count);
+    const segments = new Writer();
     for (let i = 0; i < count; i++) {
       const flags = reader.u32();
       if (flags > 7) throw new TypeError("unsupported Wasm element segment");
-      payload.u32(flags);
+      segments.u32(flags);
       if (!(flags & 1)) {
-        if (flags & 2) payload.u32(reader.u32()); // table index
-        constant(reader, payload); // offset
+        if (flags & 2) segments.u32(reader.u32()); // table index
+        constant(reader, segments); // offset
       }
       if (flags & 4) {
         if (flags & 3) {
           const start = reader.position;
           valueType(reader);
-          payload.bytes(bytes.subarray(start, reader.position));
+          segments.bytes(bytes.subarray(start, reader.position));
         }
         const length = reader.u32();
-        payload.u32(length);
-        for (let j = 0; j < length; j++) constant(reader, payload);
+        segments.u32(length);
+        for (let j = 0; j < length; j++) constant(reader, segments);
       } else {
         if (flags & 3) {
           if (reader.byte() !== 0) {
             throw new TypeError("unsupported Wasm element kind");
           }
-          payload.byte(0);
+          segments.byte(0);
         }
         const length = reader.u32();
-        payload.u32(length);
-        for (let j = 0; j < length; j++) payload.u32(shift(reader.u32()));
+        segments.u32(length);
+        for (let j = 0; j < length; j++) {
+          segments.u32(reference(reader.u32()));
+        }
       }
     }
     done(reader, "element");
+    elementsSeen = true;
+    const payload = new Writer();
+    payload.u32(count + (thunkImports.length ? 1 : 0));
+    payload.append(segments);
+    if (thunkImports.length) declareThunks(payload);
     emit(9, payload);
+    seal();
   }
 
   /**
@@ -720,20 +950,44 @@ export function instrument(
    * `unreachable` after proc_exit instead), and at entry when the function
    * can call guest code: a defined function directly, or anything
    * indirectly. A leaf function runs a bounded number of instructions between
-   * checks, so only loops and recursion need them.
+   * checks, so only loops and recursion need them. Bulk operations are
+   * charged by size before they run.
    */
-  function functionBody(reader: Reader, check: Uint8Array): Writer {
-    const head = new Writer();
-    const localsStart = reader.position;
+  function functionBody(
+    reader: Reader,
+    type: number,
+    check: Uint8Array,
+  ): Writer {
     const groups = reader.u32();
+    const groupsStart = reader.position;
+    let declared = 0;
     for (let i = 0; i < groups; i++) {
-      reader.u32();
+      declared += reader.u32();
       valueType(reader);
     }
-    head.bytes(bytes.subarray(localsStart, reader.position));
+    const groupsEnd = reader.position;
+    // Charges keep bulk sizes in one added local, after every other one.
+    const scratch = paramCounts[type] + declared;
+    const charges = new Map<number, Uint8Array>();
+    const charge = (shift: number) => {
+      let sequence = charges.get(shift);
+      if (!sequence) {
+        sequence = chargeSequence(
+          countdown(),
+          scratch,
+          importedFunctions,
+          interval,
+          shift,
+        );
+        charges.set(shift, sequence);
+      }
+      return sequence;
+    };
     const instructions = new Writer();
     let from = reader.position;
     let callsGuest = false;
+    // The value of an `i32.const` immediately before this instruction.
+    let constant: number | undefined;
     const copyUntil = (position: number) => {
       if (position > from) {
         instructions.bytes(bytes.subarray(from, position));
@@ -742,6 +996,8 @@ export function instrument(
     while (reader.position < reader.end) {
       const at = reader.position;
       const op = reader.bytes[reader.position++];
+      const operand = constant;
+      constant = undefined;
       switch (op) {
         case 0x03: // loop
           blockType(reader);
@@ -776,7 +1032,7 @@ export function instrument(
           copyUntil(at);
           from = reader.position;
           instructions.byte(op);
-          instructions.u32(shift(index));
+          instructions.u32(reference(index));
           break;
         }
         case 0x11: // call_indirect
@@ -849,7 +1105,7 @@ export function instrument(
           break;
         }
         case 0x41: // i32.const
-          reader.leb(5);
+          constant = reader.s32();
           break;
         case 0x42: // i64.const
           reader.leb(10);
@@ -872,6 +1128,22 @@ export function instrument(
           } else if (code <= 17) reader.u32();
           else {
             throw new TypeError(`unsupported Wasm instruction 0xfc ${code}`);
+          }
+          const unit = memoryBulk.has(code)
+            ? memoryChargeShift
+            : tableBulk.has(code)
+            ? tableChargeShift
+            : undefined;
+          // A constant size below one tick costs no more than any other
+          // instruction; no label can separate it from the operation.
+          const small = operand !== undefined && operand >= 0 &&
+            operand >> unit! === 0;
+          if (unit !== undefined && !small) {
+            // The operation itself is copied with the bytes that follow.
+            copyUntil(at);
+            from = at;
+            instructions.bytes(charge(unit));
+            result.bulkChecks++;
           }
           break;
         }
@@ -896,6 +1168,21 @@ export function instrument(
       }
     }
     copyUntil(reader.end);
+    const head = new Writer();
+    if (charges.size) {
+      if (scratch + 1 > maxLocals) {
+        throw new TypeError(
+          "unsupported Wasm function: no local is left for bulk operation sizes",
+        );
+      }
+      head.u32(groups + 1);
+      head.bytes(bytes.subarray(groupsStart, groupsEnd));
+      head.u32(1);
+      head.byte(0x7f);
+    } else {
+      head.u32(groups);
+      head.bytes(bytes.subarray(groupsStart, groupsEnd));
+    }
     if (callsGuest) {
       head.bytes(check);
       result.entryChecks++;
@@ -907,17 +1194,41 @@ export function instrument(
   function code(reader: Reader): void {
     const check = checkSequence(countdown(), importedFunctions, interval);
     const count = reader.u32();
+    if (count !== definedFunctions) {
+      throw new TypeError("invalid Wasm code section");
+    }
+    codeSeen = true;
     const payload = new Writer();
-    payload.u32(count);
+    payload.u32(count + thunkImports.length);
     for (let i = 0; i < count; i++) {
       const size = reader.u32();
       const start = reader.position;
       reader.skip(size);
-      const body = functionBody(new Reader(bytes, start, start + size), check);
+      const body = functionBody(
+        new Reader(bytes, start, start + size),
+        functionTypes[i],
+        check,
+      );
       payload.u32(body.length);
       payload.append(body);
     }
     done(reader, "code");
+    // Each thunk forwards its parameters to the import and checks after it.
+    for (const index of thunkImports) {
+      const body = new Writer();
+      body.byte(0); // no locals
+      for (let i = 0; i < paramCounts[importTypes[index]]; i++) {
+        body.byte(0x20); // local.get
+        body.u32(i);
+      }
+      body.byte(0x10); // call
+      body.u32(index);
+      if (index === exitFunction) body.byte(0x00); // unreachable
+      else body.bytes(check);
+      body.byte(0x0b);
+      payload.u32(body.length);
+      payload.append(body);
+    }
     result.functions += count;
     emit(10, payload);
   }
@@ -951,7 +1262,7 @@ export function instrument(
             }
             break;
           }
-          case 2: { // local names: instrumentation adds no locals
+          case 2: { // local names: an added scratch local and thunks are unnamed
             const count = part.u32();
             rewritten.u32(count);
             for (let i = 0; i < count; i++) {
@@ -1025,6 +1336,19 @@ export function instrument(
       case 2:
         imports(section);
         break;
+      case 3: {
+        const count = section.u32();
+        const entries = section.position;
+        for (let i = 0; i < count; i++) {
+          const type = section.u32();
+          if (type >= typeCount) throw new TypeError("invalid Wasm type index");
+          functionTypes.push(type);
+        }
+        done(section, "function");
+        definedFunctions = count;
+        functions = { entries, end, slot: output.slot() };
+        break;
+      }
       case 4:
         tables(section);
         break;
@@ -1054,13 +1378,16 @@ export function instrument(
       case 10:
         code(section);
         break;
-      default: // function, tag, data count and data: no function indices
+      default: // tag, data count and data: no function indices
         emit(id, verbatim(start, end));
     }
   }
   synthesizeBefore(Infinity);
   if (!memorySeen) {
     throw new TypeError("WASI command requires exactly one defined memory");
+  }
+  if (definedFunctions > 0 && !codeSeen) {
+    throw new TypeError("invalid Wasm code section");
   }
   return { bytes: output.finish(), ...result };
 }

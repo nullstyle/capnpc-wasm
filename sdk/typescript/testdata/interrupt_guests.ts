@@ -1,9 +1,16 @@
 /**
  * Pre-assembled guests for the interruption tests (interrupt_test.ts). Each
- * constant's WebAssembly text is shown above it. The bytes are the pinned
- * wasm-tools output of `wasm-tools parse <name>.wat | wasm-tools strip --all`,
- * except namedTrapGuest, which keeps the name section `wasm-tools parse`
- * emits. SDK tests run with --allow-read only and cannot spawn wasm-tools.
+ * source lives in tests/browser/guests/interrupt/<name>.wat and is shown above
+ * its constant. The bytes are the pinned wasm-tools output of
+ * `wasm-tools parse <name>.wat | wasm-tools strip --all`, except
+ * namedTrapGuest, which keeps the name section `wasm-tools parse` emits. The
+ * browser suite assembles every source and asserts that the bytes equal these
+ * constants, so the two copies cannot drift. SDK tests run with --allow-read
+ * only and cannot spawn wasm-tools.
+ *
+ * Regenerate after editing a .wat file:
+ *   wasm-tools parse tests/browser/guests/interrupt/<name>.wat |
+ *     wasm-tools strip --all | xxd -p
  */
 
 function wasm(hex: string): Uint8Array<ArrayBuffer> {
@@ -365,6 +372,191 @@ export const legacyExceptionsModule = wasm(
     "090b0b",
 );
 
+// ;; Imports used as values: a table entry, a `ref.func` declared by an element
+// ;; segment, and one declared only by an export. The test host's `stop` and
+// ;; `exported` record a stop and zero the countdown; `log` records progress.
+// ;; Once instrumented, every call that reaches `stop` or `exported` must trap
+// ;; before the guest logs again, whether it went through the table, a
+// ;; reference, or a tail call. With a host that never stops, each export
+// ;; returns its own number after logging it.
+// (module
+//   (type $void (func))
+//   (import "env" "stop" (func $stop))
+//   (import "env" "log" (func $log (param i32)))
+//   (import "env" "exported" (func $exported))
+//   (table $table 1 funcref)
+//   (elem (table $table) (i32.const 0) func $stop)
+//   (memory (export "memory") 1)
+//   (export "exported" (func $exported))
+//   (func $tail (param i32)
+//     (return_call_indirect $table (type $void) (local.get 0)))
+//   (func (export "table") (result i32)
+//     (call_indirect $table (type $void) (i32.const 0))
+//     (call $log (i32.const 1))
+//     (i32.const 1))
+//   (func (export "tail") (result i32)
+//     (call $tail (i32.const 0))
+//     (call $log (i32.const 2))
+//     (i32.const 2))
+//   (func (export "reference") (result i32)
+//     (call_ref $void (ref.func $stop))
+//     (call $log (i32.const 3))
+//     (i32.const 3))
+//   (func (export "declared_by_export") (result i32)
+//     (call_ref $void (ref.func $exported))
+//     (call $log (i32.const 4))
+//     (i32.const 4)))
+export const escapingImportsModule = wasm(
+  "0061736d01000000010c0360000060017f006000017f02250303656e760473746f700000" +
+    "03656e76036c6f67000103656e76086578706f7274656400000306050102020202040401" +
+    "7000010503010001074506066d656d6f72790200086578706f727465640002057461626c" +
+    "650004047461696c0005097265666572656e63650006126465636c617265645f62795f65" +
+    "78706f72740007090901020041000b0001000a3e05070020001300000b0d004100110000" +
+    "4101100141010b0c00410010034102100141020b0c00d20014004103100141030b0c00d2" +
+    "0214004104100141040b",
+);
+
+/** Steps of costlyStepsGuest, selected by the first stdin byte. */
+export const costlyStep = {
+  memoryFill: 0,
+  tableFill: 1,
+  randomGet: 2,
+} as const;
+
+// ;; Loop steps that are one instruction but not one instruction's work, each
+// ;; repeated until the job stops; the first stdin byte selects one. 0 fills
+// ;; 16 MiB of memory, 1 fills a table of 1,048,576 entries, and 2 or more draws
+// ;; 16 MiB from random_get. At one tick per iteration the next poll would come
+// ;; minutes later, so the job stops in time only if bulk operations are charged
+// ;; by size and every import polls the job before it acts.
+// (module
+//   (import "wasi_snapshot_preview1" "fd_read"
+//     (func $fd_read (param i32 i32 i32 i32) (result i32)))
+//   (import "wasi_snapshot_preview1" "random_get"
+//     (func $random_get (param i32 i32) (result i32)))
+//   (memory (export "memory") 257)
+//   (table $table 1048576 funcref)
+//   (func (export "_start")
+//     (local $mode i32)
+//     ;; One iovec at 0 for one byte at 16, the count read at 8.
+//     (i32.store (i32.const 0) (i32.const 16))
+//     (i32.store (i32.const 4) (i32.const 1))
+//     (drop
+//       (call $fd_read (i32.const 0) (i32.const 0) (i32.const 1) (i32.const 8)))
+//     (local.set $mode (i32.load8_u (i32.const 16)))
+//     (loop $again
+//       (block $random
+//         (block $table
+//           (block $memory
+//             (br_table $memory $table $random (local.get $mode)))
+//           (memory.fill (i32.const 0) (i32.const 0) (i32.const 16777216))
+//           (br $again))
+//         (table.fill $table (i32.const 0) (ref.null func) (i32.const 1048576))
+//         (br $again))
+//       (drop (call $random_get (i32.const 0) (i32.const 16777216)))
+//       (br $again))))
+export const costlyStepsGuest = wasm(
+  "0061736d0100000001120360047f7f7f7f017f60027f7f017f6000000246021677617369" +
+    "5f736e617073686f745f70726576696577310766645f72656164000016776173695f736e" +
+    "617073686f745f70726576696577310a72616e646f6d5f67657400010302010204060170" +
+    "00808040050401008102071302066d656d6f72790200065f737461727400020a61015f01" +
+    "017f4100411036020041044101360200410041004101410810001a41102d000021000340" +
+    "02400240024020000e020001020b410041004180808008fc0b000c020b4100d070418080" +
+    "c000fc11000c010b4100418080800810011a0c000b0b",
+);
+
+// ;; poll_oneoff may be handed one buffer as both its subscription and its
+// ;; event: the host must read the whole subscription before it writes the
+// ;; event. The guest subscribes to a relative monotonic clock with no timeout
+// ;; and userdata 42, and exits with the userdata the event reports.
+// (module
+//   (import "wasi_snapshot_preview1" "poll_oneoff"
+//     (func $poll_oneoff (param i32 i32 i32 i32) (result i32)))
+//   (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+//   (memory (export "memory") 1)
+//   (func (export "_start")
+//     (i64.store (i32.const 0) (i64.const 42)) ;; userdata
+//     (i32.store8 (i32.const 8) (i32.const 0)) ;; EVENTTYPE_CLOCK
+//     (i32.store (i32.const 16) (i32.const 1)) ;; CLOCKID_MONOTONIC
+//     (i64.store (i32.const 24) (i64.const 0)) ;; timeout
+//     (i64.store (i32.const 32) (i64.const 0)) ;; precision
+//     (i32.store16 (i32.const 40) (i32.const 0)) ;; relative
+//     (drop
+//       (call $poll_oneoff
+//         (i32.const 0) (i32.const 0) (i32.const 1) (i32.const 64)))
+//     (call $proc_exit (i32.wrap_i64 (i64.load (i32.const 0))))))
+export const pollOverlapGuest = wasm(
+  "0061736d0100000001100360047f7f7f7f017f60017f0060000002490216776173695f73" +
+    "6e617073686f745f70726576696577310b706f6c6c5f6f6e656f6666000016776173695f" +
+    "736e617073686f745f70726576696577310970726f635f65786974000103020102050301" +
+    "0001071302066d656d6f72790200065f737461727400020a420140004100422a37030041" +
+    "0841003a0000411041013602004118420037030041204200370300412841003b01004100" +
+    "4100410141c00010001a4100290300a710010b",
+);
+
+// ;; A start function runs during instantiation, before the host can zero the
+// ;; countdown. This one calls fd_write, which fails in the host because the
+// ;; shim has no instance yet; the host records the failure, and _start, which
+// ;; would exit 0, must not turn the job into a success.
+// (module
+//   (import "wasi_snapshot_preview1" "fd_write"
+//     (func $fd_write (param i32 i32 i32 i32) (result i32)))
+//   (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+//   (memory (export "memory") 1)
+//   (func $early
+//     (drop
+//       (call $fd_write (i32.const 1) (i32.const 0) (i32.const 0) (i32.const 0))))
+//   (start $early)
+//   (func (export "_start")
+//     (call $proc_exit (i32.const 0))))
+export const startFailureGuest = wasm(
+  "0061736d0100000001100360047f7f7f7f017f60017f0060000002460216776173695f73" +
+    "6e617073686f745f70726576696577310866645f7772697465000016776173695f736e61" +
+    "7073686f745f70726576696577310970726f635f65786974000103030202020503010001" +
+    "071302066d656d6f72790200065f737461727400030801020a16020d0041014100410041" +
+    "0010001a0b0600410010010b",
+);
+
+// ;; A guest with no imports that spins inside a handler catching every
+// ;; exception, then returns normally. If a failure while polling the job
+// ;; reached the guest as a JavaScript exception, this handler would catch it
+// ;; and the job would exit 0; the host must stop it with a trap instead.
+// (module
+//   (memory (export "memory") 1)
+//   (func (export "_start")
+//     (block $caught
+//       (try_table (catch_all $caught)
+//         (loop $spin (br $spin))))))
+export const swallowAllGuest = wasm(
+  "0061736d01000000010401600000030201000503010001071302066d656d6f7279020006" +
+    "5f737461727400000a1201100002401f4001020003400c000b0b0b0b",
+);
+
+// ;; Bulk memory and table operations run once per call with the size the
+// ;; caller passes, plus a fill whose constant size is below one tick. The
+// ;; instrumented copies poll only when a size uses up the countdown, and a
+// ;; stop answer traps before the operation runs. `byte` reads memory back.
+// (module
+//   (memory (export "memory") 2)
+//   (table $table 1024 funcref)
+//   (func (export "fill") (param $size i32)
+//     (memory.fill (i32.const 0) (i32.const 7) (local.get $size)))
+//   (func (export "copy") (param $size i32)
+//     (memory.copy (i32.const 65536) (i32.const 0) (local.get $size)))
+//   (func (export "table_fill") (param $size i32)
+//     (table.fill $table (i32.const 0) (ref.null func) (local.get $size)))
+//   (func (export "small")
+//     (memory.fill (i32.const 0) (i32.const 7) (i32.const 1023)))
+//   (func (export "byte") (param $address i32) (result i32)
+//     (i32.load8_u (local.get $address))))
+export const bulkChargesModule = wasm(
+  "0061736d01000000010d0360017f0060000060017f017f03060500000001020405017000" +
+    "80080503010002073406066d656d6f727902000466696c6c000004636f707900010a7461" +
+    "626c655f66696c6c000205736d616c6c0003046279746500040a3d050b00410041072000" +
+    "fc0b000b0e004180800441002000fc0a00000b0b004100d0702000fc11000b0c00410041" +
+    "0741ff07fc0b000b070020002d00000b",
+);
+
 export interface InterruptGuest {
   bytes: Uint8Array<ArrayBuffer>;
   /** Assembled with `wasm-tools parse` only, keeping its name section. */
@@ -377,4 +569,10 @@ export const interruptGuests: Readonly<Record<string, InterruptGuest>> = {
   "named-trap": { bytes: namedTrapGuest, keepNames: true },
   "rewriter-coverage": { bytes: rewriterCoverageModule },
   "legacy-exceptions": { bytes: legacyExceptionsModule },
+  "escaping-imports": { bytes: escapingImportsModule },
+  "costly-steps": { bytes: costlyStepsGuest },
+  "poll-overlap": { bytes: pollOverlapGuest },
+  "start-failure": { bytes: startFailureGuest },
+  "swallow-all": { bytes: swallowAllGuest },
+  "bulk-charges": { bytes: bulkChargesModule },
 };

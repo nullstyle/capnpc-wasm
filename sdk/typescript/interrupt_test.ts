@@ -13,8 +13,10 @@ import { Cancelled, countdownExport, JobControl } from "./interrupt.ts";
 import { runCommand } from "./runtime.ts";
 import { compileBounded, instrument } from "./wasm.ts";
 import {
+  bulkChargesModule,
   catchRetryGuest,
   catchRetryMode,
+  escapingImportsModule,
   legacyExceptionsModule,
   namedTrapGuest,
   rewriterCoverageModule,
@@ -261,6 +263,7 @@ Deno.test("SDK instrumentation fails closed on constructs it cannot parse exactl
     ["GC prefix", withBody([0xfb, 0]), "unsupported Wasm instruction 0xfb"],
     ["bulk sub-opcode", withBody([0xfc, 18]), "0xfc 18"],
     ["SIMD sub-opcode", withBody([0xfd, 0x95, 0x02]), "0xfd 277"],
+    ["unassigned SIMD sub-opcode", withBody([0xfd, 0x9a, 0x01]), "0xfd 154"],
     ["atomic sub-opcode", withBody([0xfe, 4]), "0xfe 4"],
     ["catch clause", withBody([0x1f, 0x40, 1, 4, 0, 0x0b]), "catch clause"],
     [
@@ -307,6 +310,32 @@ Deno.test("SDK instrumentation fails closed on constructs it cannot parse exactl
       new Uint8Array([...header, ...section(1, [1, 0x60, 1, 0x75, 0])]),
       "unsupported Wasm value type 0x75",
     ],
+    [
+      "type index",
+      new Uint8Array([
+        ...header,
+        ...section(1, [1, 0x60, 0, 0]),
+        ...section(3, [1, 1]),
+        ...memory,
+      ]),
+      "invalid Wasm type index",
+    ],
+    [
+      "shared memory import",
+      new Uint8Array([
+        ...header,
+        ...section(2, [1, ...name("env"), ...name("m"), 2, 3, 1, 1]),
+      ]),
+      "unsupported Wasm memory import",
+    ],
+    [
+      "64-bit memory import",
+      new Uint8Array([
+        ...header,
+        ...section(2, [1, ...name("env"), ...name("m"), 2, 4, 1]),
+      ]),
+      "unsupported Wasm memory import",
+    ],
   ];
   for (const [label, module, message] of cases) {
     let failure: unknown;
@@ -320,6 +349,139 @@ Deno.test("SDK instrumentation fails closed on constructs it cannot parse exactl
       `${label}: ${failure}`,
     );
   }
+});
+
+Deno.test("SDK validates the original module before instrumenting it", async () => {
+  // Both originals name an index the rewrite adds, so their instrumented
+  // copies are valid: global 0 becomes the countdown, which the first guest
+  // would keep resetting and so never poll, and type 2 becomes the interrupt
+  // import's `() -> i32`.
+  const cases: [string, Uint8Array][] = [
+    // loop; i32.const 1000; global.set 0; br 0; end
+    [
+      "global index",
+      commandGuest([0x03, 0x40, 0x41, 0xe8, 0x07, 0x24, 0, 0x0c, 0, 0x0b]),
+    ],
+    // block (type 2); i32.const 0; end; drop
+    ["type index", commandGuest([0x02, 0x02, 0x41, 0, 0x0b, 0x1a])],
+  ];
+  for (const [label, module] of cases) {
+    assert(
+      !WebAssembly.validate(new Uint8Array(module)),
+      `${label}: the original is valid`,
+    );
+    assert(
+      WebAssembly.validate(instrument(module, 16).bytes),
+      `${label}: the rewrite alone no longer hides the error`,
+    );
+    const refused = await rejectsWith(
+      () => compileBounded(module, 16),
+      TypeError,
+    );
+    assert(
+      refused.message.startsWith("the engine rejected the Wasm module: ") &&
+        refused.cause instanceof WebAssembly.CompileError,
+      `${label}: ${refused.message}`,
+    );
+  }
+});
+
+Deno.test("SDK instrumentation charges bulk operations by their size", async () => {
+  const result = instrument(bulkChargesModule, 16, 64);
+  // fill, copy and table_fill; the constant fill under a KiB is free.
+  assert(result.bulkChecks === 3, `${result.bulkChecks} charged operations`);
+  let polls = 0;
+  const bulk = await exportsOf(result.bytes, () => (polls++, 0));
+  const call = (name: string, ...values: number[]) =>
+    (bulk[name] as (...values: number[]) => number)(...values);
+  const expect = (count: number, what: string) =>
+    assert(polls === count, `${what}: ${polls} polls instead of ${count}`);
+  // One tick per KiB, or per 16 table entries, against a countdown of 64:
+  // sizes under one tick are free, others are subtracted, and an operation
+  // that uses up the countdown polls first.
+  call("fill", 1023);
+  expect(0, "fill under a KiB");
+  call("fill", 63 * 1024);
+  expect(0, "fill of 63 KiB");
+  call("fill", 1024);
+  expect(1, "fill that uses up the countdown");
+  call("fill", 64 * 1024);
+  expect(2, "fill of a whole interval");
+  call("small");
+  expect(2, "constant fill under a KiB");
+  call("copy", 64 * 1024);
+  expect(3, "copy of a whole interval");
+  call("table_fill", 1024);
+  expect(4, "table fill of a whole interval");
+  assert(
+    call("byte", 0) === 7 && call("byte", 65535) === 7 &&
+      call("byte", 65536) === 7,
+    "bulk results changed",
+  );
+  // A stop answer traps before the operation runs.
+  const stopped = await exportsOf(result.bytes, () => 1);
+  let trap: unknown;
+  try {
+    (stopped.fill as (size: number) => void)(64 * 1024);
+  } catch (error) {
+    trap = error;
+  }
+  assert(trap instanceof WebAssembly.RuntimeError, `no trap: ${trap}`);
+  assert(
+    (stopped.byte as (address: number) => number)(0) === 0,
+    "the stopped fill ran",
+  );
+});
+
+Deno.test("SDK instrumentation sends imports used as values through checking thunks", async () => {
+  const result = instrument(escapingImportsModule, 16);
+  // `stop` escapes through the element segment, `exported` through its
+  // export; `log` is only called directly.
+  assert(result.thunks === 2, `${result.thunks} thunks`);
+  assert(WebAssembly.validate(result.bytes), "instrumented module is invalid");
+  const logged: number[] = [];
+  let armed = false;
+  let stopped = false;
+  const stop = () => {
+    if (!armed) return;
+    stopped = true;
+    countdown.value = 0;
+  };
+  const { instance } = await WebAssembly.instantiate(result.bytes, {
+    env: { stop, exported: stop, log: (value: number) => logged.push(value) },
+    capnp_wasm: { interrupt: () => stopped ? 1 : 0 },
+  });
+  const countdown = instance.exports[countdownExport] as WebAssembly.Global;
+  const calls = ["table", "tail", "reference", "declared_by_export"];
+  for (const [index, name] of calls.entries()) {
+    const value = (instance.exports[name] as () => number)();
+    assert(
+      value === index + 1 && logged.at(-1) === value,
+      `${name} did not reach the import: ${value}`,
+    );
+  }
+  armed = true;
+  logged.length = 0;
+  for (const name of calls) {
+    stopped = false;
+    countdown.value = 65536;
+    let trap: unknown;
+    try {
+      (instance.exports[name] as () => number)();
+    } catch (error) {
+      trap = error;
+    }
+    assert(
+      trap instanceof WebAssembly.RuntimeError && stopped,
+      `${name} did not trap after the stop: ${trap}`,
+    );
+  }
+  assert(logged.length === 0, `guest code ran after a stop: ${logged}`);
+  // The export still names the import, not its thunk: the host calls it with
+  // no check after, so a stop inside returns instead of trapping.
+  stopped = false;
+  (instance.exports.exported as () => void)();
+  assert(stopped, "the exported import did not run");
 });
 
 Deno.test("SDK instruments every built toolchain module", async () => {

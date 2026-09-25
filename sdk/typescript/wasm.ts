@@ -37,23 +37,46 @@ export function inspectModules(modules: Modules, maximum: number): Language[] {
   return supplied;
 }
 
+function reason(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 /**
- * Instrument and compile bounded bytes. Engine rejections become TypeErrors
- * with the engine error as `cause`. The result imports only WASI preview1
- * functions the pinned shim implements, plus the interrupt import.
+ * Validate, instrument and compile a private copy of the module bytes. An
+ * invalid module is a TypeError with the engine's CompileError as `cause`. The
+ * original is validated before the rewrite, which adds a type, a global and a
+ * local at indices an invalid module could already name, and so must never
+ * turn an invalid module into a valid one; an engine rejection of the
+ * rewritten module is therefore an SDK bug, reported as a plain Error. The
+ * result imports only WASI preview1 functions the pinned shim implements,
+ * plus the interrupt import.
  */
 export async function compileBounded(
   module: Uint8Array,
   maximum: number,
 ): Promise<WebAssembly.Module> {
-  const { bytes } = instrument(module, maximum);
+  // What is validated is exactly what is rewritten, even if the caller's
+  // buffer changes meanwhile.
+  const original = new Uint8Array(module);
+  if (!WebAssembly.validate(original)) {
+    try {
+      await WebAssembly.compile(original);
+    } catch (cause) {
+      throw new TypeError(
+        `the engine rejected the Wasm module: ${reason(cause)}`,
+        { cause },
+      );
+    }
+    throw new TypeError("the engine rejected the Wasm module");
+  }
+  const { bytes } = instrument(original, maximum);
   let compiled: WebAssembly.Module;
   try {
     compiled = await WebAssembly.compile(bytes);
   } catch (cause) {
-    throw new TypeError(
-      `the engine rejected the Wasm module: ${
-        cause instanceof Error ? cause.message : String(cause)
+    throw new Error(
+      `the interruption rewrite produced a module the engine rejected: ${
+        reason(cause)
       }`,
       { cause },
     );
