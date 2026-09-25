@@ -419,7 +419,7 @@ export function changelogEntry(
 interface ComponentRecord {
   name: string;
   origin: string;
-  /** An SPDX license expression (scripts/package-assets.ts checks it). */
+  /** An SPDX license expression; test:package refuses one that spdxExpressionProblem rejects. */
   license: string;
   /** Prose the expression cannot carry, such as portions' own licenses. */
   note?: string;
@@ -500,11 +500,44 @@ const spdxLookup = (ids: readonly string[]) =>
 export function spdxExpressionProblem(expression: string): string | undefined {
   const licenses = spdxLookup(spdxLicenseIds);
   const exceptions = spdxLookup(spdxExceptionIds);
-  const tokens = expression.match(/\(|\)|[^\s()]+/g) ?? [];
+  // Only ASCII white space separates tokens; any other character, such as a
+  // non-breaking space, stays inside a token and fails as an identifier.
+  const tokens = expression.match(/\(|\)|[^ \t\r\n()]+/g) ?? [];
   let index = 0;
+  // Whether the last term is a bare license identifier, which WITH may follow.
+  let afterLicense = false;
   const unknown = (kind: string, id: string, list: string, constant: string) =>
-    `${id} is not an allow-listed SPDX ${kind} identifier; check ${list} and the component's license files, then add it to ${constant} in scripts/release.ts`;
+    /^[A-Za-z0-9.-]+$/.test(id)
+      ? `${id} is not an allow-listed SPDX ${kind} identifier; check ${list} and the component's license files, then add it to ${constant} in scripts/release.ts`
+      : `${
+        JSON.stringify(id)
+      } is not an SPDX ${kind} identifier, which holds only letters, digits, "-", and "."${
+        /[^\x21-\x7e]/.test(id)
+          ? " (this one holds a character outside printable ASCII, such as a non-breaking space)"
+          : ""
+      }`;
+  const unexpected = (closing: boolean): string => {
+    const token = tokens[index];
+    if (token === "WITH") {
+      return "WITH follows a single license identifier only, not a parenthesized expression or an exception";
+    }
+    if (token === ")") return 'a ")" has no matching "("';
+    const expected = [
+      "AND",
+      "OR",
+      ...(afterLicense ? ["WITH"] : []),
+      closing ? '")"' : "the end",
+    ];
+    return `${JSON.stringify(token)} stands where ${
+      expected.slice(0, -1).join(", ")
+    }, or ${expected.at(-1)} was expected${
+      spdxOperators.has(token.toUpperCase())
+        ? " (operators are upper case)"
+        : ""
+    }`;
+  };
   const term = (): string | undefined => {
+    afterLicense = false;
     const token = tokens[index];
     if (token === undefined) {
       return tokens.length === 0
@@ -515,8 +548,10 @@ export function spdxExpressionProblem(expression: string): string | undefined {
       index += 1;
       const problem = compound();
       if (problem !== undefined) return problem;
-      if (tokens[index] !== ")") return 'a "(" has no matching ")"';
+      if (tokens[index] === undefined) return 'a "(" has no matching ")"';
+      if (tokens[index] !== ")") return unexpected(true);
       index += 1;
+      afterLicense = false;
       return undefined;
     }
     if (token === ")") return '")" stands where a license was expected';
@@ -524,7 +559,8 @@ export function spdxExpressionProblem(expression: string): string | undefined {
       return `the operator ${token} stands where a license was expected`;
     }
     index += 1;
-    if (token === "NOASSERTION" || token === "NONE") {
+    const special = token.toUpperCase();
+    if (special === "NOASSERTION" || special === "NONE") {
       return `${token} records that no license expression is known`;
     }
     if (/^(?:DocumentRef-|LicenseRef-)/i.test(token)) {
@@ -536,29 +572,31 @@ export function spdxExpressionProblem(expression: string): string | undefined {
         ? `the exception ${license} stands where a license was expected`
         : unknown(
           "license",
-          license,
+          license === "" ? token : license,
           "https://spdx.org/licenses/",
           "spdxLicenseIds",
         );
     }
-    if (tokens[index] === "WITH") {
-      index += 1;
-      const exception = tokens[index];
-      if (
-        exception === undefined || exception === "(" || exception === ")" ||
-        spdxOperators.has(exception)
-      ) return "WITH is not followed by an exception identifier";
-      index += 1;
-      if (!exceptions.has(exception.toLowerCase())) {
-        return licenses.has(exception.toLowerCase())
-          ? `the license ${exception} stands where an exception was expected`
-          : unknown(
-            "exception",
-            exception,
-            "https://spdx.org/licenses/exceptions-index.html",
-            "spdxExceptionIds",
-          );
-      }
+    if (tokens[index] !== "WITH") {
+      afterLicense = true;
+      return undefined;
+    }
+    index += 1;
+    const exception = tokens[index];
+    if (
+      exception === undefined || exception === "(" || exception === ")" ||
+      spdxOperators.has(exception)
+    ) return "WITH is not followed by an exception identifier";
+    index += 1;
+    if (!exceptions.has(exception.toLowerCase())) {
+      return licenses.has(exception.toLowerCase())
+        ? `the license ${exception} stands where an exception was expected`
+        : unknown(
+          "exception",
+          exception,
+          "https://spdx.org/licenses/exceptions-index.html",
+          "spdxExceptionIds",
+        );
     }
     return undefined;
   };
@@ -574,12 +612,7 @@ export function spdxExpressionProblem(expression: string): string | undefined {
   };
   const problem = compound();
   if (problem !== undefined) return problem;
-  if (index < tokens.length) {
-    return `${
-      tokens[index]
-    } stands where AND, OR, WITH, or the end was expected (operators are upper case)`;
-  }
-  return undefined;
+  return index < tokens.length ? unexpected(false) : undefined;
 }
 
 /** True for an SPDX license expression that spdxExpressionProblem accepts. */

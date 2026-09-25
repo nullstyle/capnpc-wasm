@@ -516,10 +516,42 @@ function checkSpdxRules() {
     ["()", false],
     ["(MIT", false],
     ["MIT)", false],
+    ["MIT\tOR\nApache-2.0", true], // ASCII white space separates
+    ["MIT\u00a0OR\u00a0Apache-2.0", false], // a non-breaking space does not
+    ["Apache-2.0 WITH LLVM-exception WITH LLVM-exception", false],
+    ["Apache-2.0+ WITH LLVM-exception", true],
+    ["MIT++", false],
+    ["+", false],
+    ["noassertion", false],
   ];
   const wrong = cases.filter(([expression, accepted]) =>
     (spdxExpressionProblem(expression) === undefined) !== accepted
   );
+  // Refusals explain themselves: only a well-formed identifier is offered for
+  // the allow-list, and WITH names what it may follow.
+  const messages: [string, string, boolean][] = [
+    ["Foo-1.0", "add it to spdxLicenseIds", true],
+    ["Apache-2.0 WITH Foo-exception", "add it to spdxExceptionIds", true],
+    ["MIT/Apache-2.0", "add it to spdxLicenseIds", false],
+    ["Apache-2.0 WITH LLVM-exception+", "add it to spdxExceptionIds", false],
+    ["MIT\u00a0OR\u00a0Apache-2.0", "outside printable ASCII", true],
+    [
+      "(MIT) WITH LLVM-exception",
+      "WITH follows a single license identifier",
+      true,
+    ],
+    ["MIT or Apache-2.0", "operators are upper case", true],
+  ];
+  for (const [expression, fragment, present] of messages) {
+    const problem = spdxExpressionProblem(expression) ?? "";
+    if (problem.includes(fragment) !== present) {
+      throw new Error(
+        `SPDX gate message for ${JSON.stringify(expression)} ${
+          present ? "lacks" : "has"
+        } ${JSON.stringify(fragment)}: ${problem}`,
+      );
+    }
+  }
   if (wrong.length > 0) {
     throw new Error(
       `SPDX gate misjudges: ${
