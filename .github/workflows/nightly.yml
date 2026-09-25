@@ -81,10 +81,21 @@ jobs:
       # minutes now, should take roughly 25 to 45 minutes. That is an
       # estimate: the tasks' durations, logged under full contention, sum to
       # 78 to 94 minutes, so two at once finish within half that plus half the
-      # longest dependency chain, about 56 minutes, inside the job's 90.
-      - name: Run two mise tasks at once on the Intel runner
+      # longest dependency chain, about 56 minutes, inside the job's 90; the
+      # whole job took 26.5 minutes in nightly 36149851301.
+      # Its test timeouts also run at three times their length
+      # (CAPNP_TEST_TIMEOUT_SCALE, tests/lib/timeout-scale.ts): a wazero
+      # conversion in test:cli-parity outlasted run()'s 60-second default
+      # there (nightly 36168208228; ledger row 143). At 3 a hung program still
+      # fails in 3 minutes and a hung compiler in 30, so one hang ends the job
+      # by about 57 of its 90 minutes. The other hosts, whose logs show no
+      # near-miss (41 wazero conversions take 77 to 155 s against Intel's 141
+      # to 281), keep the scale at 1, as per-push CI does.
+      - name: Pace the Intel runner (two mise tasks, test timeouts x3)
         if: matrix.os == 'macos-15-intel'
-        run: echo "MISE_JOBS=2" >> "$GITHUB_ENV"
+        run: |
+          echo "MISE_JOBS=2" >> "$GITHUB_ENV"
+          echo "CAPNP_TEST_TIMEOUT_SCALE=3" >> "$GITHUB_ENV"
       - name: Check native and Wasm parity, generated consumers, and SDKs
         run: mise run check
       - name: Verify release archives and external package consumers
@@ -126,12 +137,20 @@ jobs:
     # vCPUs on ubuntu-24.04, three on macos-15), WebKit stalled recovering or
     # starting workers (nightly 36112692524 soak recovery, 36132427000
     # termination probe start, 36141746707 resource-limits worker init, all
-    # on Linux). Estimated, not measured: nine one-round runs logged each
-    # engine's pass at 81 to 150 s, so a pass in sequence takes about 400 s
-    # at most, and five soak rounds after test:browser and test:studio keep
-    # the job near 45 minutes.
+    # on Linux). With five soak rounds the job took 31.4 minutes on
+    # ubuntu-24.04 and 34.1 on macos-15 (nightly 36149851301).
+    # On macos-15 the test timeouts also run at three times their length
+    # (CAPNP_TEST_TIMEOUT_SCALE, tests/lib/timeout-scale.ts): a Studio folder
+    # upload there outlasted Playwright's 30-second action timeout (nightly
+    # 36168208228; ledger row 143). At 3 a hung browser step fails in 3
+    # minutes and closes within 90 s, a Studio action in 90 s and a navigation
+    # in 6 minutes, and a driver that never trips a step deadline is stopped
+    # at its 60-minute engine deadline, so one hang ends the job by about 95
+    # of its 150 minutes. ubuntu-24.04 keeps the scale at 1, as per-push CI
+    # does.
     env:
       CAPNP_BROWSER_JOBS: "1"
+      CAPNP_TEST_TIMEOUT_SCALE: ${{ matrix.os == 'macos-15' && '3' || '1' }}
     strategy:
       fail-fast: false
       matrix:
