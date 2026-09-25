@@ -160,25 +160,25 @@ within the deadline and exactly one terminated worker can be checked. The checks
 run after everything else, because a guest that outlives its cancellation keeps
 a core busy until the browser closes.
 
-| Engine (macOS arm64, 2026-09-24) | Pure-Wasm guest stops after | Host-calling guest stops after |
-| -------------------------------- | --------------------------- | ------------------------------ |
-| Chromium 153.0.8010.12           | 2041-2052 ms                | 2036-2047 ms                   |
-| WebKit 26.6                      | never (expected failure)    | 103-358 ms                     |
-| Firefox 155.0                    | not run locally; CI asserts | not run locally; CI asserts    |
+| Engine                         | Pure-Wasm guest stops after | Host-calling guest stops after |
+| ------------------------------ | --------------------------- | ------------------------------ |
+| Chromium 153.0.8010.12 (macOS) | 2021-2052 ms                | 2019-2047 ms                   |
+| WebKit 26.6 (macOS, Linux CI)  | never (expected failure)    | 51-358 ms (macOS)              |
+| Firefox 155.0 (Linux CI)       | within the bound (asserted) | within the bound (asserted)    |
 
-On macOS, WebKit stops a terminated worker only when the guest next enters
-JavaScript, so a guest that computes without WASI calls runs on at 100% CPU
-(GAP2-V1). There the driver records that case as an expected failure and fails
-loudly as soon as WebKit stops the guest: decision D1 = A has T08's in-guest
-interruption stop it, and the expectation is removed when T08 lands. WebKit on
-Linux, where CI runs it, is unmeasured: the driver accepts either behavior of
-the pure-Wasm guest there and prints which one it saw
-(`OBSERVED webkit on
-linux: ...`). In every engine and on every host, the guest
-that calls WASI must stop within the bound. `termination_test.ts`, part of
-`test:browser-bootstrap`, checks these verdicts without a browser. Until T08
-lands, treat a rejected cancellation in WebKit as a request, not as proof that
-the guest stopped.
+The macOS figures were measured on arm64 on 2026-09-24; the Linux ones come from
+CI run 36099823012, where WebKit kept the pure-Wasm guest running after every
+cancellation, as on macOS. WebKit stops a terminated worker only when the guest
+next enters JavaScript, so a guest that computes without WASI calls runs on at
+100% CPU (GAP2-V1). The driver records that case as an expected failure on every
+host and fails loudly as soon as WebKit stops the guest: decision D1 = A has
+T08's in-guest interruption stop it, and the expectation is removed when T08
+lands. In every engine and on every host, the guest that calls WASI must stop
+within the bound. Each run prints `OBSERVED <engine> termination on <os>: ...`
+with every sample's stop time, so CI keeps the numbers. `termination_test.ts`,
+part of `test:browser-bootstrap`, checks these verdicts without a browser. Until
+T08 lands, treat a rejected cancellation in WebKit as a request, not as proof
+that the guest stopped.
 
 ## Conformance corpus
 
@@ -192,10 +192,13 @@ runner the Deno surfaces use, and the driver checks the classified outcome
 against the surface's column of `expected.json`, including `<surface>@<engine>`
 departures. On macOS the rows measured a small worker stack in WebKit: about 34
 const references and 90 nested imports, against 275 and 744 in a Chromium
-worker, which matches macOS's 512 KiB default for secondary threads. Linux
-threads default to 8 MiB, so the corpus accepts either outcome there until CI
-records one; rows that accept more than one outcome print what they observed
-(`OBSERVED ...`), and the run summary repeats it.
+worker, which matches macOS's 512 KiB default for secondary threads; near that
+limit the outcome varies between runs. Linux threads default to 8 MiB, and on
+Linux CI (run 36099823012) WebKit and Firefox workers compiled the 100-deep
+chains. The WebKit worker depth rows therefore accept both outcomes, each with
+its full checks, and every row that accepts more than one outcome prints the
+whole observation (`OBSERVED ...`: outcome, stage, outputs, diagnostics), which
+the run summary repeats.
 
 ## Hosted CI
 
