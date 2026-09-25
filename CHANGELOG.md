@@ -182,6 +182,13 @@ every flavor it applies to has shipped it.
   flavor, and adds one published-releases row per flavor release; the Go module
   tag goes at the commit of the matching `capnpc-wasm` release. Each packaged
   README links the API stability policy at the producer commit.
+- Notices and SBOM: every component license in `components.json` is an SPDX
+  expression (Rust std `MIT OR Apache-2.0`, wasi-libc
+  `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT`), with prose in a
+  separate `note` that the notices print and the SBOM keeps in
+  `licenseComments`, so the SBOM declares every component's license instead of
+  `NOASSERTION`; `build:sdk` fails on a Go module or crate without a recorded
+  expression.
 
 ## capnp-wasm-compiler-host
 

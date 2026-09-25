@@ -10,7 +10,10 @@
 // component without a license text fails the staging. Every flavor gets a
 // THIRD_PARTY_NOTICES-<flavor>.md listing its artifacts' components and the
 // files that hold their texts, and components.json records the same map for
-// release packaging.
+// release packaging. Every component's license is an SPDX expression that the
+// release SBOM declares as is; prose it cannot carry goes in a separate note.
+
+import { isSpdxExpression } from "./release.ts";
 
 const destination = Deno.args[0] ?? "dist";
 if (
@@ -102,8 +105,10 @@ interface Component {
   name: string;
   /** What was built or copied: a reference commit, a toolchain, a module. */
   origin: string;
-  /** SPDX expression, or a pointer to the files when none is recorded. */
+  /** A valid SPDX license expression; the SBOM declares it as is. */
   license: string;
+  /** Prose the expression cannot carry, such as portions under other licenses. */
+  note?: string;
   files: LicenseFile[];
 }
 
@@ -183,8 +188,9 @@ const goStd: Component = {
 const rustStd: Component = {
   name: "Rust standard library",
   origin: rustVersion,
-  license:
-    "MIT OR Apache-2.0, with the third-party notices in the file (its wasm32-wasip1 build links the toolchain's own wasi-libc; see the wasi-libc component)",
+  license: "MIT OR Apache-2.0",
+  note:
+    "The file also holds the third-party notices of the library. Its wasm32-wasip1 build links the toolchain's own wasi-libc (see the wasi-libc component).",
   files: [{
     source: `${rustSysroot}/share/doc/rust/COPYRIGHT-library.html`,
     target: "rust-COPYRIGHT-library.html",
@@ -263,8 +269,10 @@ const wasiLibc: Component = {
   origin: `WebAssembly/wasi-libc at ${
     vendored.sources["wasi-libc"].commit.slice(0, 12)
   }, as recorded by ref/wasi-sdk`,
-  license:
-    "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT; musl MIT; cloudlibc BSD-2-Clause; dlmalloc CC0-1.0; musl-fts BSD-3-Clause",
+  // wasi-libc's LICENSE declares this expression for the library as a whole.
+  license: "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+  note:
+    "Portions keep their own licenses: musl MIT, cloudlibc BSD-2-Clause, dlmalloc CC0-1.0, and musl-fts BSD-3-Clause.",
   files: await vendoredFiles("wasi-libc"),
 };
 const llvmRuntimes: Component = {
@@ -277,13 +285,30 @@ const llvmRuntimes: Component = {
   files: await vendoredFiles("llvm-project"),
 };
 
-/** SPDX labels for modules and crates the build graph pulls in. */
+/**
+ * SPDX license expressions for the Go modules the build graph pulls in (by
+ * module path; Go records none) and for crates whose Cargo.toml license field
+ * is missing or not an SPDX expression (by crate name). Read a new module's
+ * license files before adding it.
+ */
 const knownLicenses: Record<string, string> = {
   "github.com/colega/zeropool": "Apache-2.0",
   "github.com/tetratelabs/wazero": "Apache-2.0",
   "golang.org/x/sync": "BSD-3-Clause",
   "golang.org/x/sys": "BSD-3-Clause",
 };
+/**
+ * The SPDX expression recorded for a module or crate; a missing or invalid
+ * one fails the staging, so every component's license is declarable as is.
+ */
+function spdxLicense(license: string | undefined, subject: string): string {
+  if (license === undefined || !isSpdxExpression(license)) {
+    throw new Error(
+      `${subject} has no SPDX license expression; read its license files and add one to knownLicenses in scripts/package-assets.ts`,
+    );
+  }
+  return license;
+}
 const licenseFileName = /^(license|licence|copying|notice)(\.|-|$)/i;
 
 async function licenseFilesIn(directory: string): Promise<string[]> {
@@ -331,7 +356,7 @@ async function goModules(
     components.push({
       name: path,
       origin: `Go module ${path}@${version}`,
-      license: knownLicenses[path] ?? "see the listed files",
+      license: spdxLicense(knownLicenses[path], `Go module ${path}@${version}`),
       // One version per module path in a build graph, so the directory omits
       // the version (a pseudo-version would exceed the archive path limit);
       // the notices and components.json record it.
@@ -418,7 +443,12 @@ async function rustCrates(manifest: string): Promise<Component[]> {
     components.push({
       name: pkg.name,
       origin: `crate ${pkg.name} ${pkg.version} (${pkg.source ?? "path"})`,
-      license: pkg.license ?? "see the listed files",
+      license: spdxLicense(
+        knownLicenses[pkg.name] ?? pkg.license ?? undefined,
+        `crate ${pkg.name} ${pkg.version} (license field ${
+          JSON.stringify(pkg.license)
+        })`,
+      ),
       files: files.map((file) => ({
         source: `${dir}/${file}`,
         target: `rust-crates/${pkg.name}-${pkg.version}/${file}`,
@@ -521,6 +551,18 @@ const flavors: Record<string, { title: string; artifacts: Artifact[] }> = {
 
 // Staging ---------------------------------------------------------------------
 
+for (const artifact of artifacts) {
+  for (const component of artifact.components) {
+    if (!isSpdxExpression(component.license)) {
+      throw new Error(
+        `${component.name}: license ${
+          JSON.stringify(component.license)
+        } is not an SPDX expression; move prose into its note`,
+      );
+    }
+  }
+}
+
 const licenses = `${destination}/licenses`;
 const staged = new Map<string, string>();
 // scripts/release.ts writes ustar headers whose name field holds at most 100
@@ -563,7 +605,9 @@ function notices(name: string, title: string, included: Artifact[]): string {
     lines.push(`## ${artifact.path} (${artifact.description})`, "");
     for (const component of artifact.components) {
       lines.push(
-        `- ${component.name}: ${component.origin}. License: ${component.license}.`,
+        `- ${component.name}: ${component.origin}. License: ${component.license}.${
+          component.note ? ` ${component.note}` : ""
+        }`,
         ...component.files.map((file) => `  - ${file.target}`),
       );
     }
@@ -596,6 +640,7 @@ await Deno.writeTextFile(
           name: component.name,
           origin: component.origin,
           license: component.license,
+          ...(component.note ? { note: component.note } : {}),
           files: component.files.map((file) => file.target),
         })),
       })),

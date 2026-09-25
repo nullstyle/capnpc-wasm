@@ -410,7 +410,10 @@ export function changelogEntry(
 interface ComponentRecord {
   name: string;
   origin: string;
+  /** An SPDX license expression (scripts/package-assets.ts checks it). */
   license: string;
+  /** Prose the expression cannot carry, such as portions' own licenses. */
+  note?: string;
   files: string[];
 }
 
@@ -683,7 +686,13 @@ export function spdxDocument(input: SbomInput): string {
   }];
   for (const component of input.components) {
     const identity = componentIdentity(component, input);
+    // An older components.json may still hold prose in `license`; it stays
+    // readable as a comment and is never declared.
     const valid = isSpdxExpression(component.license);
+    const comments = [
+      ...(valid ? [] : [component.license]),
+      ...(component.note ? [component.note] : []),
+    ].join(" ");
     const pkg: SpdxPackage = {
       name: component.name,
       SPDXID: spdxId("Component", component.name, used),
@@ -692,7 +701,7 @@ export function spdxDocument(input: SbomInput): string {
       filesAnalyzed: false,
       licenseConcluded: "NOASSERTION",
       licenseDeclared: valid ? component.license : "NOASSERTION",
-      ...(valid ? {} : { licenseComments: component.license }),
+      ...(comments ? { licenseComments: comments } : {}),
       copyrightText: "NOASSERTION",
       comment: `Origin: ${component.origin}. License texts in the archive: ${
         component.files.map((file) => `licenses/${file}`).join(", ")
