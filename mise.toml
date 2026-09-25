@@ -146,8 +146,9 @@ description = "Remove build/, dist/, and every project cache under .cache/ (Deno
 # Go extracts modules read-only; go clean removes them where rm alone fails.
 run = [
   "command -v go >/dev/null && go clean -modcache || true",
-  # Without Go on PATH the module cache is still read-only.
-  "chmod -R u+w .cache 2>/dev/null || true",
+  # Without Go on PATH the module cache is still read-only. find does not
+  # follow a symlinked .cache, and rm then removes only the link.
+  "find .cache -type d -exec chmod u+w {} + 2>/dev/null || true",
   "rm -rf build dist .cache",
 ]
 
