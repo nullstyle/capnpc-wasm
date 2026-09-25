@@ -157,10 +157,10 @@ it would for an application, and judged by its evidence:
   the SDK is the suspect: the run fails with both workers' traces.
 - Otherwise the engine is the suspect, and the stall is tolerated within a
   budget per CI job. `CAPNP_SOAK_STALL_BUDGET` (1 by default, 0 for none) bounds
-  the stalls that every driver of the job records in
-  `build/test/soak-stalls.jsonl`: all engines, the suite run, and each soak
-  round. CI jobs start from a clean checkout; locally the ledger lasts until
-  `mise run clean:test`.
+  these stalls and the termination check's start stalls (see below) together, as
+  every driver of the job records them in `build/test/soak-stalls.jsonl`: all
+  engines, the suite run, and each soak round. CI jobs start from a clean
+  checkout; locally the ledger lasts until `mise run clean:test`.
 
 A tolerated stall prints an `OBSERVED <engine> soak recovery stall` line with
 both traces and the health checks, goes into the engine's receipt and the run
@@ -187,17 +187,21 @@ The recovery cycles show that a client keeps producing correct output after
 cancellations; they do not show that a cancelled guest stopped running.
 `termination.ts` does. Two more pages audit every Worker the SDK creates and
 terminates. On a cross-origin-isolated page (COOP and COEP), a probe worker
-wraps the SDK's `worker.js` and counts the guest's progress in shared memory.
-Before each cancellation the counter must move within one 50 ms sample, so a
-stop can be observed. After each of a timeout, an abort, and a dispose, the page
-watches the counter for up to 3 seconds, until it has not moved for one second,
-and its last movement must come within 2 seconds of the rejection, forty times
-the 50 ms interval at which the page samples it. The worker must survive the
-timeout and the abort: once the page has waited out the client's one-second
-grace, in which a cancelled guest must report, no `terminate()` call and no
-second worker may have occurred, and a follow-up job on the same client must
-time out in its turn. Two guests run through the whole SDK path as the job's
-compiler:
+wraps the SDK's `worker.js` and counts the guest's progress in shared memory. A
+cancellation is measured only once the guest runs: an abort or a dispose comes
+right after a 50 ms window in which the counter moved, and a timeout, whose job
+has a 2-second deadline, must follow at least one such window. The probe also
+records, on the worker's own clock, when the guest last called the counted
+import, so the stop time does not depend on when the page samples. After each of
+a timeout, an abort, and a dispose, the page watches until the counter has not
+moved for one second, and the guest's last call must come within 2 seconds of
+its latest call at the cancellation. Abort and dispose jobs carry a 60-second
+deadline, so only the intended cancellation can end them. The worker must
+survive the timeout and the abort: once the page has waited out the client's
+one-second grace, in which a cancelled guest must report, no `terminate()` call
+and no second worker may have occurred, and a follow-up job on the same client
+must time out in its turn. Two guests run through the whole SDK path as the
+job's compiler:
 
 - `spin-counter.wat`, a loop that never calls an import, like a compiler stuck
   computing; the probe counts its polls of the `capnp_wasm.interrupt` import the
@@ -212,19 +216,36 @@ reported by then would have made the client terminate its worker, so no
 `terminate()` call and no second worker show that it stopped. The checks run
 after everything else.
 
+A sample whose probe worker does not initialize within 10 seconds, or whose
+guest does not run within 10 seconds of its job (before its deadline, for a
+timeout), is a start stall rather than a measurement. The probe worker is traced
+like a soak worker, and the page returns that trace, its own messages to the
+worker, and the soak's engine health checks. The evidence is read as the soak
+reads it. If the page never posted the message, or the engine started the
+worker, delivered the message, finished every Wasm compile and instantiation,
+and stayed healthy while the worker never answered or its guest never ran, the
+SDK is the suspect and the check fails. Otherwise the sample is retried once,
+and the stall counts against the soak's stall budget, with an
+`OBSERVED <engine> worker start stall` line, a receipt entry, and a warning
+annotation on GitHub Actions. One start stall has been seen: in the nightly run
+[36132427000](https://github.com/nullstyle/capnpc-wasm/actions/runs/36132427000),
+WebKit on Linux did not initialize the probe worker for the pure-Wasm abort
+within the SDK's default 30-second init timeout, in the suite's second run with
+three engines in parallel, and the check failed with the SDK's `TimeoutError`.
+
 | Engine                            | Pure-Wasm guest stops after | Host-calling guest stops after |
 | --------------------------------- | --------------------------- | ------------------------------ |
-| Chromium 153.0.8010.12 (macOS)    | 0-53 ms                     | 0 ms                           |
+| Chromium 153.0.8010.12 (macOS)    | 0-1 ms                      | 0 ms                           |
 | Chromium 153.0.8010.12 (Linux CI) | 0-50 ms                     | 0-50 ms                        |
 | Firefox 155.0 (Linux CI)          | 0-50 ms                     | 0 ms                           |
-| WebKit 26.6 (macOS)               | 0-51 ms                     | 0 ms                           |
+| WebKit 26.6 (macOS)               | 0-2 ms                      | 0 ms                           |
 | WebKit 26.6 (Linux CI)            | 0-50 ms                     | 0 ms                           |
 
-The macOS figures were measured locally on arm64 on 2026-09-24 and the Linux
-ones in CI run
+The macOS figures were measured locally on arm64 on 2026-09-25, in three runs,
+on the worker's clock. The Linux ones come from CI run
 [36112686931](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112686931),
-over a timeout, an abort, and a dispose each; the 50 ms sampling quantizes them.
-The nightly run
+over a timeout, an abort, and a dispose each, when the page still sampled the
+counter every 50 ms, which quantized them. The nightly run
 [36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524)
 measured 0 to 185 ms on macOS (185 ms for Firefox's abort), and the nightly run
 [36120138448](https://github.com/nullstyle/capnpc-wasm/actions/runs/36120138448)

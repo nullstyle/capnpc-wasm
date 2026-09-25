@@ -373,9 +373,11 @@ execution time as well as resources.
 
 Repeated active-worker cancellation stalled in the older tested WebKit revisions
 2248 and 2311. The current WebKit 26.6 / revision 2359 passed the same stress
-case, but has since stalled once in the browser suite's
-[recovery soak](../../tests/browser/README.md#recovery-soak), on Linux, with the
-cause unknown. The
+case, but has since stalled twice on Linux, once in the browser suite's
+[recovery soak](../../tests/browser/README.md#recovery-soak) and once starting a
+worker for its
+[termination check](../../tests/browser/README.md#termination-acceptance), with
+the cause unknown. The
 [browser evidence](../../tests/browser/README.md#engine-regression-evidence)
 records this engine comparison; upgrading the test engine does not repair older
 installed browsers. Validate the browser versions your application supports.
