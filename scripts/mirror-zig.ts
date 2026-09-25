@@ -1,39 +1,52 @@
-// Prepare, verify, and record checksums for a project-owned mirror of the
-// pinned Zig toolchain.
+// Stage, verify, and lock the project's mirror release of the pinned Zig
+// toolchain.
 //
 // ziglang.org prunes development builds, and the pinned generator toolchain
-// (the `zig` line of mise.toml, matching ref/capnp-zig/mise.toml) is one. mise
-// installs it from the Zig community mirrors, verifies the Zig Software
-// Foundation minisign signature, and checks the sha256 recorded in mise.lock.
-// A project-owned copy keeps the exact bytes available after the community
-// mirrors drop the build. Uploading it is a human action; this script prepares
-// the files, prints the commands, and verifies the result.
+// (the `zig` line of mise.toml, matching ref/capnp-zig/mise.toml) is one. The
+// project keeps the Zig Software Foundation's signed tarballs in its own
+// GitHub release, `toolchain-zig-<version>`. mise's core:zig backend never
+// downloads the url recorded in mise.lock: it requests
+// https://ziglang.org/builds/<file> and then <file>.minisig from the same host.
+// mise.toml therefore turns the Zig community mirrors off and redirects those
+// requests to the release with a `url_replacements` rule; mise still verifies
+// the ZSF minisign signature and the sha256 that mise.lock records. This script
+// applies that rule the way mise does, so the lock entries it writes name the
+// URLs mise actually fetches. Uploading a release is a human action; this
+// script prepares the files, prints the commands, and verifies the result.
 //
 // Usage (`mise run mirror:zig -- <command>`):
 //   stage               download the four tarballs and their .minisig files
 //                       into build/mirror/zig/<version>/, verify every
-//                       signature and every mise.lock checksum, write
-//                       SHA256SUMS and NOTES.md, and print the gh commands
-//                       that publish them as a GitHub release
-//   verify <base-url>   fetch every file from <base-url>/<name> (GitHub's
-//                       renamed asset names are tried as well) and verify the
-//                       signatures and checksums
+//                       signature (and the mise.lock checksums when the lock
+//                       records this version), write SHA256SUMS and NOTES.md,
+//                       and print the gh command that publishes the release
+//   verify              check the lock against what mise installs: every zig
+//                       entry names the URL that mise.toml's rule sends mise
+//                       to, records a sha256 and minisign provenance, and the
+//                       release serves a tarball and a .minisig that verify
+//                       against the ZSF key and match that sha256
+//   verify <base-url>   fetch every file from <base-url>/<name> (renamed asset
+//                       names are tried as well) and verify the signatures,
+//                       and the checksums when the lock records this version
 //   lock [--write]      print the mise.lock zig platform entries for the pinned
-//                       version from verified downloads; --write replaces them
-//                       in mise.lock. After a pin bump: `mise lock zig` first,
-//                       then this, because `mise lock` records no checksum for
-//                       a build that ziglang.org no longer lists.
+//                       version from what the mirror release serves, verified
+//                       against the ZSF key; --write replaces them in mise.lock.
+//                       After a pin bump, run `mise lock zig` first (it writes
+//                       the new version's entries with ziglang.org URLs and no
+//                       checksums), then this.
 //
-// Download sources, in order: files already staged under build/mirror, the URL
-// recorded in mise.lock, ziglang.org, then every community mirror listed at
-// https://ziglang.org/download/community-mirrors.txt. Every file is verified
-// before it is used, whatever its source.
+// stage takes each file from build/mirror when present, else from the first
+// of: the mirror release, the URL in mise.lock, ziglang.org, and every
+// community mirror listed at https://ziglang.org/download/community-mirrors.txt.
+// Every file is verified before it is used, whatever its source.
 import { createHash } from "node:crypto";
 import { sha256 } from "./verify-release.ts";
 
 const zigPublicKey = "RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U";
 const mirrorListUrl = "https://ziglang.org/download/community-mirrors.txt";
 const repository = "nullstyle/capnpc-wasm";
+// core:zig appends this query to every mirror and signature request.
+const miseRequestSuffix = "?source=mise-en-place";
 const platforms = {
   "linux-arm64": { arch: "aarch64", os: "linux" },
   "linux-x64": { arch: "x86_64", os: "linux" },
@@ -41,6 +54,8 @@ const platforms = {
   "macos-x64": { arch: "x86_64", os: "macos" },
 } as const;
 type Platform = keyof typeof platforms;
+type LockEntry = { url?: string; checksum?: string; provenance?: string };
+type Rule = { pattern: string; replacement: string };
 type Verified = {
   platform: Platform;
   file: string;
@@ -52,7 +67,7 @@ type Verified = {
 
 function usage(): never {
   console.error(
-    "usage: scripts/mirror-zig.ts stage | verify <base-url> | lock [--write]",
+    "usage: scripts/mirror-zig.ts stage | verify [<base-url>] | lock [--write]",
   );
   Deno.exit(2);
 }
@@ -68,24 +83,92 @@ function fileName(version: string, platform: Platform): string {
   return `zig-${arch}-${os}-${version}.tar.xz`;
 }
 
+// The URL core:zig requests for a version it cannot find in ziglang.org's
+// index: development builds live under /builds/.
 function upstreamUrl(version: string, file: string): string {
   return version.includes("-dev.")
     ? `https://ziglang.org/builds/${file}`
     : `https://ziglang.org/download/${version}/${file}`;
 }
 
-function lockEntries(
-  lock: string,
-): Map<Platform, { url?: string; checksum?: string }> {
-  const entries = new Map<Platform, { url?: string; checksum?: string }>();
+function releaseBase(version: string): string {
+  return `https://github.com/${repository}/releases/download/toolchain-zig-${version}`;
+}
+
+function tomlKey(raw: string): string {
+  if (raw.startsWith("'")) return raw.slice(1, -1);
+  return JSON.parse(raw);
+}
+
+// The `[settings.url_replacements]` table of mise.toml, in order.
+function urlReplacements(toml: string): Rule[] {
+  const table = toml.match(
+    /^\[settings\.url_replacements\]\n((?:(?!\[)[^\n]*\n)*)/m,
+  );
+  if (!table) return [];
+  const rules: Rule[] = [];
+  for (const line of table[1].split("\n")) {
+    const match = line.match(
+      /^('[^']*'|"(?:[^"\\]|\\.)*")\s*=\s*("(?:[^"\\]|\\.)*")\s*$/,
+    );
+    if (match) {
+      rules.push({
+        pattern: tomlKey(match[1]),
+        replacement: tomlKey(match[2]),
+      });
+    }
+  }
+  return rules;
+}
+
+// Rust regex replacement syntax: $name, ${name}, $n, ${n}, and $$.
+function expand(replacement: string, groups: (string | undefined)[]): string {
+  return replacement.replace(
+    /\$\$|\$\{([^}]*)\}|\$([A-Za-z0-9_]+)/g,
+    (token, braced?: string, bare?: string) => {
+      if (token === "$$") return "$";
+      const name = braced ?? bare ?? "";
+      return /^\d+$/.test(name) ? groups[Number(name)] ?? "" : "";
+    },
+  );
+}
+
+// mise's apply_url_replacements: the first rule that changes the URL wins; a
+// `regex:` rule replaces its first match, any other rule every occurrence.
+function applyRules(url: string, rules: Rule[]): string {
+  for (const { pattern, replacement } of rules) {
+    let replaced: string;
+    if (pattern.startsWith("regex:")) {
+      const regex = new RegExp(pattern.slice("regex:".length));
+      const match = regex.exec(url);
+      if (!match) continue;
+      replaced = url.slice(0, match.index) +
+        expand(replacement, [...match]) +
+        url.slice(match.index + match[0].length);
+    } else {
+      replaced = url.replaceAll(pattern, replacement);
+    }
+    if (replaced !== url) return replaced;
+  }
+  return url;
+}
+
+// The zig entries of mise.lock, when they are for `version`.
+function lockEntries(lock: string, version: string): Map<Platform, LockEntry> {
+  const entries = new Map<Platform, LockEntry>();
+  const start = lock.indexOf(`[[tools.zig]]\nversion = "${version}"\n`);
+  if (start < 0) return entries;
+  const next = lock.indexOf("\n[[", start + 1);
+  const section = lock.slice(start, next < 0 ? undefined : next + 1);
   for (
-    const block of lock.matchAll(
+    const block of section.matchAll(
       /\[tools\.zig\."platforms\.([a-z0-9-]+)"\]\n((?:[a-z_]+ = .*\n)*)/g,
     )
   ) {
     entries.set(block[1] as Platform, {
       url: block[2].match(/^url = "([^"]+)"$/m)?.[1],
       checksum: block[2].match(/^checksum = "([^"]+)"$/m)?.[1],
+      provenance: block[2].match(/^provenance = "([^"]+)"$/m)?.[1],
     });
   }
   return entries;
@@ -164,18 +247,27 @@ async function verifyMinisign(
   }
 }
 
+// Three attempts on a network error, 429, or 5xx (GitHub's release downloads
+// return an occasional transient 500); any other status fails at once.
 async function fetchBytes(url: string): Promise<Uint8Array | undefined> {
-  try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(600_000) });
-    if (!response.ok) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let retry = false;
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(600_000),
+      });
+      if (response.ok) return new Uint8Array(await response.arrayBuffer());
+      await response.body?.cancel();
       console.error(`  ${url}: HTTP ${response.status}`);
-      return undefined;
+      retry = response.status === 429 || response.status >= 500;
+    } catch (error) {
+      console.error(`  ${url}: ${error}`);
+      retry = true;
     }
-    return new Uint8Array(await response.arrayBuffer());
-  } catch (error) {
-    console.error(`  ${url}: ${error}`);
-    return undefined;
+    if (!retry || attempt === 3) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 2_000 * attempt));
   }
+  return undefined;
 }
 
 function signatureUrl(url: string): string {
@@ -220,58 +312,33 @@ async function verified(
   return { platform, file, source, bytes, signature, sha256: digest };
 }
 
-// Obtain a verified tarball: from the staging directory when present, else
-// from the first source that serves both the tarball and its signature.
-async function obtain(
+// Download a tarball and its signature from the URLs mise uses and verify them.
+async function fetchVerified(
   platform: Platform,
-  version: string,
-  staging: string,
-  lockUrl: string | undefined,
+  file: string,
+  tarballUrl: string,
+  signatureSource: string,
   expectedChecksum: string | undefined,
-): Promise<Verified> {
-  const file = fileName(version, platform);
-  const staged = await readIfPresent(`${staging}/${file}`);
-  const stagedSignature = await readIfPresent(`${staging}/${file}.minisig`);
-  if (staged && stagedSignature) {
-    return verified(
-      platform,
-      file,
-      `${staging}/${file}`,
-      staged,
-      new TextDecoder().decode(stagedSignature),
-      expectedChecksum,
-    );
-  }
-  const sources = [
-    ...(lockUrl ? [lockUrl] : []),
-    upstreamUrl(version, file),
-    ...(await mirrors()).map((mirror) =>
-      `${mirror}/${file}?source=capnpc-wasm`
-    ),
-  ];
-  for (const url of new Set(sources)) {
-    console.log(`fetching ${file} from ${url}`);
-    const bytes = await fetchBytes(url);
-    if (!bytes) continue;
-    const signature = await fetchBytes(signatureUrl(url));
-    if (!signature) continue;
-    return verified(
-      platform,
-      file,
-      url,
-      bytes,
-      new TextDecoder().decode(signature),
-      expectedChecksum,
-    );
-  }
-  throw new Error(`no source serves ${file} with its signature`);
+): Promise<Verified | undefined> {
+  const bytes = await fetchBytes(tarballUrl);
+  if (!bytes) return undefined;
+  const signature = await fetchBytes(signatureSource);
+  if (!signature) return undefined;
+  return verified(
+    platform,
+    file,
+    tarballUrl,
+    bytes,
+    new TextDecoder().decode(signature),
+    expectedChecksum,
+  );
 }
 
-function lockEntry(entry: Verified, version: string): string {
+function lockBlock(platform: Platform, digest: string, url: string): string {
   return [
-    `[tools.zig."platforms.${entry.platform}"]`,
-    `checksum = "sha256:${entry.sha256}"`,
-    `url = "${upstreamUrl(version, entry.file)}"`,
+    `[tools.zig."platforms.${platform}"]`,
+    `checksum = "sha256:${digest}"`,
+    `url = "${url}"`,
     `provenance = "minisign"`,
     "",
   ].join("\n");
@@ -279,25 +346,67 @@ function lockEntry(entry: Verified, version: string): string {
 
 const command = Deno.args[0];
 if (!command || !["stage", "verify", "lock"].includes(command)) usage();
-const version = pinnedVersion(await Deno.readTextFile("mise.toml"));
+const toml = await Deno.readTextFile("mise.toml");
+const version = pinnedVersion(toml);
+const rules = urlReplacements(toml);
 const lock = await Deno.readTextFile("mise.lock");
-const entries = lockEntries(lock);
+const entries = lockEntries(lock, version);
 const staging = `build/mirror/zig/${version}`;
 const tag = `toolchain-zig-${version}`;
 const keys = Object.keys(platforms) as Platform[];
+
+// What core:zig requests for a platform, after mise.toml's url_replacements.
+function miseUrls(platform: Platform) {
+  const file = fileName(version, platform);
+  const upstream = upstreamUrl(version, file);
+  return {
+    file,
+    tarball: applyRules(upstream, rules),
+    signature: applyRules(`${upstream}.minisig${miseRequestSuffix}`, rules),
+  };
+}
 
 if (command === "stage") {
   await Deno.mkdir(staging, { recursive: true });
   const results: Verified[] = [];
   for (const platform of keys) {
-    const entry = entries.get(platform);
-    const result = await obtain(
-      platform,
-      version,
-      staging,
-      entry?.url,
-      entry?.checksum,
-    );
+    const { file, tarball } = miseUrls(platform);
+    const expected = entries.get(platform)?.checksum;
+    let result: Verified | undefined;
+    const staged = await readIfPresent(`${staging}/${file}`);
+    const stagedSignature = await readIfPresent(`${staging}/${file}.minisig`);
+    if (staged && stagedSignature) {
+      result = await verified(
+        platform,
+        file,
+        `${staging}/${file}`,
+        staged,
+        new TextDecoder().decode(stagedSignature),
+        expected,
+      );
+    }
+    const lockUrl = entries.get(platform)?.url;
+    const sources = result ? [] : [
+      `${releaseBase(version)}/${file}`,
+      tarball,
+      ...(lockUrl ? [lockUrl] : []),
+      upstreamUrl(version, file),
+      ...(await mirrors()).map((mirror) =>
+        `${mirror}/${file}?source=capnpc-wasm`
+      ),
+    ];
+    for (const url of new Set(sources)) {
+      if (result) break;
+      console.log(`fetching ${file} from ${url}`);
+      result = await fetchVerified(
+        platform,
+        file,
+        url,
+        signatureUrl(url),
+        expected,
+      );
+    }
+    if (!result) throw new Error(`no source serves ${file} with its signature`);
     if (!result.source.startsWith(staging)) {
       await Deno.writeFile(`${staging}/${result.file}`, result.bytes);
       await Deno.writeTextFile(
@@ -307,9 +416,7 @@ if (command === "stage") {
     }
     console.log(
       `OK ${result.file}: minisign verified, sha256 ${result.sha256}${
-        entry?.checksum
-          ? " matches mise.lock"
-          : " (mise.lock records no checksum)"
+        expected ? " matches mise.lock" : " (mise.lock records no checksum)"
       } (${result.source})`,
     );
     results.push(result);
@@ -325,17 +432,17 @@ if (command === "stage") {
       "",
       "Exact copies of the ziglang.org development build that compiles the pinned",
       "capnp-zig generator (the `zig` pin of mise.toml and ref/capnp-zig/mise.toml).",
-      "ziglang.org prunes development builds; these files were verified against the",
-      "Zig Software Foundation minisign key before upload, and every tarball's",
+      "ziglang.org prunes development builds; mise installs these files instead,",
+      "through the `url_replacements` rule in mise.toml. They were verified against",
+      "the Zig Software Foundation minisign key before upload, and every tarball's",
       "`.minisig` verifies against it:",
       "",
       "```sh",
       `minisign -Vm <tarball> -P ${zigPublicKey}`,
       "```",
       "",
-      "GitHub renames uploaded assets whose names contain `+`. The signature's",
-      "trusted comment names the original file, so restore the original name",
-      "(from SHA256SUMS) before verifying a downloaded copy.",
+      "The asset names keep the `+` of the version; download URLs accept it as is",
+      "or as `%2B`.",
       "",
       "| File | SHA-256 | Bytes | Fetched from |",
       "| --- | --- | --- | --- |",
@@ -346,20 +453,31 @@ if (command === "stage") {
     ].join("\n"),
   );
   console.log(`\nstaged ${results.length} tarballs under ${staging}\n`);
+  const { tarball } = miseUrls(keys[0]);
+  if (!tarball.startsWith(`${releaseBase(version)}/`)) {
+    console.log(
+      `warning: mise.toml's url_replacements send mise to ${tarball}, not to ${
+        releaseBase(version)
+      }/`,
+    );
+  }
   console.log("Publish them (a human action) with:");
   console.log(
-    `  gh release create ${tag} --repo ${repository} --title "Zig toolchain mirror ${version}" --notes-file ${staging}/NOTES.md \\`,
+    `  gh release create ${tag} --repo ${repository} --prerelease --title "Zig toolchain mirror ${version}" --notes-file ${staging}/NOTES.md \\`,
   );
   console.log(
     `    ${staging}/zig-*.tar.xz ${staging}/zig-*.tar.xz.minisig ${staging}/SHA256SUMS`,
   );
-  console.log("then verify the published copies with:");
+  console.log("then verify the published copies and record them with:");
+  console.log(`  mise run mirror:zig -- verify ${releaseBase(version)}`);
   console.log(
-    `  mise run mirror:zig -- verify https://github.com/${repository}/releases/download/${tag}`,
+    "  mise lock zig                         # only after a pin bump",
   );
-} else if (command === "verify") {
-  const base = Deno.args[1]?.replace(/\/$/, "");
-  if (!base) usage();
+  console.log("  mise run mirror:zig -- lock --write");
+  console.log("  mise run mirror:zig -- verify");
+} else if (command === "verify" && Deno.args[1]) {
+  const base = Deno.args[1].replace(/\/$/, "");
+  if (Deno.args.length > 2) usage();
   let failed = false;
   for (const platform of keys) {
     const file = fileName(version, platform);
@@ -399,42 +517,105 @@ if (command === "stage") {
     }
   }
   if (failed) Deno.exit(1);
+} else if (command === "verify") {
+  let failed = false;
+  const fail = (message: string) => {
+    console.log(`FAIL ${message}`);
+    failed = true;
+  };
+  if (entries.size === 0) {
+    fail(
+      `mise.lock records no zig ${version}; run \`mise lock zig\`, then \`mise run mirror:zig -- lock --write\``,
+    );
+  }
+  for (const platform of keys) {
+    const { file, tarball, signature } = miseUrls(platform);
+    const entry = entries.get(platform);
+    if (!entry) {
+      fail(`mise.lock has no zig ${version} entry for ${platform}`);
+      continue;
+    }
+    if (entry.url !== tarball) {
+      fail(
+        `${platform}: mise.lock names ${entry.url}, but mise downloads ${tarball}; run \`mise run mirror:zig -- lock --write\``,
+      );
+      continue;
+    }
+    if (!entry.checksum?.startsWith("sha256:")) {
+      fail(`${platform}: mise.lock records no sha256 for ${file}`);
+      continue;
+    }
+    if (entry.provenance !== "minisign") {
+      fail(`${platform}: mise.lock does not require minisign provenance`);
+      continue;
+    }
+    try {
+      const result = await fetchVerified(
+        platform,
+        file,
+        tarball,
+        signature,
+        entry.checksum,
+      );
+      if (!result) {
+        fail(`${platform}: ${tarball} or its .minisig is not served`);
+        continue;
+      }
+      console.log(
+        `OK ${platform}: ${tarball} and its .minisig verify against the ZSF key and match mise.lock (sha256 ${result.sha256})`,
+      );
+    } catch (error) {
+      fail(`${platform}: ${error}`);
+    }
+  }
+  if (failed) Deno.exit(1);
 } else {
   const write = Deno.args[1] === "--write";
   if (Deno.args.length > (write ? 2 : 1)) usage();
-  if (!lock.includes(`[[tools.zig]]\nversion = "${version}"`)) {
+  if (entries.size === 0) {
     throw new Error(
       `mise.lock does not record zig ${version}; run \`mise lock zig\` first`,
     );
   }
-  const results: Verified[] = [];
+  const blocks = new Map<Platform, string>();
   for (const platform of keys) {
-    results.push(
-      await obtain(
-        platform,
-        version,
-        staging,
-        entries.get(platform)?.url,
-        undefined,
-      ),
+    const { file, tarball, signature } = miseUrls(platform);
+    console.log(`fetching ${file} from ${tarball}`);
+    const result = await fetchVerified(
+      platform,
+      file,
+      tarball,
+      signature,
+      undefined,
     );
-  }
-  const blocks = results.map((result) => lockEntry(result, version));
-  console.log(blocks.join("\n"));
-  if (write) {
-    let updated = lock;
-    for (const result of results) {
-      const pattern = new RegExp(
-        `\\[tools\\.zig\\."platforms\\.${result.platform}"\\]\\n(?:[a-z_]+ = .*\\n)*`,
+    if (!result) {
+      throw new Error(
+        `${tarball} or its .minisig is not served: stage and upload the mirror release first (\`mise run mirror:zig -- stage\` prints the command)`,
       );
-      if (!pattern.test(updated)) {
+    }
+    blocks.set(platform, lockBlock(platform, result.sha256, tarball));
+  }
+  console.log([...blocks.values()].join("\n"));
+  if (write) {
+    const start = lock.indexOf(`[[tools.zig]]\nversion = "${version}"\n`);
+    const next = lock.indexOf("\n[[", start + 1);
+    const end = next < 0 ? lock.length : next + 1;
+    let section = lock.slice(start, end);
+    for (const [platform, block] of blocks) {
+      const pattern = new RegExp(
+        `\\[tools\\.zig\\."platforms\\.${platform}"\\]\\n(?:[a-z_]+ = .*\\n)*`,
+      );
+      if (!pattern.test(section)) {
         throw new Error(
-          `mise.lock has no zig entry for ${result.platform}; run \`mise lock zig\` first`,
+          `mise.lock has no zig entry for ${platform}; run \`mise lock zig\` first`,
         );
       }
-      updated = updated.replace(pattern, lockEntry(result, version));
+      section = section.replace(pattern, () => block);
     }
-    await Deno.writeTextFile("mise.lock", updated);
+    await Deno.writeTextFile(
+      "mise.lock",
+      lock.slice(0, start) + section + lock.slice(end),
+    );
     console.log("updated the zig entries in mise.lock");
   }
 }
