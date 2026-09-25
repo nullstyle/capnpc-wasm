@@ -52,12 +52,13 @@ above), `wasm` (a Wasm loop over a shared page), or `wasm-catch-all` (the same
 loop inside `try_table (catch_all)` that retries, as C++ `catch (...)` would).
 `tests/hosts/deno/worker-termination-canary.ts` runs every guest under each
 runtime it is given, kills each run after eight seconds, and compares the result
-with the table below: only `supportedDenoWorkerVersion` may stop the guest. (The
-SDK no longer checks that deprecated constant; it stays exported for this
-record.) `mise run test:termination-canary` runs it on the worker runtime, the
-pinned Deno, and the newest release from dl.deno.land (`CAPNP_CANARY_LATEST=0`
-skips that download); the nightly workflow runs the task without gating, and a
-departure in either direction fails that job.
+with the table below: only Deno 2.6.8, the last release whose `terminate()`
+stops a running guest, may stop it. `mise run test:termination-canary` runs it
+on the pinned Deno and the newest release from dl.deno.land
+(`CAPNP_CANARY_LATEST=0` skips that download). The canary tracks upstream and is
+not a gate, since the SDK does not rely on `terminate()`: the nightly workflow
+runs the task without gating, and a departure in either direction fails only
+that job.
 
 Observed on macOS arm64 on 2026-09-24 with the canary (the counter values are in
 its receipt, `build/test/termination-canary.json`):
@@ -101,10 +102,9 @@ canary; the SDK's bounds do not depend on it.
 Bun (verified locally on Bun 1.3.14 in both modes; CI does not run Bun);
 releases without standardized Wasm exception handling still fail the factories'
 engine check. Node.js has no Web `Worker` and is rejected, as are unrecognized
-hosts. `supportedDenoWorkerVersion` remains exported but deprecated: the SDK no
-longer checks it, only this repository's termination canary reads it, and the
-2.1-second restart grace is gone. The SDK worker tests run on the pinned Deno in
-`mise run test`.
+hosts. `supportedDenoWorkerVersion` remains exported but deprecated (it can be
+removed in `0.2.0`): the SDK no longer checks it, and the 2.1-second restart
+grace is gone. The SDK worker tests run on the pinned Deno in `mise run test`.
 
 Measured on macOS arm64 on 2026-09-24 (Deno 2.9.6 and 2.6.8, Bun 1.3.14): a
 guest that spins, sleeps in `poll_oneoff` for an hour, or tail-calls forever

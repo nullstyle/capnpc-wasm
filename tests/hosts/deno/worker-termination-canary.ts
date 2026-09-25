@@ -1,15 +1,22 @@
-// The worker termination canary (GAP2-08): runs worker-termination-probe.ts in
-// every guest mode under each Deno runtime named on the command line
-// (`label=path/to/deno`), bounds every run from outside, and compares the
-// result with the recorded behavior in docs/deno-worker-termination.md: the
-// supported worker runtime (supportedDenoWorkerVersion) stops a spinning guest
-// after its two-second grace, and every later release tested keeps it running.
-// Either departure, an upstream fix or a runtime that stops JavaScript but not
-// Wasm, fails the canary; the nightly workflow runs it without gating.
+// The worker termination canary (GAP2-08), an upstream tracker and not a gate:
+// runs worker-termination-probe.ts in every guest mode under each Deno runtime
+// named on the command line (`label=path/to/deno`), bounds every run from
+// outside, and compares the result with the recorded behavior in
+// docs/deno-worker-termination.md: the last release that stops a spinning guest
+// (lastStoppingRelease) stops it after its two-second grace, and every later
+// release tested keeps it running. Either departure, an upstream fix or a
+// runtime that stops JavaScript but not Wasm, fails the canary. The SDK does not
+// rely on Worker.terminate(); the nightly workflow runs the canary on the pinned
+// and the newest Deno without gating.
 //
 //   deno run --allow-read --allow-write=build/test --allow-run \
-//     tests/hosts/deno/worker-termination-canary.ts worker=<deno> pinned=<deno>
-import { supportedDenoWorkerVersion } from "../../../sdk/typescript/environment.ts";
+//     tests/hosts/deno/worker-termination-canary.ts pinned=<deno> latest=<deno>
+
+/**
+ * The last Deno release whose Worker.terminate() stops a running guest (after
+ * a two-second grace), as docs/deno-worker-termination.md records.
+ */
+const lastStoppingRelease = "2.6.8";
 
 const modes = ["js", "wasm", "wasm-catch-all"] as const;
 /** The probe reports at four seconds; affected releases never exit on their own. */
@@ -117,9 +124,7 @@ for (const argument of Deno.args) {
       runtime: label,
       version: runtimeVersion,
       mode,
-      expected: runtimeVersion === supportedDenoWorkerVersion
-        ? "stops"
-        : "continues",
+      expected: runtimeVersion === lastStoppingRelease ? "stops" : "continues",
       ...await probe(path, label, mode),
     });
   }
@@ -148,7 +153,7 @@ await Deno.mkdir("build/test", { recursive: true });
 await Deno.writeTextFile(
   receiptPath,
   JSON.stringify(
-    { supportedDenoWorkerVersion, deadlineMs, rows, changed: changed.length },
+    { lastStoppingRelease, deadlineMs, rows, changed: changed.length },
     null,
     2,
   ) + "\n",
@@ -159,7 +164,7 @@ if (changed.length > 0) {
       changed.map((row) => `${row.runtime} ${row.version} ${row.mode}`).join(
         ", ",
       )
-    }; update docs/deno-worker-termination.md and revisit the worker runtime policy`,
+    }; record the change in docs/deno-worker-termination.md`,
   );
   Deno.exit(1);
 }
