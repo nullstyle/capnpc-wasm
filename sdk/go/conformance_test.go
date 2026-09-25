@@ -532,16 +532,26 @@ func observeGo(err error, outputs map[capnpcwasm.Language]map[string][]byte, dia
 			observed.outcome = fmt.Sprintf("exit(%d)", failure.ExitCode)
 		case message == "compiler emitted an empty CodeGeneratorRequest" || message == "generator unexpectedly wrote to stdout":
 			observed.outcome = "protocol"
-		// wazero's own trap report; Err never carries the guest's stderr.
-		case strings.Contains(message, "wasm error: stack overflow"):
-			observed.outcome = "trap:stack"
-		case strings.Contains(message, "wasm error: "):
-			observed.outcome = "trap"
 		default:
-			observed.outcome = fmt.Sprintf("error:%T", failure.Err)
+			observed.outcome = trapOutcome(message, failure.Err)
 		}
 	}
 	return observed
+}
+
+// trapOutcome reads wazero's own trap report: the text before its
+// "wasm stack trace:" lines, which name the guest's functions and so could
+// carry any text. Err never carries the guest's stderr.
+func trapOutcome(message string, err error) string {
+	report, _, _ := strings.Cut(message, "\nwasm stack trace:")
+	switch {
+	case strings.Contains(report, "wasm error: stack overflow"):
+		return "trap:stack"
+	case strings.Contains(report, "wasm error: "):
+		return "trap"
+	default:
+		return fmt.Sprintf("error:%T", err)
+	}
 }
 
 // check reports the mismatches between the expectation and an observation,
@@ -611,6 +621,10 @@ func TestConformanceClassification(t *testing.T) {
 		{&capnpcwasm.Error{Stage: "compiler", Err: errors.New("module[] function[_start] failed: wasm error: stack overflow")}, "trap:stack"},
 		{&capnpcwasm.Error{Stage: "cpp", Stderr: "wasm error: stack overflow", Err: errors.New("instantiate failed")}, "error:*errors.errorString"},
 		{&capnpcwasm.Error{Stage: "cpp", Err: errors.New("generator unexpectedly wrote to stdout")}, "protocol"},
+		// A guest function named like a stack report, in the stack trace of
+		// an ordinary trap.
+		{&capnpcwasm.Error{Stage: "cpp", Err: errors.New("module[] function[_start] failed: wasm error: unreachable\nwasm stack trace:\n\t.wasm error: stack overflow()\n\t._start()")}, "trap"},
+		{&capnpcwasm.Error{Stage: "cpp", Err: errors.New("instantiate failed\nwasm stack trace:\n\t.wasm error: unreachable()")}, "error:*errors.errorString"},
 	} {
 		if got := observeGo(test.err, nil, nil).outcome; got != test.want {
 			t.Errorf("%v: %s, want %s", test.err, got, test.want)
