@@ -125,14 +125,14 @@ export async function runTsSurface(
             ? requestVariant(spec.request, corpus.valid)
             : undefined,
         };
-        const { summary } = await runCase(
+        const { phase, summary } = await runCase(
           spec,
           inputs,
           host,
           corpus.modules,
           corpus.guests,
         );
-        const observation = observe(summary);
+        const observation = observe(summary, phase);
         const mismatches = checkObservation(expectation, observation);
         rows.push({ name: spec.name, surface, observation, mismatches });
         if (mismatches.length > 0) {

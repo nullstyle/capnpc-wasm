@@ -21,7 +21,6 @@ import {
   expectationFor,
   loadExpected,
   type Observation,
-  stackExhausted,
 } from "./outcome.ts";
 
 export interface LauncherSurface {
@@ -50,7 +49,9 @@ interface Step {
   stdout: Uint8Array;
   /** The guest's stderr, without the runtime's trap report. */
   stderr: string;
-  /** The complete stderr, for classification and messages. */
+  /** Wasmtime's trap report, empty when the guest exited on its own. */
+  report: string;
+  /** The complete stderr, for messages. */
   fullStderr: string;
   published: number;
 }
@@ -102,12 +103,21 @@ async function writeTree(
   }
 }
 
-function classify(step: Step): string {
+/**
+ * Classify from the exit status and Wasmtime's own report, never from what
+ * the guest wrote: status 134 is a trap only with a `wasm trap:` line in the
+ * report (a Wasmtime killed by SIGABRT also exits 134).
+ */
+export function classify(
+  step: Pick<Step, "code" | "signal" | "report">,
+): string {
   if (step.signal) return `signal:${step.signal}`;
   if (step.code === 0) return "ok";
-  if (step.code === 134) {
-    if (/wasm trap: interrupt/.test(step.fullStderr)) return "timeout";
-    if (stackExhausted.test(step.fullStderr)) return "trap:stack";
+  const trap = /^\s*\d+: wasm trap: (.+)$/m.exec(step.report)?.[1] ??
+    /wasm trap: (.+)$/m.exec(step.report)?.[1];
+  if (step.code === 134 && trap !== undefined) {
+    if (trap.startsWith("interrupt")) return "timeout";
+    if (trap.startsWith("call stack exhausted")) return "trap:stack";
     return "trap";
   }
   return `exit(${step.code})`;
@@ -155,13 +165,15 @@ export async function runLauncherConformance(
   ): Promise<Step> {
     const result = await run([...surface.launcher, ...args], input, env);
     const fullStderr = decoder.decode(result.stderr);
-    const report = fullStderr.indexOf(runtimeReport);
+    // The runtime reports last, after anything the guest wrote.
+    const report = fullStderr.lastIndexOf(runtimeReport);
     return {
       stage,
       code: result.signal ? null : result.code,
       signal: result.signal,
       stdout: result.stdout,
       stderr: report >= 0 ? fullStderr.slice(0, report) : fullStderr,
+      report: report >= 0 ? fullStderr.slice(report) : "",
       fullStderr,
       published: output ? await countFiles(output) : 0,
     };
@@ -303,6 +315,7 @@ export async function runLauncherConformance(
         outcome: classify(failed),
         stage: failed.stage,
         stderr: failed.stderr.length > 0,
+        message: failed.stderr,
         detail: `exit ${failed.code ?? failed.signal}: ${
           failed.fullStderr.slice(0, 200).replace(/\n/g, " ")
         }`,

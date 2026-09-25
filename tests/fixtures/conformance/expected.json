@@ -32,6 +32,7 @@
     },
     "missing-import-root": {
       "expect": "validation",
+      "message": "is not a directory in files",
       "surfaces": {
         "launcher": {
           "expect": "exit(1)",
@@ -47,6 +48,7 @@
     },
     "missing-source-prefix": {
       "expect": "validation",
+      "message": "is not a directory in files",
       "surfaces": {
         "launcher": {
           "expect": "exit(1)",

@@ -17,7 +17,14 @@ import {
   standardReader,
 } from "./cases.ts";
 import { driftedGuests, guestsPath } from "./guests.ts";
-import { expectedPath, loadExpected, validateExpected } from "./outcome.ts";
+import {
+  classifyError,
+  type ErrorSummary,
+  expectedPath,
+  loadExpected,
+  validateExpected,
+} from "./outcome.ts";
+import { classify as classifyLauncherStep } from "./launcher-surface.ts";
 import { describeObservation } from "./outcome.ts";
 import { runTsSurface } from "./ts-surface.ts";
 
@@ -51,6 +58,105 @@ suite.test(`${expectedPath} covers every case with reasoned divergences`, async 
     (await loadCases(root)).map((spec) => spec.name),
   );
   assert(problems.length === 0, problems.join("\n"));
+});
+
+suite.test("the TypeScript classifier reads the innermost cause, not guest stderr", () => {
+  const failure = (
+    message: string,
+    chain: { name: string; message: string }[],
+    exitCode?: number,
+  ): ErrorSummary => ({
+    name: "CompileError",
+    message,
+    isCompileError: true,
+    isTypeError: false,
+    stage: "cpp",
+    exitCode,
+    diagnostics: [],
+    hasOutputs: false,
+    chain,
+  });
+  // The wrapper carries the guest's stderr; only the innermost cause counts.
+  const wrapped = (stderr: string, name: string, message: string) =>
+    failure(`cpp trapped: WASI command failed: ${message}\n${stderr}`, [
+      { name: "CommandError", message: `WASI command failed: ${message}` },
+      { name, message },
+    ]);
+  const cases: [ErrorSummary, string][] = [
+    [wrapped("error: stack overflow", "RuntimeError", "unreachable"), "trap"],
+    [
+      wrapped(
+        "outputBytes resource limit exceeded",
+        "RuntimeError",
+        "unreachable",
+      ),
+      "trap",
+    ],
+    [
+      wrapped("", "RangeError", "Maximum call stack size exceeded"),
+      "trap:stack",
+    ],
+    [wrapped("", "InternalError", "too much recursion"), "trap:stack"],
+    [
+      wrapped("", "RangeError", "WebAssembly.instantiate(): Out of memory"),
+      "error:RangeError",
+    ],
+    [
+      wrapped("", "LimitError", "stderrBytes resource limit exceeded"),
+      "limit:stderrBytes",
+    ],
+    [
+      wrapped("", "TypeError", "path exceeds pathBytes limit"),
+      "limit:pathBytes",
+    ],
+    [
+      wrapped("", "Error", 'invalid filesystem entry name: "a\\\\b"'),
+      "policy:output-name",
+    ],
+    [failure("compiler emitted no request", []), "protocol"],
+    [failure("cpp generator unexpectedly wrote to stdout", []), "protocol"],
+    [failure("cpp exited with status 1", [], 1), "exit(1)"],
+  ];
+  for (const [summary, expected] of cases) {
+    const outcome = classifyError(summary);
+    assert(
+      outcome === expected,
+      `${
+        JSON.stringify(summary.chain.at(-1) ?? summary.message)
+      }: ${outcome}, expected ${expected}`,
+    );
+  }
+});
+
+suite.test("the launcher classifier reads Wasmtime's report, not guest stderr", () => {
+  const report = (trap: string) =>
+    `Error: failed to run main module \`./m.wasm\`\n\nCaused by:\n    0: failed to invoke command default\n    1: error while executing at wasm backtrace:\n    2: wasm trap: ${trap}\n`;
+  const cases: [Parameters<typeof classifyLauncherStep>[0], string][] = [
+    [
+      { code: 134, signal: null, report: report("call stack exhausted") },
+      "trap:stack",
+    ],
+    [{ code: 134, signal: null, report: report("interrupt") }, "timeout"],
+    [
+      {
+        code: 134,
+        signal: null,
+        report: report("wasm `unreachable` instruction executed"),
+      },
+      "trap",
+    ],
+    // A Wasmtime killed by SIGABRT also exits 134, without a trap report.
+    [{ code: 134, signal: null, report: "" }, "exit(134)"],
+    [{ code: 1, signal: null, report: "" }, "exit(1)"],
+    [{ code: 0, signal: null, report: "" }, "ok"],
+  ];
+  for (const [step, expected] of cases) {
+    const outcome = classifyLauncherStep(step);
+    assert(
+      outcome === expected,
+      `${JSON.stringify(step)}: ${outcome}, expected ${expected}`,
+    );
+  }
 });
 
 suite.test("TypeScript direct execution conforms to the corpus", async (t) => {

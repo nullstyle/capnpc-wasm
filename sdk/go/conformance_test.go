@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"reflect"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -27,9 +26,9 @@ import (
 //
 // Outcomes are derived from the error fields, as docs/sdk-contract.md
 // describes: Limit names a budget, ExitCode a guest exit, a validate or
-// modules stage rejected input, the contract messages are protocol
-// violations, and everything else is a trap (a stack trap when the runtime
-// says so).
+// modules stage rejected input, and the contract messages are protocol
+// violations. A trap needs wazero's own report (`wasm error:`); any other
+// failure is reported as error:<type> and matches no row.
 func TestConformance(t *testing.T) {
 	corpus := loadConformanceCorpus(t)
 	compilers := map[string]*capnpcwasm.Compiler{}
@@ -117,6 +116,7 @@ type expectation struct {
 	Stderr      *bool           `json:"stderr"`
 	Diagnostics *int            `json:"diagnostics"`
 	Outputs     map[string]int  `json:"outputs"`
+	Message     *string         `json:"message"`
 }
 
 type surfaceOverride struct {
@@ -213,6 +213,9 @@ func (corpus *conformanceCorpus) expectationFor(t *testing.T, name, surface stri
 	}
 	if override.Outputs != nil {
 		merged.Outputs = override.Outputs
+	}
+	if override.Message != nil {
+		merged.Message = override.Message
 	}
 	return merged, ""
 }
@@ -420,6 +423,7 @@ func conformanceCompiler(t *testing.T, corpus *conformanceCorpus, spec conforman
 		// The factory's rejection is the outcome; report it like a job's.
 		expectation, _ := corpus.expectationFor(t, spec.Name, "go")
 		observed := observeGo(err, nil, nil)
+		observed.phase = "factory"
 		if mismatches := expectation.check(observed); len(mismatches) > 0 {
 			t.Fatalf("%s: factory %s [observed %s]", spec.Name, strings.Join(mismatches, "; "), observed)
 		}
@@ -440,12 +444,17 @@ func (corpus *conformanceCorpus) guest(t *testing.T, name string) []byte {
 
 // observation mirrors Observation in tests/conformance/outcome.ts.
 type observation struct {
-	outcome     string
+	outcome string
+	// phase is "factory" when New rejected the module set; only
+	// validation:memoryPages may fail there.
+	phase       string
 	stage       string
 	stderr      bool
 	diagnostics int
 	outputs     map[string]int
-	detail      string
+	// message is the failure's own message, for rows that pin one.
+	message string
+	detail  string
 }
 
 func (o observation) String() string {
@@ -462,8 +471,6 @@ func (o observation) String() string {
 	return strings.Join(parts, " ")
 }
 
-var conformanceStackExhausted = regexp.MustCompile(`(?i)Maximum call stack size exceeded|too much recursion|call stack exhausted|stack overflow`)
-
 // observeGo classifies a Go SDK result or error into the corpus vocabulary
 // from the Error fields, as docs/sdk-contract.md derives the failure kind.
 func observeGo(err error, outputs map[capnpcwasm.Language]map[string][]byte, diagnostics []capnpcwasm.Diagnostic) observation {
@@ -479,10 +486,11 @@ func observeGo(err error, outputs map[capnpcwasm.Language]map[string][]byte, dia
 		return observation{outcome: "error", detail: err.Error()}
 	}
 	message := failure.Err.Error()
-	if len(message) > 200 {
-		message = message[:200]
+	detail := message
+	if len(detail) > 200 {
+		detail = detail[:200]
 	}
-	observed := observation{detail: strings.ReplaceAll(message, "\n", " ")}
+	observed := observation{message: message, detail: strings.ReplaceAll(detail, "\n", " ")}
 	switch {
 	case errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled):
 		observed.outcome = "timeout"
@@ -499,12 +507,15 @@ func observeGo(err error, outputs map[capnpcwasm.Language]map[string][]byte, dia
 			observed.outcome = "limit:" + failure.Limit
 		case failure.ExitCode != 0:
 			observed.outcome = fmt.Sprintf("exit(%d)", failure.ExitCode)
-		case strings.Contains(message, "compiler emitted an empty CodeGeneratorRequest") || strings.Contains(message, "generator unexpectedly wrote to stdout"):
+		case message == "compiler emitted an empty CodeGeneratorRequest" || message == "generator unexpectedly wrote to stdout":
 			observed.outcome = "protocol"
-		case conformanceStackExhausted.MatchString(message):
+		// wazero's own trap report; Err never carries the guest's stderr.
+		case strings.Contains(message, "wasm error: stack overflow"):
 			observed.outcome = "trap:stack"
-		default:
+		case strings.Contains(message, "wasm error: "):
 			observed.outcome = "trap"
+		default:
+			observed.outcome = fmt.Sprintf("error:%T", failure.Err)
 		}
 	}
 	return observed
@@ -520,6 +531,12 @@ func (e expectation) check(o observation) []string {
 		accepted = []string{single}
 	} else if err := json.Unmarshal(e.Expect, &accepted); err != nil {
 		return []string{"unreadable expectation " + string(e.Expect)}
+	}
+	if o.phase == "factory" && o.outcome != "validation:memoryPages" {
+		mismatches = append(mismatches, fmt.Sprintf("New rejected the module set (%s); only validation:memoryPages may fail there", o.detail))
+	}
+	if e.Message != nil && !strings.Contains(o.message, *e.Message) {
+		mismatches = append(mismatches, fmt.Sprintf("the message %q lacks %q", o.message, *e.Message))
 	}
 	found := false
 	for _, word := range accepted {
@@ -553,6 +570,24 @@ func (e expectation) check(o observation) []string {
 		}
 	}
 	return mismatches
+}
+
+// TestConformanceClassification pins observeGo: a trap needs wazero's own
+// report, and anything else is error:<type>, which matches no corpus row.
+func TestConformanceClassification(t *testing.T) {
+	for _, test := range []struct {
+		err  *capnpcwasm.Error
+		want string
+	}{
+		{&capnpcwasm.Error{Stage: "cpp", Err: errors.New("module[] function[_start] failed: wasm error: unreachable\nwasm stack trace: ...")}, "trap"},
+		{&capnpcwasm.Error{Stage: "compiler", Err: errors.New("module[] function[_start] failed: wasm error: stack overflow")}, "trap:stack"},
+		{&capnpcwasm.Error{Stage: "cpp", Stderr: "wasm error: stack overflow", Err: errors.New("instantiate failed")}, "error:*errors.errorString"},
+		{&capnpcwasm.Error{Stage: "cpp", Err: errors.New("generator unexpectedly wrote to stdout")}, "protocol"},
+	} {
+		if got := observeGo(test.err, nil, nil).outcome; got != test.want {
+			t.Errorf("%v: %s, want %s", test.err, got, test.want)
+		}
+	}
 }
 
 // TestConformanceCorpusIsReadable fails early when the fixtures are missing

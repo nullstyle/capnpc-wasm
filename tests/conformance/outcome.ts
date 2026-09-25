@@ -14,10 +14,14 @@
 //   protocol           a guest exited 0 without honoring its contract
 //   timeout            the host deadline stopped the job
 //
-// The TypeScript classification reads the error class and message (and the
-// cause chain), which is what the SDK exposes today. When CompileError gains
-// `kind` and `limit`, classifyError switches to those fields without changing
-// a single expectation.
+// The TypeScript classification reads the error class, the phase that threw,
+// and the innermost cause: the engine's or the host's own error, whose name
+// and message survive the worker protocol. It never reads guest stderr (the
+// SDK appends that to its wrapper messages), so a guest cannot steer it. When
+// CompileError gains `kind` and `limit`, those fields replace the class-based
+// split into exit, limit, trap, and protocol without changing an expectation;
+// trap:stack and policy:output-name stay derived from the innermost cause,
+// because the planned kinds cannot express them.
 
 export type Surface =
   | "ts-direct"
@@ -62,6 +66,14 @@ export interface ResultSummary {
 /** What a runner observed for one case on one surface. */
 export interface Observation {
   outcome: string;
+  /**
+   * Where a TypeScript rejection came from: the factory (createCompiler or
+   * createWorkerCompiler) or the job. Only one corpus row may fail in the
+   * factory: validation:memoryPages.
+   */
+  phase?: "factory" | "job";
+  /** The failure's own message, for rows that pin one. */
+  message?: string;
   /** The failing stage, when the outcome is a guest failure. */
   stage?: string;
   /** Whether the failing stage wrote stderr. */
@@ -74,13 +86,19 @@ export interface Observation {
   detail?: string;
 }
 
-export const stackExhausted =
-  /Maximum call stack size exceeded|too much recursion|call stack exhausted|stack overflow/i;
+/**
+ * An engine's own report of an exhausted stack: V8 and JavaScriptCore raise a
+ * RangeError, SpiderMonkey an InternalError.
+ */
+export function isStackExhaustion(name: string, message: string): boolean {
+  return (name === "RangeError" &&
+    /^Maximum call stack size exceeded\.?$/.test(message)) ||
+    (name === "InternalError" && message === "too much recursion");
+}
 
-const protocolMessages = [
-  "compiler emitted no request",
-  "generator unexpectedly wrote to stdout",
-];
+/** The two CompileErrors the SDK raises when a guest exits 0 against its contract. */
+const protocolMessage =
+  /^(compiler emitted no request|\w+ generator unexpectedly wrote to stdout)$/;
 
 /** The outcome word for a TypeScript SDK rejection. */
 export function classifyError(summary: ErrorSummary): string {
@@ -88,25 +106,35 @@ export function classifyError(summary: ErrorSummary): string {
     return "timeout";
   }
   if (summary.isTypeError) {
-    const budget = /exceeds (\w+) limit/.exec(summary.message);
+    const budget = /exceeds (\w+) limit$/.exec(summary.message);
     return budget ? `validation:${budget[1]}` : "validation";
   }
   if (!summary.isCompileError) return `error:${summary.name}`;
   if (summary.exitCode !== undefined) return `exit(${summary.exitCode})`;
-  const texts = [summary.message, ...summary.chain.map((link) => link.message)];
-  for (const text of texts) {
-    const limit = /(\w+) resource limit exceeded/.exec(text) ??
-      /exceeds (\w+) limit/.exec(text);
-    if (limit) return `limit:${limit[1]}`;
+  // The innermost cause is the engine's or the host's own error; the wrappers
+  // above it carry the guest's stderr in their messages.
+  const cause = summary.chain.at(-1);
+  if (!cause) {
+    return protocolMessage.test(summary.message)
+      ? "protocol"
+      : "error:CompileError";
   }
-  if (texts.some((text) => text.includes("invalid filesystem entry name"))) {
-    return "policy:output-name";
+  if (cause.name === "LimitError") {
+    const limit = /^(\w+) resource limit exceeded$/.exec(cause.message);
+    return limit ? `limit:${limit[1]}` : "error:LimitError";
   }
-  if (protocolMessages.some((message) => summary.message.includes(message))) {
-    return "protocol";
+  if (cause.name === "TypeError") {
+    // Output collection bounds each generated path after a zero exit.
+    const limit = /^path exceeds (\w+) limit$/.exec(cause.message);
+    return limit ? `limit:${limit[1]}` : "error:TypeError";
   }
-  if (texts.some((text) => stackExhausted.test(text))) return "trap:stack";
-  return "trap";
+  if (
+    cause.name === "Error" &&
+    cause.message.startsWith("invalid filesystem entry name: ")
+  ) return "policy:output-name";
+  if (cause.name === "RuntimeError") return "trap";
+  if (isStackExhaustion(cause.name, cause.message)) return "trap:stack";
+  return `error:${cause.name}`;
 }
 
 export function isErrorSummary(
@@ -116,18 +144,31 @@ export function isErrorSummary(
 }
 
 /** The observation for a TypeScript SDK result or rejection. */
-export function observe(summary: ErrorSummary | ResultSummary): Observation {
+export function observe(
+  summary: ErrorSummary | ResultSummary,
+  phase: "factory" | "job" = "job",
+): Observation {
   if (!isErrorSummary(summary)) {
     return {
       outcome: "ok",
+      phase,
       diagnostics: summary.diagnostics.length,
       outputs: summary.outputs,
     };
   }
   const outcome = classifyError(summary);
+  const cause = summary.chain.at(-1);
   const observation: Observation = {
     outcome,
-    detail: `${summary.name}: ${summary.message.slice(0, 200)}`,
+    phase,
+    message: summary.message,
+    detail: `${phase === "factory" ? "factory " : ""}${summary.name}: ${
+      summary.message.slice(0, 200)
+    }${
+      cause
+        ? ` [innermost cause ${cause.name}: ${cause.message.slice(0, 120)}]`
+        : ""
+    }`,
   };
   if (summary.isCompileError) {
     observation.stage = summary.stage;
@@ -152,6 +193,8 @@ export interface Expectation {
   diagnostics?: number;
   /** Files per language a successful job returns. */
   outputs?: Record<string, number>;
+  /** Text the failure's own message must contain. */
+  message?: string;
 }
 
 /** A surface's departure from the reference expectation, with its reason. */
@@ -282,6 +325,24 @@ export function checkObservation(
   const accepted = Array.isArray(expectation.expect)
     ? expectation.expect
     : [expectation.expect];
+  if (
+    observation.phase === "factory" &&
+    observation.outcome !== "validation:memoryPages"
+  ) {
+    mismatches.push(
+      `the factory rejected the module set (${observation.detail}); only validation:memoryPages may fail there`,
+    );
+  }
+  if (
+    expectation.message !== undefined &&
+    !observation.message?.includes(expectation.message)
+  ) {
+    mismatches.push(
+      `the message ${JSON.stringify(observation.message)} lacks ${
+        JSON.stringify(expectation.message)
+      }`,
+    );
+  }
   if (!accepted.includes(observation.outcome)) {
     mismatches.push(
       `outcome ${observation.outcome}, expected ${accepted.join(" or ")}${

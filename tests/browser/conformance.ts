@@ -289,7 +289,7 @@ export async function runBrowserSurface(
       ...workspace,
       request: spec.request ? requestVariant(spec.request, valid) : undefined,
     };
-    const summary = await evaluate(
+    const { phase, summary } = await evaluate(
       async ({ surface, spec, inputs }) => {
         const state = (globalThis as unknown as {
           capnpConformance: {
@@ -318,12 +318,15 @@ export async function runBrowserSurface(
             state.modules,
             state.guests,
           );
-        return result.summary as ErrorSummary | ResultSummary;
+        return {
+          phase: (result as { phase?: "factory" | "job" }).phase ?? "job",
+          summary: result.summary as ErrorSummary | ResultSummary,
+        };
       },
       { surface, spec, inputs },
       `${engine} ${surface} conformance ${spec.name}`,
     );
-    const observation = observe(summary);
+    const observation = observe(summary, phase);
     rows.push({
       name: spec.name,
       surface,
