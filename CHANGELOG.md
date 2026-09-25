@@ -1,10 +1,12 @@
 # Changelog
 
-One section per artifact flavor. Dates are the GitHub publication dates (UTC)
-for published assets. Archive and manifest digests and producer commits live in
+One section per artifact flavor; each flavor has its own version (`versions` in
+`release.json`). Dates are the GitHub publication dates (UTC) for published
+assets. Archive and manifest digests and producer commits live in
 [published releases](docs/releases.md#published-releases). Later work appends
-one-line bullets under "Unreleased"; a release moves them under the artifact and
-version that ships them.
+one-line bullets under "Unreleased"; a release copies the bullets that apply to
+its flavor under that flavor and version, and a bullet leaves "Unreleased" once
+every flavor it applies to has shipped it.
 
 ## Unreleased
 
@@ -175,6 +177,11 @@ version that ships them.
   documentation comment, removed no earlier than the next minor release); and
   records the naming rule: `capnp-wasm-<part>` for compiler-only artifacts,
   `capnpc-wasm` for the full SDK package, its archive, and the Go module tag.
+- Release process: a release bumps only its own flavor's entry in `release.json`
+  right after publishing, copies the Unreleased bullets that apply to that
+  flavor, and adds one published-releases row per flavor release; the Go module
+  tag goes at the commit of the matching `capnpc-wasm` release. Each packaged
+  README links the API stability policy at the producer commit.
 
 ## capnp-wasm-compiler-host
 
@@ -216,8 +223,10 @@ Unpublished. The archive bundles all six Wasm commands, the TypeScript SDK, the
 Go SDK source, standard includes, the launcher, licenses, manifest, and
 provenance. Candidates were prepared locally at `0.1.0-rc.1` (commit `94ba6b2`;
 receipt in `docs/release-evidence/94ba6b2-private-package.json`) and at
-`0.1.0-rc.2` and `0.1.0-rc.3` (the version in `release.json`). No `sdk/go/v*`
-tag exists.
+`0.1.0-rc.2` and `0.1.0-rc.3`, while one version covered every flavor. Its own
+entry in `release.json` is now `0.1.0-rc.4`, a version no candidate has used;
+the Go module tag `sdk/go/v<version>` takes the same version. No `sdk/go/v*` tag
+exists.
 
 ## Repository history before the first published asset
 

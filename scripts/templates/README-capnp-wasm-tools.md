@@ -80,6 +80,7 @@ packaged Wasmtime version.
 
 Documentation for this commit: the
 [launcher contract](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/docs/releases.md#repository-toolchain-launcher),
+the [API stability policy](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/docs/api-stability.md) (which parts of the launcher are stable, version rules),
 the [changelog](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/CHANGELOG.md), and the
 [security policy](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/SECURITY.md). The
 [repository README](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/README.md) describes the current state of the

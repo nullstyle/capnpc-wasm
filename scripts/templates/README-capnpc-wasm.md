@@ -126,6 +126,7 @@ bounds and their environment overrides, and exit statuses.
 
 Documentation for this commit: the
 [release and package notes](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/docs/releases.md), the
+[API stability policy](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/docs/api-stability.md) (stable and experimental interfaces, version rules), the
 [Zig generator guide](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/generators/zig/README.md), the
 [changelog](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/CHANGELOG.md), and the
 [security policy](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/SECURITY.md). The

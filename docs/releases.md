@@ -3,13 +3,13 @@
 The public source repository and canonical compiler download host is
 [nullstyle/capnpc-wasm](https://github.com/nullstyle/capnpc-wasm). The compiler
 archives below are published prereleases; full SDK registry publication and a
-stable SDK interface remain pending. `release.json` owns the package name,
-version, private registry flag, and project license selection. The `private`
-flag prevents accidental npm publication; it does not make GitHub release
-downloads private. Project-owned code is licensed under Apache-2.0; upstream
-code retains the licenses shipped in `licenses/`, listed per archive in
-`THIRD_PARTY_NOTICES.md`. The full SDK archive includes the project license at
-`LICENSE` and `sdk/go/LICENSE`.
+stable SDK interface remain pending. `release.json` owns each flavor's version
+(`versions`), the full SDK's package name, the private registry flag, and the
+project license selection. The `private` flag prevents accidental npm
+publication; it does not make GitHub release downloads private. Project-owned
+code is licensed under Apache-2.0; upstream code retains the licenses shipped in
+`licenses/`, listed per archive in `THIRD_PARTY_NOTICES.md`. The full SDK
+archive includes the project license at `LICENSE` and `sdk/go/LICENSE`.
 
 Releases are built only by the [release workflow](#release-process) from a
 clean, tagged commit. Local preparation (`mise run release:*`) produces
@@ -54,8 +54,10 @@ on the download directory as is. The compiler-host manifest digests come from
 local archives whose bytes match the published archive digests. No
 byte-identical local copy of the tools rc.2 archive exists, so its manifest
 digest is not recorded; the digest of its `SHA256SUMS` asset, which lists it, is
-recorded instead. Every release adds a row here after its draft is verified and
-before it is published (the [release process](#release-process) below).
+recorded instead. The table keeps one row per flavor release: every release of
+every flavor adds its own row after its draft is verified and before it is
+published (the [release process](#release-process) below), and a row is never
+changed afterwards.
 
 | Release                        | Archive                                                  | Archive SHA-256                                                    | `package/manifest.json` SHA-256                                                                     | Producer commit                            | CI on the producer commit                                                                                                                                                                      |
 | ------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -70,15 +72,21 @@ The full SDK archive (`capnpc-wasm-<version>.tgz`) has never been published.
 `.github/workflows/release.yml` is the only producer of published assets. It
 runs when a tag `capnp-wasm-tools-v<version>`,
 `capnp-wasm-compiler-host-v<version>`, or `capnpc-wasm-v<version>` is pushed,
-and the tag must name the version in `release.json`. A `workflow_dispatch` run
-takes a flavor and performs the same build and checks as a dry run: it uploads
-the assets as workflow artifacts and never creates a release, an attestation, or
-a tag.
+and the tag must name that flavor's own version, `versions["<flavor>"]` in
+`release.json`. A `workflow_dispatch` run takes a flavor and performs the same
+build and checks as a dry run: it uploads the assets as workflow artifacts and
+never creates a release, an attestation, or a tag. Each flavor has its own
+version and cadence; releasing one flavor never changes another flavor's
+version.
 
-1. Set the version in `release.json`, move the flavor's bullets from
-   `## Unreleased` in `CHANGELOG.md` under `## <flavor>` / `### <version>`
-   (publish mode refuses a version without that entry), and commit. CI must be
-   green for that commit.
+1. Check that the flavor's entry in `release.json` names the version to release,
+   and change only that entry if it does not (the
+   [version rules](api-stability.md#version-rules) decide between a candidate, a
+   patch, and a minor release). Copy the `## Unreleased` bullets that apply to
+   the flavor under `## <flavor>` / `### <version>` in `CHANGELOG.md` (publish
+   mode refuses a version without that entry), remove a bullet from
+   `## Unreleased` once every flavor it applies to has shipped it, and commit.
+   CI must be green for that commit.
 2. Push the tag at that commit (an annotated or signed tag; the tag rulesets
    below decide who may create one). The `build` job checks that the commit has
    a successful CI run, or runs `mise run check` itself; builds from the clean
@@ -97,11 +105,15 @@ a tag.
    the row to [published releases](#published-releases) in a docs commit, then
    publish the draft. With immutable releases enabled, the assets can no longer
    be changed or deleted.
-5. Right after publishing, choose the next version in `release.json` so that
-   later candidates never carry a published version; candidate mode refuses a
-   version whose tag exists at another commit. The Go module tag
-   `sdk/go/v<version>` is created by hand, after the SDK API freeze, and is not
-   part of this workflow.
+5. Right after publishing, bump only that flavor's entry in `release.json` to
+   its next version (for example `0.1.0-rc.4` to `0.1.0-rc.5`) and commit, so
+   that later candidates of the flavor never carry a published version;
+   candidate mode refuses a flavor version whose tag exists at another commit.
+   The other flavors keep their versions until they are released. The Go module
+   tag `sdk/go/v<version>` takes the `capnpc-wasm` version: it is created by
+   hand, after the SDK API freeze, at the commit that `capnpc-wasm-v<version>`
+   names, and is not part of this workflow. `release.ts` refuses a `capnpc-wasm`
+   build whose Go module tag points at another commit.
 
 Repository settings that only a human can enable, and that the workflow assumes:
 immutable releases (Settings, General); tag rulesets for `capnp-wasm-*`,
@@ -147,15 +159,15 @@ mise run test:package
 
 `release:prepare` builds the full SDK candidate, `release:tools` the
 compiler-only archive, and `release:compiler-host` the compiler and TypeScript
-host archive. The output is under `dist/releases/<stem>/` (for the current
-version, `dist/releases/capnpc-wasm-0.1.0-rc.3/`): a `package/` directory, the
-npm-compatible `<stem>.tgz` archive, `<stem>.manifest.json` (a copy of
-`package/manifest.json`), the `<stem>.spdx.json` SBOM, `<stem>.notes.md`, and
-`SHA256SUMS`, which lists the archive, the manifest asset, and the SBOM.
-Preparation starts from fresh staging directories and removes stale assets.
-Sorted tar entries, fixed permissions, zero ownership, and zero timestamps make
-archive bytes reproducible for the same source and built inputs, and the Wasm
-modules are byte-identical from any checkout path
+host archive, each at its own version from `release.json`. The output is under
+`dist/releases/<stem>/`, where the stem is `<flavor>-<version>`: a `package/`
+directory, the npm-compatible `<stem>.tgz` archive, `<stem>.manifest.json` (a
+copy of `package/manifest.json`), the `<stem>.spdx.json` SBOM,
+`<stem>.notes.md`, and `SHA256SUMS`, which lists the archive, the manifest
+asset, and the SBOM. Preparation starts from fresh staging directories and
+removes stale assets. Sorted tar entries, fixed permissions, zero ownership, and
+zero timestamps make archive bytes reproducible for the same source and built
+inputs, and the Wasm modules are byte-identical from any checkout path
 (`mise run check:wasm-artifacts` rejects build-host paths and DWARF).
 
 `scripts/release.ts` refuses two states that must never reach a release, and
@@ -163,10 +175,13 @@ modules are byte-identical from any checkout path
 
 - A working tree with uncommitted or untracked changes: pass `--allow-dirty` for
   a local experiment (`manifest.json` records `dirty: true`), or commit first.
-- A version whose release tag exists at another commit (for example
-  `capnp-wasm-compiler-host-v0.1.0-rc.3` at `a5ccaae` while `release.json` still
-  says `0.1.0-rc.3`): choose the next version, or pass `--allow-existing-tag`
-  for a throwaway candidate. Task arguments pass through, so
+- A flavor version whose release tag exists at another commit (for example
+  `capnp-wasm-compiler-host-v0.1.0-rc.3` at `a5ccaae` while the compiler host's
+  entry in `release.json` still says `0.1.0-rc.3`), and for the full SDK also a
+  version whose Go module tag `sdk/go/v<version>` exists at another commit:
+  choose the flavor's next version, or pass `--allow-existing-tag` for a
+  throwaway candidate. Each flavor is checked against its own tags only. Task
+  arguments pass through, so
   `mise run release:compiler-host -- --allow-existing-tag` works.
 
 `--out <dir>` writes `<dir>/<stem>/` instead of `dist/releases/<stem>/`; the
@@ -424,11 +439,12 @@ go mod tidy
 ```
 
 Supply `package/wasm/*.wasm` and any required `package/include/` schema bytes to
-the SDK. The nested module is tagged `sdk/go/v<version>` with the version in
-`release.json` (for example `sdk/go/v0.1.0-rc.3`), which
-`go get github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.3` resolves; verify a
+the SDK. The nested module is tagged `sdk/go/v<version>` with the full SDK's
+version (`versions["capnpc-wasm"]` in `release.json`), at the commit of the
+`capnpc-wasm-v<version>` release (for example `sdk/go/v0.1.0-rc.4`), which
+`go get github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.4` resolves; verify a
 tag with
-`GOPROXY=direct go list -m github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.3`.
+`GOPROXY=direct go list -m github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.4`.
 The SDK tests skip when the checkout's build outputs are absent, so
 `go test all` passes in a consumer. Preparing a candidate does not create that
 tag or publish the npm package.
