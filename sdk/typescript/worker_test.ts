@@ -71,10 +71,19 @@ async function timed<T>(run: () => Promise<T>): Promise<[T, number]> {
 workerTest(
   "SDK worker keeps its worker after ordinary job errors",
   async () => {
-    const { modules, request } = await fixture();
+    const { modules, request: full } = await fixture();
+    // The worker's zig generator loops forever, so the timeout below always
+    // cancels a running guest; the real jobs use the other three languages.
+    const request: CompileRequest = {
+      ...full,
+      generators: ["cpp", "rust", "go"],
+    };
     const expected = await (await createCompiler(modules)).compile(request);
     await countingWorkers(async (constructions) => {
-      const worker = await createWorkerCompiler(workerURL, modules);
+      const worker = await createWorkerCompiler(workerURL, {
+        ...modules,
+        generators: { ...modules.generators, zig: loopGuest },
+      });
       try {
         equalOutputs(await worker.compile(request), expected);
         assert(constructions() === 1, "unexpected worker count after start");
@@ -131,8 +140,8 @@ workerTest(
         // A timeout stops the guest inside the worker, which stays.
         await rejects(
           () =>
-            worker.compile({ ...request, generators: ["cpp"] }, {
-              timeoutMs: 1,
+            worker.compile({ ...request, generators: ["zig"] }, {
+              timeoutMs: 100,
             }),
           "TimeoutError",
         );

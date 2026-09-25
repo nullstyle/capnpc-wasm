@@ -71,6 +71,8 @@ type BrowserState = {
   memoryGuest: Uint8Array;
   streamGuest: Uint8Array;
   hostileGuests?: Record<string, Uint8Array>;
+  /** The recovery soak's client: a spinning compiler and the real generators. */
+  soak?: WorkerCompiler;
 };
 type BrowserGlobal = typeof globalThis & { capnpTest: BrowserState };
 type HostileOutcome = {
@@ -1219,20 +1221,40 @@ try {
     );
   }
 
-  // Repeated replacement exposes engine faults that a single cancellation can
-  // miss. Keep the same compiler client and verify complete output after each.
+  // Repeated cancellation exposes engine faults that a single one can miss:
+  // twenty cycles on one client, alternating an abort and a timeout, each
+  // followed by a complete generation on the same client. The cancelled job
+  // runs a compiler that spins forever, so it can never finish first; both
+  // cancellations reach it while it runs. On this page, which is not
+  // cross-origin isolated, an abort replaces the worker and a timeout keeps it.
+  // The abort fires at 50 ms, before the job's 2 s deadline, which bounds a
+  // spinning guest that terminate() leaves running.
+  await evaluate(
+    async ({ spinGuest }) => {
+      const state = (globalThis as BrowserGlobal).capnpTest;
+      state.soak = await state.sdk.createWorkerCompiler(state.workerURL, {
+        ...state.modules,
+        compiler: spinGuest,
+      });
+    },
+    { spinGuest: data.spinGuest },
+    `${engine} create the recovery soak client`,
+  );
   for (let iteration = 0; iteration < 20; iteration++) {
     const mode = iteration % 2 === 0 ? "abort" : "timeout";
     const result = await evaluate(
-      async ({ mode, input }) => {
-        const worker = (globalThis as BrowserGlobal).capnpTest.worker;
+      async ({ mode, input, request }) => {
+        const soak = (globalThis as BrowserGlobal).capnpTest.soak!;
         const controller = new AbortController();
         let pending: Promise<Result>;
         if (mode === "abort") {
-          pending = worker.compile(input, { signal: controller.signal });
-          setTimeout(() => controller.abort(), 1);
+          pending = soak.compile(input, {
+            signal: controller.signal,
+            timeoutMs: 2000,
+          });
+          setTimeout(() => controller.abort(), 50);
         } else {
-          pending = worker.compile(input, { timeoutMs: 1 });
+          pending = soak.compile(input, { timeoutMs: 100 });
         }
         try {
           await pending;
@@ -1247,9 +1269,12 @@ try {
               { cause: error },
             );
           }
-          let result: Result;
+          let result: Awaited<ReturnType<WorkerCompiler["generate"]>>;
           try {
-            result = await worker.compile(input);
+            result = await soak.generate({
+              request: new Uint8Array(request),
+              generators: input.generators,
+            });
           } catch (cause) {
             throw new Error(
               `worker recovery after ${mode} failed: ${
@@ -1273,7 +1298,11 @@ try {
           };
         }
       },
-      { mode, input: data.scenarios[0].input },
+      {
+        mode,
+        input: data.scenarios[0].input,
+        request: data.scenarios[0].request,
+      },
       `${engine} worker ${mode} recovery cycle ${iteration + 1}`,
     );
     assert(
@@ -1291,6 +1320,11 @@ try {
       }/20)`,
     );
   }
+  await evaluate(
+    () => (globalThis as BrowserGlobal).capnpTest.soak!.dispose(),
+    undefined,
+    `${engine} dispose the recovery soak client`,
+  );
 
   // The failure and limit corpus on the three browser surfaces (GAP3-01).
   // Each surface runs its deadline rows last: in WebKit every timed-out guest
