@@ -271,8 +271,9 @@ every flavor it applies to has shipped it.
   core:zig's downloads there with `url_replacements`; mise still verifies the
   ZSF minisign signature and the locked sha256. `mise.lock` names the release
   URLs, `mise run mirror:zig -- verify` checks the lock, the rule, and the
-  release against each other, and `check:lock-urls` also checks each Zig
-  `.minisig`.
+  release against each other (`check:zig-lock`, in `lint`, checks the rule, the
+  mirrors setting, and the lock entries offline), and `check:lock-urls` also
+  checks each Zig `.minisig`.
 
 ## capnp-wasm-compiler-host
 

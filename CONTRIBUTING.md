@@ -105,11 +105,24 @@ release before it locks:
 3. `mise run mirror:zig -- verify <release URL>` checks the published copies.
 4. `mise lock zig` records the new version with ziglang.org URLs and no
    checksums; `mise run mirror:zig -- lock --write` replaces them with the
-   release URLs and the verified sha256 digests. Run it after every
-   `mise lock zig`, which drops them again.
+   release URLs and the verified sha256 digests. Run it after any `mise lock`
+   that includes zig (`mise lock zig` or a full `mise lock`), which drops them
+   again.
 5. `mise run mirror:zig -- verify` checks that the lock, the rule, and the
-   release agree, and `mise run check:lock-urls` that every locked file and
-   signature is served.
+   release agree (`mise run lint` runs its offline half, `check:zig-lock`), and
+   `mise run check:lock-urls` that every locked file and signature is served.
+
+The rule has side effects inside this repository. It captures every Zig
+development build, so `mise install zig@master` or any other dev build fails
+with a 404 from the release unless it holds that build. mise does not merge
+`url_replacements` tables: the project's table replaces one in your global
+config, and a table in `mise.local.toml` or `MISE_URL_REPLACEMENTS` replaces the
+project's, drops the Zig rule, and makes a cold install fail with a bare 404 for
+the ziglang.org URL (`check:zig-lock` warns about both). `MISE_SAFE=1` ignores
+the project's settings, so Zig then comes from the community mirrors, still
+signature-checked. mise's own error messages name the ziglang.org URL even when
+the request went to the release; `MISE_LOG_LEVEL=trace` shows the rewritten
+request.
 
 The Wasmtime pin is copied into every tools archive as the required runtime
 version, so bumping it changes the launcher contract for consumers. The Deno pin
