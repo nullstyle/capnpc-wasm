@@ -1,8 +1,9 @@
 # Scheduled verification that a push never exercises: a cold bootstrap from the
 # committed lock with no tool cache, the browser suites on Linux and macOS,
 # long cancellation soaks, the Go race detector, the go.mod floor toolchain, a
-# drift check against newer wazero, and the reachability of every locked
-# download. Every verification step calls a mise task, so it also runs locally.
+# drift check against newer wazero, a non-gating worker termination canary,
+# and the reachability of every locked download. Every verification step calls
+# a mise task, so it also runs locally.
 name: Nightly
 
 on:
@@ -222,6 +223,42 @@ jobs:
           path: build/test/
           if-no-files-found: ignore
           retention-days: 7
+
+  # Non-gating: does Worker.terminate() stop a spinning JS, Wasm, or Wasm
+  # catch_all guest on the supported worker runtime (Deno 2.6.8), the pinned
+  # Deno, and the newest Deno release (GAP2-08)? The SDK admits worker
+  # execution only where it does, and the SDK tests only prove the pinned
+  # worker runtime; this job notices an upstream fix or a Wasm-only
+  # regression. A result that departs from the recorded table fails the job
+  # without failing the nightly run.
+  termination-canary:
+    name: Deno worker termination canary (non-gating)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # Only the two locked Deno runtimes; --locked never rewrites mise.lock.
+      # The canary task downloads the newest release itself from dl.deno.land.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: 2026.9.1
+          install_args: --locked deno deno-worker
+          cache: false
+      - name: Probe worker termination on each Deno runtime
+        run: mise run test:termination-canary
+      - name: Preserve the canary receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-termination-canary
+          path: build/test/termination-canary.json
+          if-no-files-found: ignore
+          retention-days: 90
 
   lock-urls:
     name: Locked download URLs
