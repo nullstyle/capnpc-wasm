@@ -26,16 +26,25 @@
 // terminate() calls, and the follow-up job can be observed, not the guest.
 //
 // A sample measures a cancellation only once its worker started and its guest
-// ran. A probe worker that does not initialize within startBoundMs, or a guest
-// that does not run within that bound (before its deadline, for a timeout), is
-// a start stall: the sample returns the worker's trace (worker-trace.ts), the
-// page's messages to it, and whether the engine still starts workers and
-// compiles Wasm. stallSuspect() reads that evidence the way the recovery soak
-// does; a stall that points at the engine is retried once and then handed to
-// the caller's stall budget (soak-stalls.ts), and any other fails the check.
+// ran. A probe worker whose initialization times out after startBoundMs, or a
+// guest that does not run within that bound (or, in a timeout job, before its
+// deadline), is a start stall: the sample returns the worker's trace, the
+// page's posts to it and the replies that reached the page (worker-trace.ts),
+// and whether the engine still starts workers and compiles Wasm. Any other
+// failure is the check's own. judgeStall() in worker-trace.ts, the rule the
+// recovery soak uses too, reads the evidence; a stall that points at the
+// engine is retried once and then handed to the caller's stall budget
+// (soak-stalls.ts), and any other fails the check.
 import type { Engine } from "./engines.ts";
 import { settleGraceMs } from "../../sdk/typescript/interrupt.ts";
-import { type EngineHealth, traceWorkerTemplate } from "./worker-trace.ts";
+import {
+  type EngineHealth,
+  judgeStall,
+  type StallEvidence,
+  stallSuspect,
+  traceModuleSource,
+  traceWorkerTemplate,
+} from "./worker-trace.ts";
 
 /**
  * Milliseconds a guest may keep running after its job was cancelled. The
@@ -93,8 +102,9 @@ export type TerminationMode = "timeout" | "abort" | "dispose";
  * Installed in every termination context before its page loads: counts the
  * workers the SDK creates and terminates, collects the counter each probe
  * worker posts before it handles any message, and keeps each worker's trace
- * events (worker-trace.ts) with the page's own messages to it, marked
- * `page:post:<kind>:<id>`.
+ * events (worker-trace.ts) with the page's own: each message it posts to the
+ * worker, `page:post:<kind>:<id>`, and each reply that reaches it,
+ * `page:reply:<id>`.
  */
 export const workerAuditScript = `(() => {
   const RealWorker = globalThis.Worker;
@@ -121,6 +131,7 @@ export const workerAuditScript = `(() => {
           audit.probes.push(data.counter ? new Int32Array(data.counter) : null);
         }
         if (data && data.kind === "capnpTrace") keep(events, data.t + ":" + data.event);
+        else if (data && typeof data.id === "number") keep(events, "page:reply:" + data.id);
       });
     }
     postMessage(message, transfer) {
@@ -141,12 +152,12 @@ export const workerAuditScript = `(() => {
 
 /**
  * The probe worker script: the trace template (worker-trace.ts), which
- * statically imports the real worker.js (a blob URL substituted in), so the
- * SDK's message handler exists before any message arrives; then the counter.
- * It patches WebAssembly.instantiate so that each call of the counted import
- * adds one to the counter's first cell and writes the worker's clock, in
- * whole milliseconds, to its second, and posts the counter. __GUEST__ is
- * "pure" or "host": the import whose calls count.
+ * statically imports the trace module and then the real worker.js (blob URLs
+ * substituted in), so the SDK's message handler exists before any message
+ * arrives; then the counter. It patches WebAssembly.instantiate so that each
+ * call of the counted import adds one to the counter's first cell and writes
+ * the worker's clock, in whole milliseconds, to its second, and posts the
+ * counter. __GUEST__ is "pure" or "host": the import whose calls count.
  */
 const probeWorkerTemplate = `${traceWorkerTemplate}
 const guest = "__GUEST__";
@@ -180,21 +191,19 @@ try {
 }
 `;
 
-/** A probe worker that did not start in time, with the page's evidence. */
-export interface StartStall {
+/**
+ * A probe worker that did not start in time, with the page's evidence. The
+ * expected message is the page's init post, or its compile post once the
+ * worker initialized; the error is the init's or the timeout job's
+ * TimeoutError, and null for an abort or dispose, whose wait the page ended.
+ */
+export interface StartStall extends StallEvidence {
   /** "init": the worker never finished initializing; "start": its guest never ran in time. */
   stage: "init" | "start";
   /** What did not happen, in one clause. */
   reason: string;
   /** Milliseconds the page waited. */
   afterMs: number;
-  /** The error the page saw, if any: the init timeout, or the job's own. */
-  error: string | null;
-  /** The worker's trace events and the page's posts to it, most recent last. */
-  events: string[];
-  /** The guest's counter when the page gave up (0: it never ran); null without a counter. */
-  count: number | null;
-  health: EngineHealth;
 }
 
 /** What one cancellation did, as measured in the page. */
@@ -275,15 +284,19 @@ export async function setupTermination(
   counterModule: Uint8Array,
   label: string,
 ): Promise<{ crossOriginIsolated: boolean }> {
-  return await evaluate(async ({ spinGuest, template, counterModule }) => {
+  return await evaluate(async (
+    { spinGuest, template, traceModule, counterModule },
+  ) => {
     const sdk = await import(new URL("/sdk/mod.js", location.href).href);
     const workerSource = await (await fetch("/sdk/worker.js")).text();
-    const realURL = URL.createObjectURL(
-      new Blob([workerSource], { type: "text/javascript" }),
-    );
+    const blobURL = (source: string) =>
+      URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+    const realURL = blobURL(workerSource);
+    const traceURL = blobURL(traceModule);
     const probeURLs: Record<string, string> = {};
     for (const guest of ["pure", "host"]) {
       const source = template
+        .replace("__TRACE_URL__", traceURL)
         .replace("__REAL_WORKER_URL__", realURL)
         .replace("__GUEST__", guest);
       probeURLs[guest] = URL.createObjectURL(
@@ -301,6 +314,7 @@ export async function setupTermination(
   }, {
     spinGuest,
     template: probeWorkerTemplate,
+    traceModule: traceModuleSource,
     counterModule: Array.from(counterModule),
   }, label);
 }
@@ -384,7 +398,8 @@ export async function measureTermination(
       };
       // The evidence for a start stall: the sample's worker is the first one
       // created from here on. Its events are kept before the health checks,
-      // which start workers of their own.
+      // which start workers of their own. The worker had to answer the page's
+      // init, or once initialized its compile.
       const stalled = async (
         stage: "init" | "start",
         reason: string,
@@ -393,12 +408,29 @@ export async function measureTermination(
         count: number | null,
       ): Promise<TerminationSample> => {
         const afterMs = Math.round(performance.now() - since);
-        const events = (audit.traces[createdBefore] ?? []).slice(-24);
+        const trace = [...(audit.traces[createdBefore] ?? [])];
+        const kind = stage === "init" ? "init" : "compile";
+        const post = trace.filter((event) =>
+          event.startsWith(`page:post:${kind}:`)
+        ).at(-1);
+        const expected = post === undefined
+          ? null
+          : post.slice("page:post:".length);
         const health = await engineHealth();
         return {
           ...sample,
           hasCounter: count !== null,
-          stall: { stage, reason, afterMs, error, events, count, health },
+          stall: {
+            stage,
+            reason,
+            afterMs,
+            expected,
+            error,
+            // The whole trace: the audit keeps at most 60 events per worker.
+            events: trace,
+            count,
+            health,
+          },
         };
       };
       const errorText = (error: unknown) =>
@@ -414,6 +446,13 @@ export async function measureTermination(
           { initTimeoutMs: startMs },
         );
       } catch (error) {
+        // Only an initialization that timed out is a start stall; the factory
+        // failing in any other way fails the check.
+        if ((error as Error)?.name !== "TimeoutError") {
+          throw new Error(
+            `the probe worker failed to initialize: ${errorText(error)}`,
+          );
+        }
         return await stalled(
           "init",
           `the probe worker did not initialize within ${startMs} ms`,
@@ -481,10 +520,19 @@ export async function measureTermination(
         }
         sample.countBeforeCancel = previous;
         sample.advanceBeforeCancel = advance;
-        const early = outcome.value !== null && mode !== "timeout";
-        if (!early && advance === 0) {
-          // No cancellation could be measured: the guest never ran for a
-          // whole window, in time or before its deadline.
+        if (mode === "timeout" && !outcome.value) {
+          client.dispose();
+          throw new Error(
+            `the job did not time out within ${bound} ms of its start, although its deadline was ${jobTimeoutMs} ms`,
+          );
+        }
+        // No cancellation could be measured: the guest never ran for a whole
+        // window before its own deadline stopped it, or within the start bound
+        // of an abort or dispose job. A job that ended any other way is not a
+        // stall; its outcome goes to the checks below.
+        const timedOut = outcome.value?.name === "TimeoutError" &&
+          outcome.at - started >= jobTimeoutMs - 10;
+        if (advance === 0 && (mode === "timeout" ? timedOut : !outcome.value)) {
           client.dispose();
           await settled;
           return await stalled(
@@ -580,51 +628,17 @@ export async function measureTermination(
   );
 }
 
-/** Engine operations the trace shows begun and never finished. */
-function unfinished(events: string[]): string[] {
-  const begun = new Set<string>();
-  for (const event of events) {
-    const match = /^((?:compile|instantiate)\d+):(start|end|error)/.exec(event);
-    if (!match) continue;
-    if (match[2] === "start") begun.add(match[1]);
-    else begun.delete(match[1]);
-  }
-  return [...begun];
-}
-
-/**
- * Who a start stall points at, read the way the recovery soak reads its
- * stalls. The engine: it never ran the worker's script, never delivered the
- * message the page posted, never finished a Wasm compile or instantiation it
- * began, or no longer starts a fresh worker or compiles Wasm; or the guest did
- * run, only late. The SDK: the page never posted the message, or the engine
- * did all of the above and stayed healthy while the worker never answered or
- * its guest never ran.
- */
-export function stallSuspect(stall: StartStall): "sdk" | "engine" {
-  // `<ms>:<event>` from the worker, `page:post:<kind>:<id>` from the page.
-  const events = stall.events.map((event) => event.replace(/^[^:]*:/, ""));
-  const message = stall.stage === "init" ? "init" : "compile";
-  if (!events.some((event) => event.startsWith(`post:${message}`))) {
-    return "sdk";
-  }
-  if (!stall.health.healthy) return "engine";
-  if (!events.includes("started")) return "engine";
-  if (!events.some((event) => event.startsWith(`message:${message}`))) {
-    return "engine";
-  }
-  if (unfinished(events).length > 0) return "engine";
-  if (stall.stage === "start" && (stall.count ?? 0) > 0) return "engine";
-  return "sdk";
-}
+export { stallSuspect };
 
 /** One line for a start stall: what did not happen, where it stopped, health. */
 export function describeStall(stall: StartStall): string {
   const last = stall.events.at(-1);
   return `${stall.reason}${stall.error ? ` (${stall.error})` : ""}; ${
-    last === undefined
+    stall.expected === null
+      ? `the page never posted ${stall.stage === "init" ? "init" : "the job"}`
+      : last === undefined
       ? "the worker reported no event"
-      : `the worker's last event: ${last}`
+      : `the last event: ${last}`
   }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}`;
 }
 
@@ -647,11 +661,12 @@ async function measureOrRetry(
 ): Promise<TerminationSample> {
   const first = await measureTermination(evaluate, guest, mode, label, bounds);
   if (!first.stall) return first;
+  const { suspect, because } = judgeStall(first.stall);
   assert(
-    stallSuspect(first.stall) === "engine",
+    suspect === "engine",
     `${label}: ${
       describeStall(first.stall)
-    }; the engine did its part and stayed healthy, which points at the SDK: ${
+    }; the evidence points at the SDK: ${because}: ${
       JSON.stringify(first.stall)
     }`,
   );

@@ -8,13 +8,17 @@ import {
   checkIsolatedTermination,
   checkPlainTermination,
   measureTermination,
-  stallSuspect,
   type StartStall,
   type TerminationGuest,
   type TerminationMode,
   type TerminationSample,
 } from "./termination.ts";
-import type { EngineHealth } from "./worker-trace.ts";
+import {
+  type EngineHealth,
+  judgeStall,
+  type StallEvidence,
+  stallSuspect,
+} from "./worker-trace.ts";
 import {
   type SoakStall,
   stallBudget,
@@ -213,8 +217,10 @@ const healthy: EngineHealth = {
  * Run measureTermination's page function here, against a fake SDK whose
  * guest counts every 10 ms in shared memory, as the probe does (the count and
  * the millisecond of its latest call), until `stopAfterMs` after its job is
- * rejected. `neverRuns` keeps the guest from counting at all, and `initFails`
- * rejects the factory as an init timeout would.
+ * rejected. `neverRuns` keeps the guest from counting at all; `initFails`
+ * rejects the factory as an init timeout would, and `initError` with another
+ * error; `failsAfterMs` rejects the job early with a CompileError; and
+ * `ignoresTimeout` never times the job out.
  */
 async function measureFake(
   stopAfterMs: number,
@@ -222,6 +228,9 @@ async function measureFake(
   fake: {
     neverRuns?: boolean;
     initFails?: boolean;
+    initError?: Error;
+    failsAfterMs?: number;
+    ignoresTimeout?: boolean;
     bounds?: { timeoutMs?: number; startMs?: number };
   } = {},
 ): Promise<TerminationSample> {
@@ -256,7 +265,8 @@ async function measureFake(
             new DOMException("compilation timed out", "TimeoutError"),
           );
         }
-        events.push("2:reply:1");
+        if (fake.initError) return Promise.reject(fake.initError);
+        events.push("2:reply:1", "page:reply:1");
         audit.probes.push(counter);
         return Promise.resolve({
           compile(
@@ -272,10 +282,19 @@ async function measureFake(
                 reject(error);
               };
               pending.add(stop);
-              const timer = setTimeout(
-                () => stop(new DOMException("the job stopped", "TimeoutError")),
-                options.timeoutMs ?? 30_000,
-              );
+              const timer = fake.failsAfterMs !== undefined
+                ? setTimeout(() => {
+                  const error = new Error("cpp trapped: an SDK regression");
+                  error.name = "CompileError";
+                  stop(error);
+                }, fake.failsAfterMs)
+                : fake.ignoresTimeout
+                ? undefined
+                : setTimeout(
+                  () =>
+                    stop(new DOMException("the job stopped", "TimeoutError")),
+                  options.timeoutMs ?? 30_000,
+                );
               options.signal?.addEventListener(
                 "abort",
                 () => stop(new DOMException("the job stopped", "AbortError")),
@@ -341,6 +360,7 @@ Deno.test("measureTermination reports a worker or guest that does not start as a
     init.stall?.stage === "init" &&
       init.stall.reason ===
         "the probe worker did not initialize within 10000 ms" &&
+      init.stall.expected === "init:1" &&
       init.stall.error === "TimeoutError: compilation timed out" &&
       init.stall.events.includes("1:message:init:1") &&
       init.stall.health.healthy,
@@ -352,6 +372,7 @@ Deno.test("measureTermination reports a worker or guest that does not start as a
   });
   assert(
     idle.stall?.stage === "start" && idle.stall.count === 0 &&
+      idle.stall.expected === "compile:2" && idle.stall.error === null &&
       idle.stall.reason ===
         "the guest did not run for a 50 ms window within 300 ms of its job",
     `a guest that never ran read as ${JSON.stringify(idle)}`,
@@ -371,17 +392,77 @@ Deno.test("measureTermination reports a worker or guest that does not start as a
   );
 });
 
+Deno.test("measureTermination fails a worker that fails, and a job that ends early, instead of reading a stall", async () => {
+  // A worker.js that throws while it loads makes the factory fail at once:
+  // the SDK's failure, not a stall.
+  const failed = await rejection(() =>
+    measureFake(0, "abort", {
+      initError: new Error("Uncaught SyntaxError: worker.js failed to load"),
+    })
+  );
+  assert(
+    failed ===
+      "the probe worker failed to initialize: Error: Uncaught SyntaxError: worker.js failed to load",
+    `a factory failure read as ${failed}`,
+  );
+  // A timeout job that ends before its deadline with a CompileError reaches
+  // the checks, which fail it, whether or not its guest ran for a window.
+  for (const neverRuns of [false, true]) {
+    const early = await measureFake(0, "timeout", {
+      neverRuns,
+      failsAfterMs: 75,
+    });
+    assert(
+      early.stall === null && early.rejection.name === "CompileError",
+      `a job that failed early read as ${JSON.stringify(early)}`,
+    );
+    const checked = await rejection(() =>
+      checkIsolatedTermination(
+        "webkit",
+        engineThat(() => 0, (sample) =>
+          sample.guest === "pure" && sample.mode === "timeout" ? early : {}),
+        "linux",
+        () =>
+          Promise.resolve(),
+      )
+    );
+    assert(
+      checked.startsWith(
+        "webkit pure guest, timeout: rejected with CompileError (cpp trapped: an SDK regression), expected TimeoutError",
+      ),
+      `the checks passed a job that failed early: ${checked}`,
+    );
+  }
+  // A timeout that never fires is the SDK's too.
+  const never = await rejection(() =>
+    measureFake(0, "timeout", {
+      ignoresTimeout: true,
+      bounds: { timeoutMs: 300 },
+    })
+  );
+  assert(
+    never ===
+      "the job did not time out within 5300 ms of its start, although its deadline was 300 ms",
+    `a timeout that never fired read as ${never}`,
+  );
+});
+
 function startStall(
   stage: "init" | "start",
   events: string[],
   count: number | null = null,
   health: EngineHealth = healthy,
+  error: string | null = null,
 ): StartStall {
+  const kind = stage === "init" ? "init" : "compile";
+  const post = events.filter((event) => event.startsWith(`page:post:${kind}:`))
+    .at(-1);
   return {
     stage,
     reason: `the probe worker did not ${stage}`,
     afterMs: 10_000,
-    error: null,
+    expected: post === undefined ? null : post.slice("page:post:".length),
+    error,
     events,
     count,
     health,
@@ -399,6 +480,7 @@ Deno.test("A start stall points at the SDK only where the engine did its part", 
   const instantiated = [
     ...initialized,
     "3:reply:1",
+    "page:reply:1",
     "page:post:compile:2",
     "4:message:compile:2",
     "5:instantiate1:start",
@@ -406,6 +488,28 @@ Deno.test("A start stall points at the SDK only where the engine did its part", 
   ];
   const cases: [string, StartStall, "sdk" | "engine"][] = [
     ["the page never posted init", startStall("init", ["0:started"]), "sdk"],
+    [
+      "a wait that ended with an error, not a timeout",
+      startStall(
+        "init",
+        ["page:post:init:1"],
+        null,
+        healthy,
+        "Error: worker script failed to load",
+      ),
+      "sdk",
+    ],
+    [
+      "an init timeout",
+      startStall(
+        "init",
+        ["page:post:init:1"],
+        null,
+        healthy,
+        "TimeoutError: compilation timed out",
+      ),
+      "engine",
+    ],
     [
       "an engine that no longer compiles Wasm",
       startStall("init", initialized, null, { ...healthy, healthy: false }),
@@ -432,13 +536,23 @@ Deno.test("A start stall points at the SDK only where the engine did its part", 
       "sdk",
     ],
     [
+      "a reply the worker sent that never reached the page",
+      startStall("init", [...initialized, "3:reply:1"]),
+      "engine",
+    ],
+    [
+      "a reply that reached the page, which the client never used",
+      startStall("init", [...initialized, "3:reply:1", "page:reply:1"]),
+      "sdk",
+    ],
+    [
       "a job never delivered",
-      startStall("start", instantiated.slice(0, 7), 0),
+      startStall("start", instantiated.slice(0, 8), 0),
       "engine",
     ],
     [
       "an instantiation that never finished",
-      startStall("start", instantiated.slice(0, 9), 0),
+      startStall("start", instantiated.slice(0, 10), 0),
       "engine",
     ],
     [
@@ -455,6 +569,68 @@ Deno.test("A start stall points at the SDK only where the engine did its part", 
   for (const [label, stall, expected] of cases) {
     const suspect = stallSuspect(stall);
     assert(suspect === expected, `${label}: read as ${suspect}`);
+  }
+});
+
+Deno.test("A soak recovery stall is read by the same rule", () => {
+  // The soak's evidence: the page's last post to the stalled worker, if it
+  // posted anything for the recovery, and no counter. The two cases where the
+  // soak's own reading used to differ are fixed by the shared rule.
+  const soak = (
+    expected: string | null,
+    events: string[],
+    error = "TimeoutError: compilation timed out",
+  ): StallEvidence => ({
+    expected,
+    error,
+    events,
+    health: healthy,
+    count: null,
+  });
+  const received = [
+    "page:post:compile:9",
+    "40:message:compile:9",
+    "41:instantiate7:start",
+    "42:instantiate7:end",
+  ];
+  const cases: [string, StallEvidence, "sdk" | "engine", string][] = [
+    [
+      "a recovery the page never posted",
+      soak(null, ["30:reply:8", "page:reply:8"]),
+      "sdk",
+      "the page never posted the message the worker had to answer",
+    ],
+    [
+      "a received job left unanswered while its compile is still running",
+      soak("compile:9", [...received.slice(0, 2), "41:compile3:start:5"]),
+      "engine",
+      "the engine never finished compile3",
+    ],
+    [
+      "a received job left unanswered with every engine operation finished",
+      soak("compile:9", received),
+      "sdk",
+      "the engine did its part and stayed healthy, yet the worker never answered compile:9",
+    ],
+    [
+      "a recovery that failed with an error",
+      soak("compile:9", received, "CompileError: cpp trapped"),
+      "sdk",
+      "the wait ended with CompileError: cpp trapped, a failure, not a stall",
+    ],
+    [
+      "a new worker whose script never ran",
+      soak("init:10", ["page:post:init:10"]),
+      "engine",
+      "the engine never ran the worker's script",
+    ],
+  ];
+  for (const [label, evidence, suspect, because] of cases) {
+    const judged = judgeStall(evidence);
+    assert(
+      judged.suspect === suspect && judged.because === because,
+      `${label}: read as ${JSON.stringify(judged)}`,
+    );
   }
 });
 
@@ -514,7 +690,12 @@ Deno.test("A start stall that points at the engine is retried once, then tolerat
       () => Promise.resolve(),
     )
   );
-  assert(sdk.includes("which points at the SDK"), `SDK suspect: ${sdk}`);
+  assert(
+    sdk.includes(
+      "the evidence points at the SDK: the engine did its part and stayed healthy, yet the worker never answered init:1",
+    ),
+    `SDK suspect: ${sdk}`,
+  );
   let left = 1;
   const plainTolerated: string[] = [];
   const plain = await checkPlainTermination(

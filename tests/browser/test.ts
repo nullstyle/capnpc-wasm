@@ -19,7 +19,10 @@ import { envMilliseconds, stepClock } from "./deadline.ts";
 import {
   type EngineHealth,
   engineHealthScript,
+  judgeStall,
+  type StallEvidence,
   type TracedWorker,
+  traceModuleSource,
   traceWorkerTemplate,
 } from "./worker-trace.ts";
 import {
@@ -90,11 +93,34 @@ type BrowserState = {
   hostileGuests?: Record<string, Uint8Array>;
   /** The recovery soak's client: the real compiler and a spinning zig generator. */
   soak?: WorkerCompiler;
-  /** The soak's traced workers, the page's own Worker, and the traced script. */
+  /**
+   * The soak's traced workers, the page's own Worker, the traced script, and
+   * how many messages the page has posted to traced workers.
+   */
   soakTrace?: {
     workers: TracedWorker[];
     RealWorker: typeof Worker;
     url: string;
+    posts: number;
+  };
+};
+
+/**
+ * A soak recovery that did not finish, as the page reports it: the evidence
+ * judgeStall() reads, and the retry the page made on the same client.
+ */
+type SoakStallRecord = StallEvidence & {
+  afterMs: number;
+  /** Whether the client had terminated the stalled worker. */
+  terminated: boolean | null;
+  /** Traced workers before the health checks, which start their own. */
+  workersStarted: number;
+  retry: {
+    ok: boolean;
+    ms: number;
+    error: string | null;
+    /** The workers the retry started, or the stalled one if it reused it. */
+    workers: string[][];
   };
 };
 type BrowserGlobal = typeof globalThis & { capnpTest: BrowserState };
@@ -1264,22 +1290,28 @@ try {
   // worker and a timeout keeps it. The abort fires at 50 ms, before the job's
   // 2 s deadline.
   //
-  // Every soak worker is traced (worker-trace.ts). A recovery gets 20 s, over
-  // six times the slowest one measured in CI (WebKit on Linux, 3.1 s). One that
-  // does not finish in time is reported with its worker's trace and whether a
-  // fresh worker and Wasm compilation still respond, then retried once on the
-  // same client, which replaces the stalled worker as it would for an
-  // application. One such stall per run is tolerated and reported
-  // (tests/browser/README.md records the one seen so far); a second one, or a
-  // retry that fails too, fails the run.
+  // Every soak worker is traced (worker-trace.ts), with the page's posts to it
+  // and the replies that reach the page. A recovery gets 20 s, over six times
+  // the slowest one measured in CI (WebKit on Linux, 3.1 s). One that does not
+  // finish in time is reported with its worker's trace and whether a fresh
+  // worker and Wasm compilation still respond, then retried once on the same
+  // client, which replaces the stalled worker as it would for an application.
+  // judgeStall() decides who the stall points at: a stall that points at the
+  // SDK, or a retry that fails too, fails the run, and one that points at the
+  // engine counts against the job's stall budget (soak-stalls.ts).
   const soakLanguages = ["cpp", "rust", "go"] as const;
   const soakRecoveryMs = 20_000;
   await evaluate(
-    async ({ spinGuest, template }) => {
+    async ({ spinGuest, template, traceModule }) => {
       const state = (globalThis as BrowserGlobal).capnpTest;
       const workers: TracedWorker[] = [];
       const byWorker = new WeakMap<Worker, TracedWorker>();
       const RealWorker = globalThis.Worker;
+      const soakTrace = { workers, RealWorker, url: "", posts: 0 };
+      const keep = (traced: TracedWorker, event: string) => {
+        traced.events.push(event);
+        if (traced.events.length > 60) traced.events.splice(0, 20);
+      };
       globalThis.Worker = class extends RealWorker {
         constructor(url: string | URL, options?: WorkerOptions) {
           super(url, options);
@@ -1289,10 +1321,29 @@ try {
           this.addEventListener("message", (event: MessageEvent) => {
             const message = event.data;
             if (message && message.kind === "capnpTrace") {
-              traced.events.push(`${message.t}:${message.event}`);
-              if (traced.events.length > 60) traced.events.splice(0, 20);
+              keep(traced, `${message.t}:${message.event}`);
+            } else if (message && typeof message.id === "number") {
+              keep(traced, `page:reply:${message.id}`);
             }
           });
+        }
+        override postMessage(
+          message: unknown,
+          transfer?: Transferable[] | StructuredSerializeOptions,
+        ): void {
+          const traced = byWorker.get(this);
+          const { kind, id } = (message ?? {}) as {
+            kind?: unknown;
+            id?: unknown;
+          };
+          if (traced && typeof kind === "string") {
+            soakTrace.posts++;
+            keep(
+              traced,
+              `page:post:${kind}${id === undefined ? "" : `:${id}`}`,
+            );
+          }
+          super.postMessage(message, transfer as Transferable[]);
         }
         override terminate() {
           const traced = byWorker.get(this);
@@ -1300,18 +1351,23 @@ try {
           super.terminate();
         }
       } as typeof Worker;
-      const url = URL.createObjectURL(
-        new Blob([template.replace("__REAL_WORKER_URL__", state.workerURL)], {
-          type: "text/javascript",
-        }),
+      const blobURL = (source: string) =>
+        URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+      soakTrace.url = blobURL(
+        template.replace("__TRACE_URL__", blobURL(traceModule))
+          .replace("__REAL_WORKER_URL__", state.workerURL),
       );
-      state.soakTrace = { workers, RealWorker, url };
-      state.soak = await state.sdk.createWorkerCompiler(url, {
+      state.soakTrace = soakTrace;
+      state.soak = await state.sdk.createWorkerCompiler(soakTrace.url, {
         ...state.modules,
         generators: { ...state.modules.generators, zig: spinGuest },
       });
     },
-    { spinGuest: data.spinGuest, template: traceWorkerTemplate },
+    {
+      spinGuest: data.spinGuest,
+      template: traceWorkerTemplate,
+      traceModule: traceModuleSource,
+    },
     `${engine} create the recovery soak client`,
   );
   // Tolerated stalls, of the soak and of the termination acceptance below:
@@ -1389,24 +1445,20 @@ try {
             };
           }
         };
+        const postsBefore = trace.posts;
         let recovery = await recover();
-        let stall: Record<string, unknown> | undefined;
+        let stall: SoakStallRecord | undefined;
         if (!recovery.ok) {
           const stalled = trace.workers.at(-1);
           // Counted before the health checks, whose workers are traced too.
           const workersStarted = trace.workers.length;
-          const events = stalled?.events ?? [];
-          // The last job the stalled worker received, if it never answered it.
-          const jobs = events.flatMap((event) => {
-            const id = /^\d+:message:(?:compile|generate):(\d+)$/.exec(event)
-              ?.[1];
-            return id === undefined ? [] : [id];
-          });
-          const lastJob = jobs.at(-1);
-          const unanswered = lastJob !== undefined &&
-            !events.some((event) =>
-              new RegExp(`^\\d+:reply:${lastJob}(?::error)?$`).test(event)
-            );
+          // A copy: the retry below may add to the same worker's events.
+          const events = [...(stalled?.events ?? [])];
+          // The message the stalled worker had to answer: the page's last
+          // post to it, if the page posted anything for the recovery at all.
+          const post = trace.posts > postsBefore
+            ? events.filter((event) => event.startsWith("page:post:")).at(-1)
+            : undefined;
           // Does the engine itself still start workers and compile Wasm?
           const health = await (globalThis as unknown as {
             capnpEngineHealth(): Promise<EngineHealth>;
@@ -1415,22 +1467,22 @@ try {
           const before = trace.workers.length;
           const started = performance.now();
           const retried = await recover();
-          const suspect = unanswered && health.healthy ? "sdk" : "engine";
           stall = {
+            expected: post === undefined
+              ? null
+              : post.slice("page:post:".length),
             error: recovery.error,
-            afterMs: recovery.afterMs,
-            suspect,
-            unansweredJob: unanswered ? lastJob : null,
-            worker: stalled
-              ? { events: events.slice(-16), terminated: stalled.terminated }
-              : null,
-            workersStarted,
+            // The whole list: the page keeps at most 60 events per worker.
+            events,
             health,
+            count: null,
+            afterMs: recovery.afterMs,
+            terminated: stalled ? stalled.terminated : null,
+            workersStarted,
             retry: {
               ok: retried.ok,
               ms: Math.round(performance.now() - started),
               error: retried.ok ? null : retried.error,
-              // The workers the retry started, or the stalled one if it reused it.
               workers: (trace.workers.length > before
                 ? trace.workers.slice(before)
                 : stalled
@@ -1440,34 +1492,25 @@ try {
                 ),
             },
           };
-          if (suspect === "sdk") {
-            throw new Error(
-              `soak recovery after ${mode} stalled although the engine is healthy: the worker received job ${lastJob} and never answered it, which points at the SDK; ${
-                JSON.stringify(stall)
-              }`,
-            );
-          }
-          if (!retried.ok) {
-            throw new Error(
-              `worker recovery after ${mode} failed twice (${retried.error} after ${retried.afterMs} ms): ${
-                JSON.stringify(stall)
-              }`,
-            );
-          }
-          recovery = retried;
+          if (retried.ok) recovery = retried;
         }
+        // The driver judges a stall (judgeStall) before it compares outputs.
         return {
           name: cancellation.name,
-          outputs: Object.fromEntries(
-            Object.entries(recovery.result.outputs).map(([language, files]) => [
-              language,
-              Object.fromEntries(
-                Object.entries(files!).map((
-                  [path, bytes],
-                ) => [path, Array.from(bytes)]),
-              ),
-            ]),
-          ),
+          outputs: recovery.ok
+            ? Object.fromEntries(
+              Object.entries(recovery.result.outputs).map((
+                [language, files],
+              ) => [
+                language,
+                Object.fromEntries(
+                  Object.entries(files!).map((
+                    [path, bytes],
+                  ) => [path, Array.from(bytes)]),
+                ),
+              ]),
+            )
+            : {},
           stall,
         };
       },
@@ -1484,6 +1527,26 @@ try {
       result.name === (mode === "abort" ? "AbortError" : "TimeoutError"),
       `${mode} failed with ${result.name}`,
     );
+    const stall = result.stall;
+    if (stall) {
+      const { suspect, because } = judgeStall(stall);
+      assert(
+        suspect === "engine",
+        `${engine}: soak recovery after ${mode} in cycle ${
+          iteration + 1
+        } stalled, and the evidence points at the SDK: ${because}; ${
+          JSON.stringify(stall)
+        }`,
+      );
+      assert(
+        stall.retry.ok,
+        `${engine}: soak recovery after ${mode} in cycle ${
+          iteration + 1
+        } failed twice (${stall.retry.error} after ${stall.retry.ms} ms): ${
+          JSON.stringify(stall)
+        }`,
+      );
+    }
     equalOutputs(
       result.outputs,
       Object.fromEntries(
@@ -1494,15 +1557,7 @@ try {
       ),
       `worker recovery after ${mode}`,
     );
-    if (result.stall) {
-      const detail = result.stall as {
-        error: string;
-        afterMs: number;
-        worker: { events: string[] } | null;
-        health: Record<string, string>;
-        retry: { ms: number };
-      };
-      const lastEvent = detail.worker?.events.at(-1);
+    if (stall) {
       await tolerate({
         job: stallJob(),
         engine,
@@ -1510,11 +1565,12 @@ try {
         cycle: iteration + 1,
         mode,
         at: new Date().toISOString(),
-        summary:
-          `${detail.error} after ${detail.afterMs} ms; the stalled worker's last event: ${
-            lastEvent ?? "none (it never started)"
-          }; fresh worker ${detail.health.plainWorker}, Wasm in a worker ${detail.health.workerCompile}, Wasm on the page ${detail.health.pageCompile}; the retry recovered in ${detail.retry.ms} ms`,
-        detail,
+        summary: `${stall.error} after ${stall.afterMs} ms; ${
+          judgeStall(stall).because
+        }; the last event: ${
+          stall.events.at(-1) ?? "none"
+        }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}; the retry recovered in ${stall.retry.ms} ms`,
+        detail: stall,
       });
     }
     console.log(
