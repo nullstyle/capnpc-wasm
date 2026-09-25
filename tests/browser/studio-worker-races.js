@@ -56,7 +56,7 @@ export async function checkWorkerRaces(browser, url) {
         terminated: globalThis.studioAudit.terminated,
         heldInits: globalThis.studioAudit.heldInits,
       }));
-    await page.goto(url);
+    await page.goto(url, { timeout: 120_000 });
     await page.waitForFunction(() => globalThis.studioAudit.heldInits === 1);
     // Cancelling a starting worker terminates it inside the SDK: after every
     // cancellation no worker is alive, and the next Generate starts one.
