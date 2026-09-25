@@ -1,8 +1,7 @@
 // The TypeScript SDK against the shared failure and limit corpus
-// (tests/fixtures/conformance): direct execution on the pinned Deno, worker
-// execution on the supported worker runtime. The Go SDK, the packaged
-// launcher, the browsers, and the Studio adapter run the same corpus against
-// the same expectations.
+// (tests/fixtures/conformance): direct and worker execution on the pinned Deno.
+// The Go SDK, the packaged launcher, the browsers, and the Studio adapter run
+// the same corpus against the same expectations.
 import { defaultLimits } from "./mod.ts";
 import type {
   JobOptions as SdkJobOptions,

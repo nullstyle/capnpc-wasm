@@ -2,8 +2,8 @@
  * Worker-client behaviour that the shared output tests cannot see: which
  * failures restart the worker, that errors cross the boundary with the direct
  * compiler's classes and messages, result shapes, and the client's state
- * machine around load failures, initialization, and disposal. These run on
- * the verified Deno worker release only.
+ * machine around load failures, initialization, and disposal. They run on the
+ * pinned Deno with the rest of test:sdk-ts.
  */
 import {
   CompileError,

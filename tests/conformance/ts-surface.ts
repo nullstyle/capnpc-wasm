@@ -1,6 +1,6 @@
-// Runs the corpus on the TypeScript SDK in Deno: the direct compiler on the
-// pinned Deno, the worker compiler on the supported worker runtime. Shared by
-// sdk/typescript/conformance_test.ts and tests/conformance/conformance_test.ts.
+// Runs the corpus on the TypeScript SDK in Deno: the direct and the worker
+// compiler on the pinned Deno. Shared by sdk/typescript/conformance_test.ts and
+// tests/conformance/conformance_test.ts.
 
 import {
   CompileError,
