@@ -1,5 +1,6 @@
 /**
- * In-guest interruption, shared by the rewriter (wasm.ts) and the runtime.
+ * In-guest interruption, shared by the rewriter (wasm.ts), the runtime and
+ * both execution modes.
  *
  * compileBounded instruments every guest module: a countdown global ticks at
  * each loop header, at the entry of each function that can call guest code,
@@ -26,8 +27,54 @@ export const countdownExport = "capnp_wasm.countdown";
 /** Guest checks between two host polls. */
 export const pollInterval = 65536;
 
+/** Job deadline used when a caller passes no `timeoutMs`. */
+export const defaultTimeoutMs = 30_000;
+
 export function timeoutError(): DOMException {
   return new DOMException("compilation timed out", "TimeoutError");
+}
+
+/** The same bound setTimeout accepts, so both execution modes agree. */
+export function checkTimeout(timeoutMs: unknown, name: string): number {
+  if (
+    typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) ||
+    timeoutMs <= 0 || timeoutMs > 2_147_483_647
+  ) {
+    throw new TypeError(`${name} must be positive and at most 2147483647`);
+  }
+  return timeoutMs;
+}
+
+/**
+ * Check a job's options the same way in both execution modes, before the
+ * request itself: an object (or nothing), a timeout checkTimeout accepts, and
+ * an AbortSignal. An already aborted signal rejects with its reason.
+ */
+export function jobOptions(
+  options: unknown,
+): { signal?: AbortSignal; timeoutMs: number } {
+  if (options === undefined) return { timeoutMs: defaultTimeoutMs };
+  if (typeof options !== "object" || options === null) {
+    throw new TypeError("job options must be an object");
+  }
+  const { signal, timeoutMs = defaultTimeoutMs } = options as {
+    signal?: unknown;
+    timeoutMs?: unknown;
+  };
+  checkTimeout(timeoutMs, "timeoutMs");
+  if (
+    signal !== undefined &&
+    (typeof signal !== "object" || signal === null ||
+      typeof (signal as AbortSignal).aborted !== "boolean" ||
+      typeof (signal as AbortSignal).addEventListener !== "function")
+  ) throw new TypeError("signal must be an AbortSignal");
+  if ((signal as AbortSignal | undefined)?.aborted) {
+    throw (signal as AbortSignal).reason;
+  }
+  return {
+    signal: signal as AbortSignal | undefined,
+    timeoutMs: timeoutMs as number,
+  };
 }
 
 // A private cell for CPU-free sleeps where nothing else can wake the thread.

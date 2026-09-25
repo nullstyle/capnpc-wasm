@@ -8,6 +8,7 @@ import { compileBounded, inspectModules } from "./wasm.ts";
 import { resolveLimits } from "./limits.ts";
 import { CommandError, runCommand } from "./runtime.ts";
 import { requireWasmExceptions } from "./environment.ts";
+import { Cancelled, JobControl } from "./interrupt.ts";
 import {
   CompileError,
   type CompileResult,
@@ -40,12 +41,20 @@ export interface Engine {
   readonly limits: ResourceLimits;
   /** Generator languages the factory received modules for. */
   readonly supplied: ReadonlySet<Language>;
-  /** Run the compiler, then the requested generators, on private inputs. */
-  compileStaged(job: StagedCompileJob): Promise<CompileResult>;
+  /**
+   * Run the compiler, then the requested generators, on private inputs. A
+   * cancelled job rejects with `control.reason`: a TimeoutError, the abort
+   * signal's reason, or an AbortError for a shared-cell cancellation.
+   */
+  compileStaged(
+    job: StagedCompileJob,
+    control?: JobControl,
+  ): Promise<CompileResult>;
   /** Run generators on a private request buffer. */
   generateStaged(
     request: Uint8Array,
     generators: readonly Language[],
+    control?: JobControl,
   ): Promise<GenerationResult>;
 }
 
@@ -74,7 +83,10 @@ export async function createEngine(
     files: Record<string, Uint8Array>,
     readonly: boolean,
     diagnostics: Diagnostic[],
+    control: JobControl,
   ) {
+    // A deadline or abort that passed between stages stops the job here.
+    control.throwIfCancelled();
     let result;
     try {
       // Inputs are private already; the filesystem shares them read-only.
@@ -86,8 +98,10 @@ export async function createEngine(
         readonly,
         limits,
         false,
+        control,
       );
     } catch (cause) {
+      if (cause instanceof Cancelled) throw cause.reason;
       if (cause instanceof CommandError && cause.stderr) {
         diagnostics.push({ stage, stderr: cause.stderr });
       }
@@ -115,6 +129,7 @@ export async function createEngine(
     request: Uint8Array,
     selected: readonly Language[],
     diagnostics: Diagnostic[],
+    control: JobControl,
   ): Promise<GenerationResult> {
     // Plain objects in both execution modes; language keys are SDK-chosen.
     const outputs: GenerationResult["outputs"] = {};
@@ -127,6 +142,7 @@ export async function createEngine(
         {},
         false,
         diagnostics,
+        control,
       );
       if (generated.stdout.length !== 0) {
         throw new CompileError(
@@ -143,10 +159,10 @@ export async function createEngine(
   return {
     limits,
     supplied,
-    async generateStaged(request, selected) {
-      return await generate(request, selected, []);
+    async generateStaged(request, selected, control = new JobControl()) {
+      return await generate(request, selected, [], control);
     },
-    async compileStaged(job) {
+    async compileStaged(job, control = new JobControl()) {
       const diagnostics: Diagnostic[] = [];
       const compiled = await execute(
         "compiler",
@@ -168,6 +184,7 @@ export async function createEngine(
         job.files,
         true,
         diagnostics,
+        control,
       );
       if (compiled.stdout.length === 0) {
         throw new CompileError(
@@ -180,7 +197,12 @@ export async function createEngine(
       // runs, so an oversized request already failed as a CompileError.
       return {
         request: compiled.stdout,
-        ...await generate(compiled.stdout, job.generators, diagnostics),
+        ...await generate(
+          compiled.stdout,
+          job.generators,
+          diagnostics,
+          control,
+        ),
       };
     },
   };

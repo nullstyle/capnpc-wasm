@@ -161,7 +161,7 @@ cause chain.
 | A guest stage exits nonzero                                                                                                                               | `CompileError` with `stage`, `exitCode`, and every stage's `diagnostics`                                                                |
 | A guest stage traps, or exceeds a host budget while running (stdout, stderr, output bytes or entries, path length, or `requestBytes` for compiler output) | `CompileError` with `stage`, no `exitCode`, `diagnostics` captured so far, and `cause`; a budget failure names the limit in its message |
 | A caller input exceeds a budget before any guest starts (`workspaceBytes`, `workspaceEntries`, `pathBytes`, or `requestBytes` for a supplied request)     | `TypeError` reading `<subject> exceeds <limit> limit`                                                                                   |
-| Worker job cancelled                                                                                                                                      | `DOMException` named `TimeoutError`, or the abort `signal.reason` (an `AbortError` by default)                                          |
+| Job cancelled, in either mode                                                                                                                             | `DOMException` named `TimeoutError`, or the abort `signal.reason` (an `AbortError` by default)                                          |
 | Worker client disposed, or a second concurrent job                                                                                                        | `Error` (`worker compiler is disposed`, `worker compiler already has an active job`)                                                    |
 | Worker script failed to load, or the worker crashed                                                                                                       | `Error` with the engine's message                                                                                                       |
 | Unsupported worker runtime                                                                                                                                | `Error` naming the runtime and pointing to `createCompiler`                                                                             |
@@ -177,8 +177,14 @@ inferred from human-readable diagnostics.
 
 `createCompiler(modules, options?)` compiles modules once and runs jobs in the
 current JS thread. Its interface is asynchronous, but each guest's execution
-blocks that thread. This works in Deno and application-owned workers; it has no
-hard timeout.
+blocks that thread. This works in Deno and application-owned workers. Its
+`compile(request, { signal, timeoutMs })` and `generate` accept the same job
+options as the worker client, and `timeoutMs` (30 seconds by default) is a hard
+deadline: every guest is instrumented with interruption checks, so a guest still
+running at the deadline traps and the job rejects with a `TimeoutError`,
+including a guest that loops, recurses, or sleeps. A blocked thread cannot
+observe an abort while a guest runs, so an abort takes effect before the next
+guest stage starts and `timeoutMs` bounds the running one.
 
 `createWorkerCompiler(workerURL, modules, options?)` executes off the main
 thread. Its `compile(request, { signal, timeoutMs })` accepts an `AbortSignal`

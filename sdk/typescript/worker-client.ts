@@ -5,6 +5,7 @@ import {
   validateGenerate,
 } from "./limits.ts";
 import { checkWorkerRuntime, requireWasmExceptions } from "./environment.ts";
+import { checkTimeout, defaultTimeoutMs, timeoutError } from "./interrupt.ts";
 import { inspectModules } from "./wasm.ts";
 import {
   decodeError,
@@ -17,21 +18,12 @@ import type {
   CompilerOptions,
   GenerationRequest,
   GenerationResult,
+  JobOptions,
   Language,
   Modules,
 } from "./types.ts";
 
 export { supportedDenoWorkerVersion } from "./environment.ts";
-
-export interface JobOptions {
-  /** Aborting terminates the worker and rejects with `signal.reason`. */
-  signal?: AbortSignal;
-  /**
-   * Milliseconds until the job rejects with a `TimeoutError` DOMException and
-   * its worker is terminated. Defaults to 30000 and includes any restart wait.
-   */
-  timeoutMs?: number;
-}
 
 export interface WorkerCompilerOptions extends CompilerOptions {
   /** Aborts worker start-up: the worker is terminated and the factory rejects. */
@@ -56,23 +48,8 @@ export interface WorkerCompiler {
   [Symbol.dispose](): void;
 }
 
-const defaultTimeoutMs = 30_000;
-
 function disposedError(): Error {
   return new Error("worker compiler is disposed");
-}
-
-function timeoutError(): DOMException {
-  return new DOMException("compilation timed out", "TimeoutError");
-}
-
-function checkTimeout(timeoutMs: number, name: string): void {
-  if (
-    !Number.isFinite(timeoutMs) || timeoutMs <= 0 ||
-    timeoutMs > 2_147_483_647
-  ) {
-    throw new TypeError(`${name} must be positive and at most 2147483647`);
-  }
 }
 
 /**

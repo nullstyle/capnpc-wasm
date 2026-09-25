@@ -82,11 +82,41 @@ export interface CompileResult extends GenerationResult {
   request: Uint8Array;
 }
 
+/**
+ * Per-job cancellation, accepted by both execution modes. Every guest runs
+ * with injected interruption checks, so a timeout or abort stops the guest
+ * itself with a trap, not only the returned promise.
+ */
+export interface JobOptions {
+  /**
+   * Aborting rejects the job with `signal.reason`. A worker job's guest stops
+   * within milliseconds where SharedArrayBuffer is available (Deno, and
+   * cross-origin isolated pages); elsewhere the worker is terminated, and
+   * the guest still stops at `timeoutMs` in engines where termination does
+   * not stop it. A direct job runs its guests on the calling thread, which
+   * cannot observe the signal until the running guest stage ends, so the
+   * abort takes effect before the next stage and `timeoutMs` bounds the rest.
+   */
+  signal?: AbortSignal;
+  /**
+   * Milliseconds until the job rejects with a `TimeoutError` DOMException and
+   * its guest traps at its next check. Defaults to 30000; worker jobs include
+   * any wait for a worker to start or recover.
+   */
+  timeoutMs?: number;
+}
+
 export interface Compiler {
   /** Fresh guest instances and filesystems for every invocation. */
-  compile(request: CompileRequest): Promise<CompileResult>;
+  compile(
+    request: CompileRequest,
+    options?: JobOptions,
+  ): Promise<CompileResult>;
   /** Generate from a previously compiled request, without running the frontend. */
-  generate(request: GenerationRequest): Promise<GenerationResult>;
+  generate(
+    request: GenerationRequest,
+    options?: JobOptions,
+  ): Promise<GenerationResult>;
 }
 
 /**

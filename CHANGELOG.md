@@ -212,6 +212,12 @@ every flavor it applies to has shipped it.
   unchanged). `poll_oneoff` sleeps with `Atomics.wait` instead of spinning,
   reads the subscription flags at the WASI offset (absolute clock timeouts),
   reports the event count, and returns `EINTR` when the job is cancelled.
+- TypeScript SDK, behavior change before the first tag: direct `compile` and
+  `generate` accept the worker's `{ signal, timeoutMs }` options (`JobOptions`
+  now lives in the shared types), and `timeoutMs` defaults to 30 seconds in both
+  modes; a direct guest past its deadline traps and the job rejects with a
+  `TimeoutError`, and invalid options reject with `TypeError` before the request
+  is validated.
 
 ## capnp-wasm-compiler-host
 

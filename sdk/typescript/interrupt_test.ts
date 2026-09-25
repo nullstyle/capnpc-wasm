@@ -1,8 +1,14 @@
 /**
- * In-guest interruption: the module rewriter (wasm.ts), and host stops that
- * trap instead of throwing into the guest (runtime.ts).
+ * In-guest interruption: the module rewriter (wasm.ts), host stops that trap
+ * instead of throwing into the guest (runtime.ts), and direct-mode deadlines
+ * and abort signals (mod.ts). Worker cancellation is in worker_test.ts.
  */
-import { CompileError, createCompiler, defaultLimits } from "./mod.ts";
+import {
+  CompileError,
+  createCompiler,
+  defaultLimits,
+  type Modules,
+} from "./mod.ts";
 import { Cancelled, countdownExport, JobControl } from "./interrupt.ts";
 import { runCommand } from "./runtime.ts";
 import { compileBounded, instrument } from "./wasm.ts";
@@ -16,15 +22,37 @@ import {
 import {
   assert,
   commandGuest,
+  equalOutputs,
+  fixture,
   leb,
   loopGuest,
   name,
   read,
+  rejects,
   rejectsWith,
   section,
   simpleRequest,
   trapGuest,
 } from "./testdata/support.ts";
+
+// Stopping takes well under a millisecond on an idle host (see the SDK
+// README); the bound leaves 5x headroom over a 100 ms target for loaded CI.
+const timeoutMs = 200;
+const lateMs = 500;
+
+async function elapsed<T>(run: () => Promise<T>): Promise<number> {
+  const started = performance.now();
+  await run();
+  return performance.now() - started;
+}
+
+function stoppedInTime(took: number, what: string): void {
+  assert(took >= timeoutMs, `${what} stopped before its deadline: ${took} ms`);
+  assert(
+    took < timeoutMs + lateMs,
+    `${what} ran ${took - timeoutMs} ms past its deadline`,
+  );
+}
 
 /** Instantiate `bytes` (instrumented or not) with the coverage imports. */
 async function exportsOf(
@@ -328,12 +356,15 @@ Deno.test("SDK instruments every built toolchain module", async () => {
 
 /** A direct compiler whose cpp generator is catchRetryGuest. */
 async function catchRetry(options: { limits?: { stdoutBytes: number } } = {}) {
-  const compiler = await createCompiler({
+  const modules: Modules = {
     compiler: trapGuest,
     generators: { cpp: catchRetryGuest },
-  }, options);
-  return (mode: number) =>
-    compiler.generate({ request: Uint8Array.of(mode), generators: ["cpp"] });
+  };
+  const compiler = await createCompiler(modules, options);
+  return (mode: number, timeout = timeoutMs) =>
+    compiler.generate({ request: Uint8Array.of(mode), generators: ["cpp"] }, {
+      timeoutMs: timeout,
+    });
 }
 
 Deno.test("SDK host stops trap without running guest handlers", async () => {
@@ -392,4 +423,132 @@ Deno.test("SDK host stops trap without running guest handlers", async () => {
       `mode ${mode}: ${cancelled}`,
     );
   }
+});
+
+Deno.test("SDK direct jobs stop running guests at their deadline", async () => {
+  const run = await catchRetry();
+  // Spinning, sleeping in poll_oneoff for an hour, and endless tail calls
+  // with no loop instruction all stop at the deadline.
+  for (
+    const mode of [
+      catchRetryMode.spin,
+      catchRetryMode.sleep,
+      catchRetryMode.tailCalls,
+    ]
+  ) {
+    let failure: unknown;
+    const took = await elapsed(async () => {
+      try {
+        await run(mode);
+      } catch (error) {
+        failure = error;
+      }
+    });
+    assert(
+      failure instanceof DOMException && failure.name === "TimeoutError",
+      `mode ${mode}: ${failure}`,
+    );
+    stoppedInTime(took, `mode ${mode}`);
+  }
+  // A compiler that timed out keeps producing the native bytes.
+  const { modules, request } = await fixture();
+  const compiler = await createCompiler({
+    ...modules,
+    generators: { ...modules.generators, cpp: loopGuest },
+  });
+  const expected = await (await createCompiler(modules)).compile({
+    ...request,
+    generators: ["rust"],
+  });
+  const took = await elapsed(() =>
+    rejects(
+      () =>
+        compiler.compile({ ...request, generators: ["cpp"] }, { timeoutMs }),
+      "TimeoutError",
+    )
+  );
+  stoppedInTime(took, "loop generator");
+  equalOutputs(
+    await compiler.compile({ ...request, generators: ["rust"] }),
+    expected,
+  );
+});
+
+Deno.test("SDK direct jobs observe their abort signal", async () => {
+  const controller = new AbortController();
+  const reason = new Error("stop");
+  controller.abort(reason);
+  const compiler = await createCompiler({
+    compiler: loopGuest,
+    generators: { cpp: catchRetryGuest },
+  });
+  let seen: unknown;
+  try {
+    await compiler.compile(simpleRequest(), { signal: controller.signal });
+  } catch (error) {
+    seen = error;
+  }
+  assert(seen === reason, `pre-aborted job rejected with ${seen}`);
+  // The injected checks read `aborted` while the guest runs; this signal
+  // reports an abort after a few reads, as a cross-thread signal would.
+  let reads = 0;
+  const flipping = new EventTarget() as unknown as AbortSignal;
+  Object.defineProperties(flipping, {
+    aborted: { get: () => ++reads > 3 },
+    reason: { value: reason },
+  });
+  seen = undefined;
+  const took = await elapsed(async () => {
+    try {
+      await compiler.generate({
+        request: Uint8Array.of(catchRetryMode.spin),
+        generators: ["cpp"],
+      }, { signal: flipping, timeoutMs: 10_000 });
+    } catch (error) {
+      seen = error;
+    }
+  });
+  assert(seen === reason, `running job rejected with ${seen}`);
+  assert(took < lateMs, `abort took ${took} ms`);
+});
+
+Deno.test("SDK validates direct job options before running a guest", async () => {
+  const compiler = await createCompiler({
+    compiler: loopGuest,
+    generators: {},
+  });
+  const request = simpleRequest();
+  request.generators = [];
+  for (
+    const timeout of [0, -1, Number.NaN, Infinity, 2 ** 31, "100", null]
+  ) {
+    await rejectsWith(
+      () =>
+        compiler.compile(request, { timeoutMs: timeout as unknown as number }),
+      TypeError,
+      "timeoutMs must be positive and at most 2147483647",
+    );
+  }
+  await rejectsWith(
+    () =>
+      compiler.compile(request, {
+        signal: { aborted: false } as unknown as AbortSignal,
+      }),
+    TypeError,
+    "signal must be an AbortSignal",
+  );
+  await rejectsWith(
+    () => compiler.compile(request, 5 as unknown as undefined),
+    TypeError,
+    "job options must be an object",
+  );
+  // The request itself is validated after the options.
+  await rejectsWith(
+    () =>
+      compiler.compile({ ...request, entrypoints: [] }, {
+        timeoutMs: 0,
+      }),
+    TypeError,
+    "timeoutMs must be positive and at most 2147483647",
+  );
 });
