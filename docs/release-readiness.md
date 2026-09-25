@@ -97,6 +97,13 @@ and macos-15-intel, the Go SDK on Windows, the termination canary, the ledger,
 and browsers and soak on Linux. "Browsers and soak (macos-15)" failed at
 Firefox's worker abort recovery cycle 5, where the job finished before the abort
 took effect: a race in the test, fixed on T08's branch but not yet on `main`.
+The Linux cold bootstraps passed there by mirror choice: mise tries the
+community mirrors in random order and fetches the `.minisig` from the one that
+served the tarball, with no fallback, and zig.bcr.ist has none, so the failure
+recurs at random until the project's own Zig mirror exists (a run of the
+per-push CI workflow,
+[36098649887](https://github.com/nullstyle/capnpc-wasm/actions/runs/36098649887),
+failed at that download on attempt 1 and passed on attempt 2 with no change).
 
 The ledger, [nightly-confidence.json](release-evidence/nightly-confidence.json),
 is generated. `mise run audit:nightly` reads the gitlink from the index and the
