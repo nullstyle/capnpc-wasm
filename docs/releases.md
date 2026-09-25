@@ -446,10 +446,9 @@ go mod tidy
 Supply `package/wasm/*.wasm` and any required `package/include/` schema bytes to
 the SDK. The nested module is tagged `sdk/go/v<version>` with the full SDK's
 version (`versions["capnpc-wasm"]` in `release.json`), at the commit of the
-`capnpc-wasm-v<version>` release (for example `sdk/go/v0.1.0-rc.4`), which
-`go get github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.4` resolves; verify a
-tag with
-`GOPROXY=direct go list -m github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.4`.
+`capnpc-wasm-v<version>` release (for example `sdk/go/v0.1.0`), which
+`go get github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0` resolves; verify a tag
+with `GOPROXY=direct go list -m github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0`.
 The SDK tests skip when the checkout's build outputs are absent, so
 `go test all` passes in a consumer. Preparing a candidate does not create that
 tag or publish the npm package.

@@ -154,8 +154,6 @@ finish with `mise run ci` before a rebase or hand-off.
   `capnp-wasm-compiler-host` (compiler and TypeScript host).
   `scripts/release.ts` accepts only `X.Y.Z-rc.N` with `private: true` and
   rejects a missing or unknown flavor.
-  [docs/api-stability.md](docs/api-stability.md) holds the naming rule, the
-  stability tiers, and the version rules.
 - Each archive's `README.md` is generated from
   `scripts/templates/README-<flavor>.md`. `sdk/typescript/README.md` ships as
   `docs/typescript.md` in the SDK flavors and `sdk/go/README.md` in the full
@@ -163,17 +161,14 @@ finish with `mise run ci` before a rebase or hand-off.
   commit. Editing them or the templates changes packaged bytes;
   `docs/releases.md` is not packaged.
 - Published assets are immutable; changed bytes need a new version. Releases are
-  built only by `.github/workflows/release.yml` (held on
-  `quality/held-workflows` until it reaches `main`) from a pushed tag
+  built only by `.github/workflows/release.yml` from a pushed tag
   `<flavor>-v<version>` naming that flavor's own version; `sdk/go/v<version>`
   tags the Go module with the `capnpc-wasm` version at the commit of that
-  release. `scripts/release.ts` refuses a dirty tree and a flavor version whose
-  tag exists at another commit among the local tags (`--allow-dirty` and
-  `--allow-existing-tag` serve local candidates; `--publish` is the workflow's
-  mode). Add the `CHANGELOG.md` entry before tagging, the archive and manifest
-  digests to the published releases table in `docs/releases.md` before
-  publishing the draft, and bump only that flavor's entry in `release.json`
-  right after publishing it.
+  release. Run `git fetch --tags` before preparing a candidate; `release.ts`'s
+  tag checks read local tags. Add the `CHANGELOG.md` entry before tagging, the
+  archive and manifest digests to the published releases table in
+  `docs/releases.md` before publishing the draft, and bump only that flavor's
+  entry in `release.json` right after publishing it.
 
 ## Zig synchronization
 

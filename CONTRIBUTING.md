@@ -193,9 +193,10 @@ Per reference:
   published digests in `docs/releases.md`, shipped changes in `CHANGELOG.md`,
   and index every new document in `docs/README.md`. A document that stops being
   maintained moves to `docs/history/` with a dated banner.
-- `sdk/typescript/README.md`, `sdk/go/README.md`, and
-  `scripts/templates/README-<flavor>.md` become packaged documents, with
-  relative links rewritten to the repository at the producer commit; editing
-  them changes packaged bytes. `docs/releases.md` is not packaged.
+- `scripts/templates/README-<flavor>.md` becomes each archive's `README.md` with
+  its placeholders filled; `sdk/typescript/README.md` and `sdk/go/README.md`
+  ship with their relative links rewritten to the repository at the producer
+  commit. Editing any of them changes packaged bytes; `docs/releases.md` is not
+  packaged.
 - Format the files you touched with `deno fmt` and run `mise run check:links`
   before committing; `mise run lint` checks both.

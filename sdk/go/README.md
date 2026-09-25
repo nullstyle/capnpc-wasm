@@ -50,8 +50,8 @@ module itself, or the self-contained source in a prepared release candidate. See
 [release preparation and external installation checks](../../docs/releases.md).
 The nested module is tagged `sdk/go/v<version>` with the full SDK's version
 (`versions["capnpc-wasm"]` in `release.json`) at the commit of the
-`capnpc-wasm-v<version>` release, for example `sdk/go/v0.1.0-rc.4`, so that
-`go get github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.4` resolves it.
+`capnpc-wasm-v<version>` release, for example `sdk/go/v0.1.0`, so that
+`go get github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0` resolves it.
 
 Read modules from the candidate's `wasm/` directory, `build/wasm/bin/`, or embed
 them in your application. The SDK does not download modules or supply annotation

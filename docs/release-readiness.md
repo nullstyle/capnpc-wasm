@@ -42,8 +42,7 @@ package anything that is not a private release candidate.
   TypeScript host archive (`capnp-wasm-compiler-host`), the full SDK archive
   (`capnpc-wasm`) with all six Wasm commands, and the Go module tag
   `sdk/go/v0.1.0` at the commit of `capnpc-wasm-v0.1.0`. Registry packages (npm,
-  JSR) are not part of `0.1.0`: decision D2 = A defers them until after the API
-  freeze and the nightly gate.
+  JSR) wait for the API freeze and the nightly gate (decision D2 = A).
 - API freeze: the TypeScript `CompileRequest`, `GenerationRequest`,
   `CompileError`, and `ResourceLimits` shapes and the Go `Request`,
   `GenerationRequest`, and `Error` shapes are frozen; the stage vocabulary,
@@ -69,8 +68,9 @@ package anything that is not a private release candidate.
   rather than copied from the repository.
 - Platform coverage: every host the support matrix lists as supported has a
   recorded test result at the release commit.
-- Documentation: the published-releases table and the changelog carry the new
-  digests and versions before the tag is pushed.
+- Documentation: the changelog carries the version before the tag is pushed, and
+  the published-releases table carries the archive and manifest digests before
+  the draft is published.
 - An explicit publication decision is recorded in the ledger
   (`publicationAuthorized`) and on this page.
 
