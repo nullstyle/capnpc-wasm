@@ -87,6 +87,13 @@ supported-Deno worker tests and the real termination probe; the producer-pinned
 Deno checks direct execution and early rejection of unsupported worker use. This
 is a host compatibility policy, not a Deno engine fix.
 
-Browser engines have their own termination behavior, which the SDK does not yet
-compensate for: WebKit never stops a running Wasm guest on `terminate()`.
-Chromium stops it after about 2 s. Firefox is untested.
+## Browsers
+
+Browser engines have their own termination behavior, which the browser suite's
+[termination acceptance](../tests/browser/README.md#termination-acceptance)
+measures with a shared counter after a timeout, an abort, and a dispose.
+Chromium stops a running guest about 2.05 s after `terminate()`. WebKit stops a
+guest when it next calls into JavaScript (a WASI import), but never stops a loop
+that stays in Wasm; that case is an expected failure until T08's in-guest
+interruption (decision D1 = A) lands. Firefox runs in the hosted Linux job; it
+cannot launch on the development host where the table was measured.

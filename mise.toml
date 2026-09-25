@@ -312,7 +312,7 @@ description = "Install pinned Chromium, Firefox, and WebKit into PLAYWRIGHT_BROW
 run = 'deno run --config tests/browser/deno.json --frozen --allow-read --allow-write="$PLAYWRIGHT_BROWSERS_PATH" --allow-env --allow-sys --allow-net --allow-run=deno,cmake tests/browser/install.ts'
 
 [tasks."test:browser"]
-description = "Run offline SDK parity and cancellation in Chromium, Firefox, and WebKit"
+description = "Run offline SDK parity, cancellation, the termination acceptance, and the conformance corpus in Chromium, Firefox, and WebKit, all engines at once (tests/browser/README.md lists the deadline and job variables)"
 depends = ["build:native", "build:sdk"]
 run = "deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/run.ts"
 
@@ -483,7 +483,7 @@ description = "HEAD-request every download URL recorded in mise.lock; a pruned z
 run = "bash scripts/check-lock-urls.sh"
 
 [tasks."test:browser-soak"]
-description = "Repeat the browser suite (each round: parity, diagnostics, and 20 cancellation-and-recovery cycles per engine); CAPNP_SOAK_ROUNDS rounds, default 5"
+description = "Repeat the browser suite (each round: parity, diagnostics, 20 cancellation-and-recovery cycles, the termination acceptance, and the conformance corpus per engine); CAPNP_SOAK_ROUNDS rounds, default 5"
 depends = ["build:native", "build:sdk"]
 run = '''
 #!/usr/bin/env bash

@@ -40,20 +40,50 @@ bootstrap test verifies both restoration and the retained Linux permission
 denial. No additional permissions are granted.
 
 `install.ts` obtains the current platform's download plan from the pinned
-Playwright package, downloads its official archives, and extracts them with the
-mise-managed CMake. Playwright's own ZIP extractor stalls with the pinned Deno
-release. Installation uses temporary directories beneath the project cache and
-publishes each browser directory only after extraction succeeds. Complete
-installations are reused; the installer needs network access only for missing
-archives.
+Playwright package, downloads its official archives, checks each one's sha256
+against the digest recorded in `install.ts` before extracting it (an archive
+without a recorded digest, or with another one, is never extracted), and
+extracts it with the mise-managed CMake. Playwright's own ZIP extractor stalls
+with the pinned Deno release. Installation uses temporary directories beneath
+the project cache and publishes each browser directory only after extraction
+succeeds. Complete installations are reused; the installer needs network access
+only for missing archives. After a Playwright bump,
+`mise run browser:install -- --print-digests` prints the digests to record.
 
 `run.ts` runs each selected engine in a separate Deno process, allowing each
-driver to independently revoke permissions. `test.ts` first compiles the fixture
-workspace with native upstream tools to prepare its oracle. It reads the shipped
-modules and annotation schemas from `dist/`, serves only the SDK bundles and
-five Wasm guests over a temporary loopback server, then loads a direct compiler
-and a worker compiler in real browser engines. The worker uses a preloaded Blob
-URL so cancellation and restart also work offline.
+driver to independently revoke permissions, and starts the drivers together;
+their output is prefixed with the engine, and a summary per engine closes the
+run. `test.ts` first compiles the fixture workspace with native upstream tools
+to prepare its oracle. It reads the shipped modules and annotation schemas from
+`dist/`, serves only the SDK bundles, the Wasm modules, the Studio adapter, and
+the standard schemas over a temporary loopback server, then loads a direct
+compiler and a worker compiler in real browser engines. The worker uses a
+preloaded Blob URL so cancellation and restart also work offline. The driver
+imports the SDK's request, result, module, option, and error types from
+`sdk/typescript/types.ts`; `sdk.ts` states the worker client's interface, which
+`sdk/typescript/conformance_test.ts` checks against the SDK's own at type level.
+
+Every browser step (launch, page load, each `page.evaluate`, close) runs under a
+labelled deadline, 60 seconds by default, and a stalled engine fails with the
+step's label:
+`chromium worker abort recovery cycle 3 did not finish within 60
+seconds`. The
+driver records the running step next to its receipt. `run.ts` gives each driver
+an overall deadline, 20 minutes by default; past it, the driver receives
+SIGTERM, names the step it was on, and closes its browser, and it is killed 30
+seconds later if it has not exited. Environment variables adjust this:
+
+| Variable                          | Effect                                                           |
+| --------------------------------- | ---------------------------------------------------------------- |
+| `CAPNP_BROWSER_DEADLINE_MS`       | Each step's deadline (default 60000)                             |
+| `CAPNP_BROWSER_ENGINE_TIMEOUT_MS` | Each driver's overall deadline (default 1200000)                 |
+| `CAPNP_BROWSER_JOBS`              | Drivers that run at once (default 3; 1 runs the engines in turn) |
+| `CAPNP_BROWSER_STALL`             | Hangs the first step whose label contains the text, as a drill   |
+
+For example,
+`CAPNP_BROWSER_STALL="abort recovery cycle 3" CAPNP_BROWSER_DEADLINE_MS=5000 mise run test:browser chromium`
+fails on that step five seconds after it starts. `deadline_test.ts`, part of
+`test:browser-bootstrap`, checks the deadline without a browser.
 
 Before compiling, the driver blocks network requests and WebSocket connections,
 closes its asset server, and revokes its own Deno network and process-spawning
@@ -84,12 +114,11 @@ the generated fixtures for inspection.
 
 Malformed and truncated Zig requests must exit unsuccessfully with preserved
 diagnostics and no exposed output files. Twenty alternating worker abort and
-timeout operations must terminate their jobs and allow reuse with identical
-output after every replacement. A separate 60-second host deadline detects a
-stalled browser without changing the SDK's one-millisecond cancellation budget
-or its normal 30-second recovery budget. Native output and temporary browser
-profiles stay under `build/test/browser-*`; the output remains available for
-inspection.
+timeout operations must reject their jobs and allow reuse with identical output
+after every replacement; the step deadlines detect a stalled browser without
+changing the SDK's one-millisecond cancellation budget or its normal 30-second
+recovery budget. Native output and temporary browser profiles stay under
+`build/test/browser-*`; the output remains available for inspection.
 
 Direct and worker clients also reject aggregate workspace and output overages
 without returning partial output, then successfully execute another permitted
@@ -110,23 +139,69 @@ refuses to run if the bytes differ from the copies embedded in
 `sdk/typescript/testdata/hostile_guests.ts`, which the permission-restricted SDK
 tests use.
 
-Cancellation evidence is about the SDK client, not the engine: WebKit never
-stops a running Wasm guest on `terminate()`. Chromium stops it after about 2 s.
-Firefox is untested. The recovery cycles below show that replacement workers
-keep producing correct output; they do not show that the terminated guest
-stopped consuming CPU.
+## Termination acceptance
+
+The recovery cycles show that replacement workers keep producing correct output;
+they do not show that a cancelled guest stopped running. `termination.ts` does.
+Two more pages audit every Worker the SDK creates and terminates. On a
+cross-origin-isolated page (COOP and COEP), a probe worker wraps the SDK's
+`worker.js`, and the guest counts its progress in a shared Wasm memory. After
+each of a timeout, an abort, and a dispose, the counter must stop within 12
+seconds, five times Chromium's idle termination delay of about 2.1 s. Two guests
+run through the whole SDK path:
+
+- `spin-counter.wat`, which the probe instantiates in place of the job's module:
+  a loop that never leaves Wasm, like a compiler stuck computing.
+- `spin-yield.wat`, the job's own module, which calls WASI `sched_yield` on
+  every iteration.
+
+A plain page repeats the timeout without isolation. There, only a rejection
+within the deadline and exactly one terminated worker can be checked. The checks
+run after everything else, because a guest that outlives its cancellation keeps
+a core busy until the browser closes.
+
+| Engine (macOS arm64, 2026-09-24) | Pure-Wasm guest stops after | Host-calling guest stops after |
+| -------------------------------- | --------------------------- | ------------------------------ |
+| Chromium 153.0.8010.12           | 2041-2052 ms                | 2036-2047 ms                   |
+| WebKit 26.6                      | never (expected failure)    | 103-358 ms                     |
+| Firefox 155.0                    | not run locally; CI asserts | not run locally; CI asserts    |
+
+WebKit stops a terminated worker only when the guest next enters JavaScript, so
+a guest that computes without WASI calls runs on at 100% CPU (GAP2-V1). The
+driver records that case as an expected failure and fails loudly as soon as
+WebKit stops the guest: decision D1 = A has T08's in-guest interruption stop it,
+and the expectation is removed when T08 lands. Until then, treat a rejected
+cancellation in WebKit as a request, not as proof that the guest stopped.
+
+## Conformance corpus
+
+The driver also runs the
+[failure and limit conformance corpus](../fixtures/conformance/README.md) on
+three surfaces in each engine: `createCompiler`, `createWorkerCompiler`, and the
+Schema Studio adapter (`examples/browser/compiler.js`, bundled for the page with
+the pinned Deno, which is primed with every module while the asset server is
+up). The page runs each case through `tests/conformance/page-runner.js`, the
+runner the Deno surfaces use, and the driver checks the classified outcome
+against the surface's column of `expected.json`, including `<surface>@<engine>`
+departures. The rows measured a small worker stack in WebKit: about 34 const
+references and 90 nested imports, against 275 and 744 in a Chromium worker.
+
+## Hosted CI
 
 Hosted CI runs this complete three-engine suite and the Schema Studio suite in a
 separate Linux job after installing the browser system libraries with the pinned
 Playwright CLI; the clean-checkout job on Linux and macOS runs `mise run check`,
-`mise run test:package`, and the Deno 2.6.8 worker lane. The lanes are listed in
+`mise run test:package`, the Deno 2.6.8 worker lane, and the Go race tests. The
+lanes are listed in
 [CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes). Build trees
 are not restored from caches, and failed test fixtures plus the exact tested
 Wasm modules and SDK bundles are retained as workflow artifacts.
 
-Published package installation and application-specific Content Security
-Policies are outside this suite's current coverage. Browser versions follow the
-pinned Playwright package rather than the user's installed browser versions.
+Published package installation is outside this suite's current coverage. The
+Schema Studio driver runs under Studio's own Content-Security-Policy (see the
+Studio guide) and fails on any axe-core violation; the SDK driver applies no
+policy of its own. Browser versions follow the pinned Playwright package rather
+than the user's installed browser versions.
 
 ## Engine regression evidence
 

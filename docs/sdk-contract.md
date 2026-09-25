@@ -15,8 +15,9 @@ change is allowed with that line, after it the contract is additive.
 
 The limit defaults are machine-readable in
 [`tests/fixtures/contract/limits.json`](../tests/fixtures/contract/limits.json).
-The Go test `TestContractLimits` asserts `DefaultLimits()` against it; the
-TypeScript assertion of `defaultLimits` against the same file is pending (T13).
+The Go test `TestContractLimits` asserts `DefaultLimits()` against it, and
+`sdk/typescript/conformance_test.ts` asserts `defaultLimits` against the same
+file.
 
 ## Names
 
@@ -242,8 +243,17 @@ files as a single compile.
   [feature corpus](../tests/fixtures/features/README.md) and the compiler-path
   fixture (`tests/package/compiler-path-fixture.ts`, mirrored in the Go test
   `TestCompilerPathFixtureMatchesNative`) with both import root orders.
-- The limits fixture pins the Go defaults (`TestContractLimits`); the TypeScript
-  assertion is pending (T13).
+- The limits fixture pins the defaults of both SDKs (`TestContractLimits` and
+  `sdk/typescript/conformance_test.ts`).
+- The
+  [failure and limit conformance corpus](../tests/fixtures/conformance/README.md)
+  runs one set of failing and budget-breaching inputs through TypeScript direct
+  and worker execution, the Go SDK, the packaged launcher, each browser engine
+  in both modes, and the Schema Studio adapter, and checks each outcome (`ok`,
+  `validation`, `exit(n)`, `trap`, `trap:stack`, `limit:<budget>`,
+  `policy:<rule>`, `protocol`, `timeout`) against one table in which every
+  departure of a surface carries a reason and a finding. The runners derive the
+  outcome from the fields this contract defines, as § Errors maps them.
 - The invalid-schema fixtures under `tests/fixtures/invalid/` are compiler exit
   1 with clean diagnostics in both SDKs; malformed generation requests are
   generator exit 1 without outputs.

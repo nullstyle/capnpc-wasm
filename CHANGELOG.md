@@ -118,6 +118,30 @@ version that ships them.
   `295ff5e`, and on an interface with streaming methods an error from an
   ordinary method now returns an exception for that call only instead of
   rejecting the calls after it.
+- Tests: a failure and limit conformance corpus (`tests/fixtures/conformance`,
+  `test:conformance` in `test`) runs one set of failing and budget-breaching
+  inputs through TypeScript direct and worker execution, the Go SDK, the
+  packaged launcher, Chromium, Firefox, and WebKit in both modes, and the Schema
+  Studio adapter, against one table whose every departure carries a reason; the
+  TypeScript `defaultLimits` are asserted against the contract fixture, and the
+  external Deno and Go package consumers must compile the compiler-path fixture
+  to identical bytes.
+- Browsers: every browser step and each engine driver runs under a labelled
+  deadline, the engines run at once, and the driver imports the SDK's types. A
+  termination acceptance under COOP/COEP shows that timeout, abort, and dispose
+  stop a running guest: Chromium after about 2 s; WebKit only when the guest
+  next enters JavaScript, so a Wasm loop is an expected failure until in-guest
+  interruption lands. WebKit workers compile only about 34 nested const
+  references and 90 nested imports.
+- Deno: the worker termination probe also spins in Wasm and in a Wasm catch_all
+  handler, and `test:termination-canary` (nightly, not a gate) compares the
+  worker runtime, the pinned Deno, and the newest release with the recorded
+  behavior.
+- Tooling: `lint` runs actionlint 1.7.12 (locked); `ci` and the CI check job run
+  the Go race tests; `test:package` and `test:launcher` prepare their candidates
+  under `build/test` and run on a dirty tree, with the package gates' writes
+  confined to `build/`; the wazero test host caches compiled code
+  (`test:cli-parity` 80 s to 56 s); `clean:all` runs without Go.
 
 ## capnp-wasm-compiler-host
 
