@@ -367,6 +367,8 @@ permission-revocation guarantees unchanged. It uses the same static handler as
 the example server and compares downloaded generated files with fresh native
 C++/Rust/Go/Zig output. It also covers workspace editing, error recovery,
 cancellation, binary imports/exports, file management, and responsive layouts.
-Evidence lives under `build/test/studio-*/`; browser CI retains failing fixtures
-and the complete Studio bundle. See the
+Each navigation may take two minutes, not Playwright's 30-second default: on a
+loaded runner Firefox once timed out loading Studio right after Chromium passed
+(nightly 36141746707). Evidence lives under `build/test/studio-*/`; browser CI
+retains failing fixtures and the complete Studio bundle. See the
 [Studio guide](../../examples/browser/README.md).

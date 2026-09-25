@@ -113,6 +113,12 @@ const server = Deno.serve(
   },
 );
 const url = `http://127.0.0.1:${server.addr.port}/`;
+// The server above is already listening, but on a loaded runner the first
+// page an engine loads can outlast Playwright's 30-second navigation default
+// (nightly 36141746707: Firefox on macos-15 timed out loading Studio right
+// after Chromium passed; ledger row 139). Each navigation gets two minutes;
+// a page that never loads still fails, naming the URL.
+const navigationTimeoutMs = 120_000;
 
 // The server's own guards: loopback Host names only, no hidden paths, and the
 // headers a meta tag cannot carry. A raw socket sends the Host header as is.
@@ -255,7 +261,7 @@ try {
       page.on("pageerror", (error) => errors.push(error.message));
       page.on("request", (request) => requested.push(request.url()));
       page.on("dialog", (dialog) => dialog.accept());
-      await page.goto(url);
+      await page.goto(url, { timeout: navigationTimeoutMs });
       await badgeIs(page, "Up to date");
       assert(
         !requested.some((path) => /capnpc-(rust|go|zig)\.wasm/.test(path)),
@@ -619,7 +625,7 @@ try {
         const fresh = await browser.newPage();
         fresh.setDefaultTimeout(30_000);
         fresh.on("pageerror", (error) => errors.push(error.message));
-        await fresh.goto(url);
+        await fresh.goto(url, { timeout: navigationTimeoutMs });
         await badgeIs(fresh, "Up to date");
         let refused = 0;
         await fresh.route("**/capnpc-rust.wasm*", (route) => {
@@ -848,7 +854,7 @@ try {
           }
         };
       });
-      await unsupported.goto(url);
+      await unsupported.goto(url, { timeout: navigationTimeoutMs });
       await unsupported.waitForFunction(() =>
         document.querySelector("#alert")?.textContent?.includes(
           "exception handling",
