@@ -67,6 +67,19 @@ jobs:
       # time.
       - name: Check native and Wasm parity, generated consumers, and SDKs
         run: mise run check
+      # The wasm-digests job compares these between the two hosts.
+      - name: Record the digests of the built Wasm modules
+        run: |
+          mkdir -p build/digests
+          (cd dist/wasm && shasum -a 256 -- *.wasm) > build/digests/wasm.sha256
+          cat build/digests/wasm.sha256
+      - name: Upload the Wasm module digests
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wasm-sha256-${{ matrix.os }}
+          path: build/digests/wasm.sha256
+          if-no-files-found: error
+          retention-days: 7
       - name: Verify release archive and external package consumers
         run: mise run test:package
       # The task checks the locked worker runtime (tool deno-worker, installed
@@ -89,6 +102,53 @@ jobs:
           path: build/test/
           if-no-files-found: ignore
           retention-days: 7
+
+  # Report-only: are the six Wasm modules byte-identical between the Linux
+  # and macOS builds? Each host checks its own modules against the artifact
+  # contract, and the build is reproducible on one host, but nothing yet
+  # guarantees equality across hosts (different WASI SDK, Rust, Go, and Zig
+  # host binaries, per-host build roots). A difference therefore fails this
+  # job without blocking the run, so the evidence accumulates until the
+  # cross-host claim can be made or withdrawn.
+  wasm-digests:
+    name: Wasm modules across Linux and macOS (report only)
+    needs: check
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: wasm-sha256-*
+          path: digests
+      - name: Compare the module digests
+        run: |
+          linux=digests/wasm-sha256-ubuntu-24.04/wasm.sha256
+          macos=digests/wasm-sha256-macos-15/wasm.sha256
+          for file in "$linux" "$macos"; do
+            if [ ! -s "$file" ]; then
+              echo "::warning::no digests in $file: its check job stopped before recording them"
+              exit 1
+            fi
+          done
+          {
+            echo "| Module | Linux | macOS | Equal |"
+            echo "| --- | --- | --- | --- |"
+            join -1 2 -2 2 <(sort -k2 "$linux") <(sort -k2 "$macos") |
+              while read -r module linux_digest macos_digest; do
+                equal=no
+                if [ "$linux_digest" = "$macos_digest" ]; then equal=yes; fi
+                printf '| %s | %.16s | %.16s | %s |\n' \
+                  "$module" "$linux_digest" "$macos_digest" "$equal"
+              done
+          } >> "$GITHUB_STEP_SUMMARY"
+          if diff <(sort -k2 "$linux") <(sort -k2 "$macos"); then
+            echo "The Linux and macOS builds produced byte-identical Wasm modules."
+          else
+            echo "::warning::the Linux and macOS builds produced different Wasm modules; see the job summary"
+            exit 1
+          fi
 
   browsers:
     name: Chromium, Firefox, and WebKit
