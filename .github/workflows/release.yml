@@ -1,7 +1,8 @@
 # Builds one release-archive flavor from its tag and drafts the release, or
 # dry-runs the same build from a manual dispatch. Every step calls the scripts
 # a maintainer runs locally: scripts/release.ts in --publish mode (which
-# refuses a dirty tree, an untagged HEAD, and a missing CHANGELOG.md entry),
+# refuses a dirty tree, an untagged HEAD, a missing CHANGELOG.md entry, and
+# for capnpc-wasm a Go module tag sdk/go/v<version> at another commit),
 # the package gates (test:package, test:compiler-host-package, test:launcher,
 # test:deno-worker), and scripts/verify-release.ts from the checkout.
 #
@@ -154,9 +155,12 @@ jobs:
         run: mise run check
       - name: Build the native tools and the SDK bundle
         run: mise run build
-      # Publish mode refuses a dirty tree, a HEAD without the release tag, and
-      # a missing CHANGELOG.md entry. A dispatched dry run builds a candidate
-      # instead (the tag may not exist, or may exist at another commit).
+      # Publish mode refuses a dirty tree, a HEAD without the release tag, a
+      # missing CHANGELOG.md entry, and for capnpc-wasm a Go module tag
+      # (sdk/go/v<version>) at another commit; it reads the tags the
+      # fetch-depth: 0 checkout fetched. A dispatched dry run builds a
+      # candidate instead (the tag may not exist, or may exist at another
+      # commit).
       - name: Prepare the release archive
         env:
           FLAG: ${{ steps.release.outputs.flag }}
