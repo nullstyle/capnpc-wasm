@@ -258,8 +258,19 @@ export async function checkModule(
       found.add(match[0]);
     }
   }
+  // The SDK's build roots can begin with the builder's own home directory: a
+  // GitHub macOS runner's HOME is /Users/runner, the root the macOS SDK tarball
+  // was built under. Look for the checkout and home literals only outside the
+  // allow-listed SDK paths.
+  const outsideSdkPaths = text.replace(
+    hostPathPattern,
+    (path) =>
+      sdkBuildPathPrefixes.some((prefix) => path.startsWith(prefix))
+        ? ""
+        : path,
+  );
   for (const literal of [options.root, options.home]) {
-    if (literal && text.includes(literal)) found.add(literal);
+    if (literal && outsideSdkPaths.includes(literal)) found.add(literal);
   }
   if (found.size > 0) {
     const sample = [...found].slice(0, 5);
