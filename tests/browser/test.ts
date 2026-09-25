@@ -1,5 +1,5 @@
 import { chromium, firefox, webkit } from "./playwright.ts";
-import type { Browser, Page } from "playwright";
+import type { Browser, BrowserContext, Page } from "playwright";
 import { selectedEngines } from "./engines.ts";
 import { hostileGuests } from "../../sdk/typescript/testdata/hostile_guests.ts";
 import type {
@@ -13,6 +13,14 @@ import type {
   WorkerCompiler,
 } from "./sdk.ts";
 import { envMilliseconds, stepClock } from "./deadline.ts";
+import {
+  checkIsolatedTermination,
+  checkPlainTermination,
+  isolationHeaders,
+  setupTermination,
+  type TerminationResult,
+  workerAuditScript,
+} from "./termination.ts";
 
 // This driver deliberately prepares its native oracle before browser execution,
 // then revokes its own process/network permissions for the offline SDK tests.
@@ -244,6 +252,8 @@ async function prepare() {
   });
   const memoryGuest = await assemble(work, "memory-limit");
   const streamGuest = await assemble(work, "stream-limit");
+  const spinGuest = await assemble(work, "spin-yield");
+  const spinCounter = await assemble(work, "spin-counter");
   // The SDK tests embed these guests because they cannot spawn wasm-tools.
   // Assemble every source here and refuse to run if either copy drifted.
   const hostile: Record<string, Uint8Array> = {};
@@ -428,6 +438,8 @@ async function prepare() {
     invalidNative,
     memoryGuest,
     streamGuest,
+    spinGuest,
+    spinCounter,
     hostileGuests: hostile,
   };
 }
@@ -461,11 +473,16 @@ const server = Deno.serve(
   { hostname: "127.0.0.1", port: 0, onListen() {} },
   (request) => {
     const path = new URL(request.url).pathname;
-    if (path === "/") {
+    if (path === "/" || path === "/isolated") {
       return new Response(
         "<!doctype html><title>capnpc-wasm browser tests</title>",
         {
-          headers: { "Content-Type": "text/html" },
+          headers: {
+            "Content-Type": "text/html",
+            // Cross-origin isolation (COOP and COEP) gives the termination
+            // probe its SharedArrayBuffer.
+            ...(path === "/isolated" ? isolationHeaders : {}),
+          },
         },
       );
     }
@@ -544,24 +561,66 @@ try {
     `${engine} load SDK`,
   );
 
+  // The termination acceptance (TST-04) runs a spinning guest on two more
+  // pages that audit every Worker the SDK creates and terminates: one
+  // cross-origin isolated, whose shared counter shows whether cancellation
+  // stopped the guest, and one plain, where only the rejection is visible.
+  const terminationPages: {
+    name: "isolated" | "plain";
+    context: BrowserContext;
+    page: Page;
+  }[] = [];
+  for (const name of ["isolated", "plain"] as const) {
+    const auditedContext = await browser.newContext({
+      serviceWorkers: "block",
+    });
+    await auditedContext.addInitScript(workerAuditScript);
+    const auditedPage = await auditedContext.newPage();
+    auditedPage.on("pageerror", (error) => errors.push(error.message));
+    auditedPage.setDefaultTimeout(60_000);
+    await clock.step(
+      auditedPage.goto(`${origin}/${name === "isolated" ? "isolated" : ""}`),
+      `${engine} load ${name} termination page`,
+    );
+    const isolation = await setupTermination(
+      evaluateOn(auditedPage),
+      data.spinGuest,
+      data.spinCounter,
+      `${engine} prepare ${name} termination page`,
+    );
+    assert(
+      isolation.crossOriginIsolated === (name === "isolated"),
+      `${engine} ${name} termination page: crossOriginIsolated is ${isolation.crossOriginIsolated}`,
+    );
+    terminationPages.push({
+      name,
+      context: auditedContext,
+      page: auditedPage,
+    });
+  }
+
   let networkRequests = 0;
-  context.on("request", (request) => {
-    if (!request.url().startsWith("blob:")) networkRequests++;
-  });
-  await context.route(
-    "**/*",
-    (route) =>
-      route.request().url().startsWith("blob:")
-        ? route.continue()
-        : route.abort(),
-  );
-  await context.routeWebSocket("**/*", (socket) => {
-    networkRequests++;
-    socket.close();
-  });
-  // WebKit's offline emulation also blocks its local Blob worker reloads.
-  // Routing still blocks all network access; Blob URLs read preloaded memory.
-  if (engine !== "webkit") await context.setOffline(true);
+  for (
+    const each of [context, ...terminationPages.map((entry) => entry.context)]
+  ) {
+    each.on("request", (request) => {
+      if (!request.url().startsWith("blob:")) networkRequests++;
+    });
+    await each.route(
+      "**/*",
+      (route) =>
+        route.request().url().startsWith("blob:")
+          ? route.continue()
+          : route.abort(),
+    );
+    await each.routeWebSocket("**/*", (socket) => {
+      networkRequests++;
+      socket.close();
+    });
+    // WebKit's offline emulation also blocks its local Blob worker reloads.
+    // Routing still blocks all network access; Blob URLs read preloaded memory.
+    if (engine !== "webkit") await each.setOffline(true);
+  }
   await server.shutdown();
   await Deno.permissions.revoke({ name: "run" });
   await Deno.permissions.revoke({ name: "net" });
@@ -1097,6 +1156,17 @@ try {
     );
   }
 
+  // Termination acceptance, last: in WebKit a guest that outlives its
+  // cancellation keeps a core busy until the browser closes.
+  const termination: TerminationResult[] = [];
+  for (const { name, page: auditedPage } of terminationPages) {
+    const result = name === "isolated"
+      ? await checkIsolatedTermination(engine, evaluateOn(auditedPage))
+      : await checkPlainTermination(engine, evaluateOn(auditedPage));
+    termination.push(result);
+    console.log(result.verdict);
+  }
+
   assert(
     networkRequests === 0,
     `SDK attempted ${networkRequests} network requests after loading`,
@@ -1125,6 +1195,7 @@ try {
             path: `${scenario.directory}/${host}-request.bin`,
           })),
         })),
+        termination,
       },
       null,
       2,
