@@ -539,18 +539,25 @@ func observeGo(err error, outputs map[capnpcwasm.Language]map[string][]byte, dia
 	return observed
 }
 
-// trapOutcome reads wazero's own trap report: the text before its
-// "wasm stack trace:" lines, which name the guest's functions and so could
-// carry any text. Err never carries the guest's stderr.
+// trapReport is the prefix wazero writes, and the guest cannot, when the
+// guest's _start traps: "module[] function[_start] failed: wasm error:
+// <reason>".
+const trapReport = "module[] function[_start] failed: wasm error: "
+
+// trapOutcome reads wazero's own trap report, anchored on trapReport: the
+// "wasm stack trace:" lines after it name the guest's functions, and a link
+// error, which has no stack trace, quotes the guest's import names, so either
+// could carry any text. Err never carries the guest's stderr.
 func trapOutcome(message string, err error) string {
 	report, _, _ := strings.Cut(message, "\nwasm stack trace:")
+	reason, ok := strings.CutPrefix(report, trapReport)
 	switch {
-	case strings.Contains(report, "wasm error: stack overflow"):
-		return "trap:stack"
-	case strings.Contains(report, "wasm error: "):
-		return "trap"
-	default:
+	case !ok:
 		return fmt.Sprintf("error:%T", err)
+	case reason == "stack overflow":
+		return "trap:stack"
+	default:
+		return "trap"
 	}
 }
 
@@ -625,6 +632,10 @@ func TestConformanceClassification(t *testing.T) {
 		// an ordinary trap.
 		{&capnpcwasm.Error{Stage: "cpp", Err: errors.New("module[] function[_start] failed: wasm error: unreachable\nwasm stack trace:\n\t.wasm error: stack overflow()\n\t._start()")}, "trap"},
 		{&capnpcwasm.Error{Stage: "cpp", Err: errors.New("instantiate failed\nwasm stack trace:\n\t.wasm error: unreachable()")}, "error:*errors.errorString"},
+		// A link error has no stack trace and quotes the guest's import name:
+		// a guest that imports a function named like a trap report never ran.
+		{&capnpcwasm.Error{Stage: "compiler", Err: errors.New(`"wasm error: stack overflow" is not exported in module "wasi_snapshot_preview1"`)}, "error:*errors.errorString"},
+		{&capnpcwasm.Error{Stage: "compiler", Err: errors.New(`"module[] function[_start] failed: wasm error: stack overflow" is not exported in module "env"`)}, "error:*errors.errorString"},
 	} {
 		if got := observeGo(test.err, nil, nil).outcome; got != test.want {
 			t.Errorf("%v: %s, want %s", test.err, got, test.want)
