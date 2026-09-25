@@ -1,10 +1,14 @@
 /**
- * In-guest interruption: the module rewriter (wasm.ts).
+ * In-guest interruption: the module rewriter (wasm.ts), and host stops that
+ * trap instead of throwing into the guest (runtime.ts).
  */
 import { CompileError, createCompiler, defaultLimits } from "./mod.ts";
-import { countdownExport } from "./interrupt.ts";
-import { instrument } from "./wasm.ts";
+import { Cancelled, countdownExport, JobControl } from "./interrupt.ts";
+import { runCommand } from "./runtime.ts";
+import { compileBounded, instrument } from "./wasm.ts";
 import {
+  catchRetryGuest,
+  catchRetryMode,
   legacyExceptionsModule,
   namedTrapGuest,
   rewriterCoverageModule,
@@ -19,6 +23,7 @@ import {
   rejectsWith,
   section,
   simpleRequest,
+  trapGuest,
 } from "./testdata/support.ts";
 
 /** Instantiate `bytes` (instrumented or not) with the coverage imports. */
@@ -317,6 +322,74 @@ Deno.test("SDK instruments every built toolchain module", async () => {
     assert(
       result.names === (custom.length ? "renumbered" : "absent"),
       `${module}: name section ${result.names}`,
+    );
+  }
+});
+
+/** A direct compiler whose cpp generator is catchRetryGuest. */
+async function catchRetry(options: { limits?: { stdoutBytes: number } } = {}) {
+  const compiler = await createCompiler({
+    compiler: trapGuest,
+    generators: { cpp: catchRetryGuest },
+  }, options);
+  return (mode: number) =>
+    compiler.generate({ request: Uint8Array.of(mode), generators: ["cpp"] });
+}
+
+Deno.test("SDK host stops trap without running guest handlers", async () => {
+  const run = await catchRetry();
+  // A throwing exit would reach the handler, which then returns normally.
+  const exit = await rejectsWith(
+    () => run(catchRetryMode.exit),
+    CompileError,
+    "cpp exited with status 3",
+  );
+  assert(
+    exit.exitCode === 3 && exit.diagnostics.length === 0,
+    `exit ran a handler: ${JSON.stringify(exit.diagnostics)}`,
+  );
+  const thrown = await rejectsWith(
+    () => run(catchRetryMode.hostThrow),
+    CompileError,
+    "cpp trapped: WASI command failed: sockets not supported",
+  );
+  assert(thrown.diagnostics.length === 0, "host failure ran a handler");
+  const limited = await catchRetry({ limits: { stdoutBytes: 0 } });
+  const limit = await rejectsWith(
+    () => limited(catchRetryMode.stdout),
+    CompileError,
+    "cpp trapped: WASI command failed: stdoutBytes resource limit exceeded",
+  );
+  assert(
+    limit.exitCode === undefined && limit.diagnostics.length === 0,
+    "budget stop ran a handler",
+  );
+  // The runtime reports what the guest wrote before a cancellation: nothing.
+  const module = await compileBounded(
+    catchRetryGuest,
+    defaultLimits.memoryPages,
+  );
+  for (const mode of [catchRetryMode.spin, catchRetryMode.sleep]) {
+    let cancelled: unknown;
+    try {
+      await runCommand(
+        module,
+        ["capnpc-c++"],
+        Uint8Array.of(mode),
+        {},
+        false,
+        defaultLimits,
+        true,
+        new JobControl({ deadline: performance.now() + 50 }),
+      );
+    } catch (error) {
+      cancelled = error;
+    }
+    assert(
+      cancelled instanceof Cancelled && cancelled.stderr === "" &&
+        cancelled.reason instanceof DOMException &&
+        cancelled.reason.name === "TimeoutError",
+      `mode ${mode}: ${cancelled}`,
     );
   }
 });

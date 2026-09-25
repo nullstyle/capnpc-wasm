@@ -14,9 +14,10 @@ import {
 import type { ResourceLimits } from "./types.ts";
 
 /**
- * A guest exceeded one of the host budgets in ResourceLimits. Thrown from
- * inside a WASI import, it unwinds the guest like a trap and mod.ts reports it
- * as a CompileError whose message names the limit.
+ * A guest exceeded one of the host budgets in ResourceLimits. Thrown inside a
+ * WASI import, it never reaches the guest: runCommand catches it at the import
+ * boundary and the guest traps at its next check (see interrupt.ts), so no
+ * guest handler runs. The engine reports a CompileError naming the limit.
  */
 export class LimitError extends Error {
   override readonly name = "LimitError";
@@ -291,9 +292,10 @@ export function boundWasiIO(wasi: WASI, limits: ResourceLimits): void {
     count: number,
     ...rest: unknown[]
   ) => {
-    // The shim serves exactly one clock subscription (48 bytes in, 32 bytes
-    // out). Treat the count as the unsigned value the guest passed, so a
-    // negative i32 cannot slip past the shim's own checks to a raw read.
+    // runCommand's clock poll, like the shim, serves exactly one clock
+    // subscription (48 bytes in, 32 bytes out). Treat the count as the
+    // unsigned value the guest passed, so a negative i32 cannot slip past
+    // these checks to a raw read.
     const subscriptions = count >>> 0;
     if (subscriptions === 0) return ERRNO_INVAL;
     if (subscriptions !== 1) return ERRNO_NOTSUP;

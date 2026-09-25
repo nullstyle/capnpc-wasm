@@ -205,6 +205,13 @@ every flavor it applies to has shipped it.
   constructs the rewriter cannot parse exactly (GC types, table initializers,
   unknown opcodes) are rejected with `TypeError`. Generated output is
   byte-identical.
+- TypeScript SDK: host stops never throw into a guest, where `catch_all` could
+  intercept them: `proc_exit`, budget overruns, and host failures inside WASI
+  imports record their outcome and trap the guest at its next check, so no guest
+  handler or cleanup runs after them (exit codes, messages, and causes are
+  unchanged). `poll_oneoff` sleeps with `Atomics.wait` instead of spinning,
+  reads the subscription flags at the WASI offset (absolute clock timeouts),
+  reports the event count, and returns `EINTR` when the job is cancelled.
 
 ## capnp-wasm-compiler-host
 

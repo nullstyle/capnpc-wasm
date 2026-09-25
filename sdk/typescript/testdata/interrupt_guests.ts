@@ -10,6 +10,94 @@ function wasm(hex: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(hex.match(/../g)!, (byte) => parseInt(byte, 16));
 }
 
+/** Bodies of catchRetryGuest, selected by the first stdin byte. */
+export const catchRetryMode = {
+  spin: 0,
+  exit: 1,
+  stdout: 2,
+  hostThrow: 3,
+  sleep: 4,
+  tailCalls: 5,
+} as const;
+
+// ;; Host stops must trap. This guest catches every exception and retries, so a
+// ;; stop delivered as a JavaScript exception would run its handler. The first
+// ;; stdin byte selects the body: 0 spins, 1 exits with status 3, 2 writes one
+// ;; byte to stdout (run it with stdoutBytes 0), 3 calls sock_recv, which the
+// ;; host shim fails by throwing, 4 sleeps for an hour in poll_oneoff, and 5
+// ;; tail-calls between two functions forever with no loop instruction. The
+// ;; handler writes "H" to stderr and retries at most three times, then returns
+// ;; normally, so a stop that throws finishes the job instead of stopping it.
+// (module
+//   (import "wasi_snapshot_preview1" "fd_read"
+//     (func $fd_read (param i32 i32 i32 i32) (result i32)))
+//   (import "wasi_snapshot_preview1" "fd_write"
+//     (func $fd_write (param i32 i32 i32 i32) (result i32)))
+//   (import "wasi_snapshot_preview1" "proc_exit" (func $proc_exit (param i32)))
+//   (import "wasi_snapshot_preview1" "sock_recv"
+//     (func $sock_recv (param i32 i32 i32 i32 i32 i32) (result i32)))
+//   (import "wasi_snapshot_preview1" "poll_oneoff"
+//     (func $poll_oneoff (param i32 i32 i32 i32) (result i32)))
+//   (memory (export "memory") 1)
+//   ;; iovecs: stdin byte at 64, "H" at 72, "x" at 73
+//   (data (i32.const 0) "\40\00\00\00\01\00\00\00")
+//   (data (i32.const 8) "\48\00\00\00\01\00\00\00")
+//   (data (i32.const 16) "\49\00\00\00\01\00\00\00")
+//   (data (i32.const 72) "Hx")
+//   ;; One relative monotonic clock subscription at 128: id at +16, one hour
+//   ;; (3.6e12 ns) at +24. The event goes to 192.
+//   (data (i32.const 144) "\01\00\00\00")
+//   (data (i32.const 152) "\00\a0\b8\30\46\03\00\00")
+//   (func $ping (return_call $pong))
+//   (func $pong (return_call $ping))
+//   (func $body (param $mode i32)
+//     (if (i32.eqz (local.get $mode))
+//       (then (loop $spin (br $spin))))
+//     (if (i32.eq (local.get $mode) (i32.const 1))
+//       (then (call $proc_exit (i32.const 3))))
+//     (if (i32.eq (local.get $mode) (i32.const 2))
+//       (then (drop (call $fd_write
+//         (i32.const 1) (i32.const 16) (i32.const 1) (i32.const 96)))))
+//     (if (i32.eq (local.get $mode) (i32.const 3))
+//       (then (drop (call $sock_recv
+//         (i32.const 0) (i32.const 0) (i32.const 0) (i32.const 0)
+//         (i32.const 96) (i32.const 100)))))
+//     (if (i32.eq (local.get $mode) (i32.const 4))
+//       (then (drop (call $poll_oneoff
+//         (i32.const 128) (i32.const 192) (i32.const 1) (i32.const 96)))))
+//     (if (i32.eq (local.get $mode) (i32.const 5))
+//       (then (call $ping))))
+//   (func (export "_start")
+//     (local $tries i32)
+//     (drop (call $fd_read (i32.const 0) (i32.const 0) (i32.const 1) (i32.const 96)))
+//     (block $done
+//       (loop $retry
+//         (block $caught
+//           (try_table (catch_all $caught)
+//             (call $body (i32.load8_u (i32.const 64))))
+//           (br $done))
+//         (drop (call $fd_write
+//           (i32.const 2) (i32.const 8) (i32.const 1) (i32.const 96)))
+//         (local.set $tries (i32.add (local.get $tries) (i32.const 1)))
+//         (br_if $retry (i32.lt_u (local.get $tries) (i32.const 3)))))))
+export const catchRetryGuest = wasm(
+  "0061736d01000000011a0460047f7f7f7f017f60017f0060067f7f7f7f7f7f017f600000" +
+    "02af010516776173695f736e617073686f745f70726576696577310766645f7265616400" +
+    "0016776173695f736e617073686f745f70726576696577310866645f7772697465000016" +
+    "776173695f736e617073686f745f70726576696577310970726f635f6578697400011677" +
+    "6173695f736e617073686f745f707265766965773109736f636b5f726563760002167761" +
+    "73695f736e617073686f745f70726576696577310b706f6c6c5f6f6e656f666600000305" +
+    "04030301030503010001071302066d656d6f72790200065f737461727400080ab6010404" +
+    "0012060b040012050b6600200045044003400c000b0b20004101460440410310020b2000" +
+    "410246044041014110410141e00010011a0b20004103460440410041004100410041e000" +
+    "41e40010031a0b2000410446044041800141c001410141e00010041a0b20004105460440" +
+    "10050b0b4301017f41004100410141e00010001a0240034002401f4001020041c0002d00" +
+    "0010070b0c020b41024108410141e00010011a200041016a210020004103490d000b0b0b" +
+    "0b48060041000b0840000000010000000041080b0848000000010000000041100b084900" +
+    "0000010000000041c8000b024878004190010b0401000000004198010b0800a0b8304603" +
+    "0000",
+);
+
 // ;; Instrumentation shifts every defined function index by one, so the name
 // ;; section has to shift with it: a trap backtrace from the instrumented guest
 // ;; must still name $bravo, called from $charlie. Assembled without strip so

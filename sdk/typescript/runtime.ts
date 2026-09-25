@@ -5,7 +5,13 @@ import {
   LimitError,
 } from "./resource-fs.ts";
 import { checkPath } from "./limits.ts";
-import { interruptModule, interruptName } from "./interrupt.ts";
+import {
+  Cancelled,
+  countdownExport,
+  interruptModule,
+  interruptName,
+  JobControl,
+} from "./interrupt.ts";
 import { defaultLimits, type ResourceLimits } from "./types.ts";
 import WASI from "../../ref/browser_wasi_shim/src/wasi.ts";
 import {
@@ -16,12 +22,18 @@ import {
   PreopenDirectory,
 } from "../../ref/browser_wasi_shim/src/fs_mem.ts";
 import {
+  CLOCKID_MONOTONIC,
+  CLOCKID_REALTIME,
   ERRNO_BADF,
+  ERRNO_INTR,
   ERRNO_INVAL,
   ERRNO_NOTDIR,
+  ERRNO_NOTSUP,
   ERRNO_ROFS,
+  EVENTTYPE_CLOCK,
   OFLAGS_CREAT,
   OFLAGS_TRUNC,
+  SUBCLOCKFLAGS_SUBSCRIPTION_CLOCK_ABSTIME,
 } from "../../ref/browser_wasi_shim/src/wasi_defs.ts";
 
 export interface CommandResult {
@@ -200,10 +212,73 @@ function protectFiles(wasi: WASI, readonly: boolean): void {
   };
 }
 
+/** Why the host stopped a guest from inside an import. */
+type Stop =
+  | { kind: "exit"; code: number }
+  | { kind: "failure"; error: unknown }
+  | { kind: "cancel" };
+
+/**
+ * `poll_oneoff` for the single clock subscription the pinned shim supports
+ * (boundWasiIO checks the count and the subscription and event pointers).
+ * The shim busy-waits for the whole interval and reads the subscription
+ * flags at the wrong offset; this sleeps through JobControl instead, never
+ * past the job deadline, and answers EINTR when the job was cancelled, after
+ * which the check following the call traps.
+ * https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md#poll_oneoff
+ */
+function clockPoll(
+  wasi: WASI,
+  control: JobControl,
+  cancel: () => void,
+): (input: number, output: number, count: number, events: number) => number {
+  return (input, output, _count, events) => {
+    const buffer = wasi.inst.exports.memory.buffer;
+    input >>>= 0;
+    output >>>= 0;
+    events >>>= 0;
+    if (events + 4 > buffer.byteLength) return ERRNO_INVAL;
+    const view = new DataView(buffer);
+    // subscription: userdata u64 @0, tag u8 @8, clock id u32 @16,
+    // timeout u64 @24, precision u64 @32, flags u16 @40.
+    if (view.getUint8(input + 8) !== EVENTTYPE_CLOCK) return ERRNO_NOTSUP;
+    const clock = view.getUint32(input + 16, true);
+    let now: bigint;
+    if (clock === CLOCKID_MONOTONIC) {
+      now = BigInt(Math.round(performance.now() * 1_000_000));
+    } else if (clock === CLOCKID_REALTIME) {
+      now = BigInt(Date.now()) * 1_000_000n;
+    } else return ERRNO_INVAL;
+    const timeout = view.getBigUint64(input + 24, true);
+    const absolute = view.getUint16(input + 40, true) &
+      SUBCLOCKFLAGS_SUBSCRIPTION_CLOCK_ABSTIME;
+    const remaining = absolute ? timeout - now : timeout;
+    control.sleep(remaining > 0n ? Number(remaining) / 1_000_000 : 0);
+    if (control.cancelled()) {
+      cancel();
+      return ERRNO_INTR;
+    }
+    // event: userdata u64 @0, error u16 @8, type u8 @10, 32 bytes in all.
+    const event = new DataView(wasi.inst.exports.memory.buffer, output, 32);
+    for (let offset = 0; offset < 32; offset += 4) event.setUint32(offset, 0);
+    event.setBigUint64(0, view.getBigUint64(input, true), true);
+    event.setUint8(10, EVENTTYPE_CLOCK);
+    new DataView(wasi.inst.exports.memory.buffer).setUint32(events, 1, true);
+    return 0;
+  };
+}
+
 /**
  * Execute a pinned WASI command in a fresh memory filesystem. `stdin` and
  * `files` are copied into the filesystem unless `copy` is false, which callers
  * pass only for buffers they already own privately.
+ *
+ * `module` must come from compileBounded: the injected checks poll `control`,
+ * and a stop never throws into the guest (see interrupt.ts). An exit records
+ * its status, a budget or host error records its cause, and a cancellation
+ * records nothing here; each zeroes the countdown so the guest traps at its
+ * next check, before any guest handler runs. Once stopped, every import
+ * returns EINTR without acting. A cancelled job rejects with Cancelled.
  */
 export async function runCommand(
   module: WebAssembly.Module,
@@ -213,6 +288,7 @@ export async function runCommand(
   readonly: boolean,
   limits: ResourceLimits = defaultLimits,
   copy = true,
+  control: JobControl = new JobControl(),
 ): Promise<CommandResult> {
   const root = stageFiles(files, readonly, copy);
   if (!readonly) boundFilesystem(root, limits);
@@ -232,6 +308,13 @@ export async function runCommand(
     new PreopenDirectory("/", root.contents),
   ], { debug: false });
   protectFiles(wasi, readonly);
+
+  let stop: Stop | undefined;
+  let countdown: WebAssembly.Global | undefined;
+  const halt = (reason: Stop) => {
+    stop ??= reason;
+    if (countdown) countdown.value = 0;
+  };
 
   // The in-memory filesystem has no symlinks. Zig checks each output path
   // with readlink before writing; preserve lookup failures and report INVAL
@@ -263,37 +346,86 @@ export async function runCommand(
     return 0;
   };
 
+  wasi.wasiImport.poll_oneoff = clockPoll(
+    wasi,
+    control,
+    () => halt({ kind: "cancel" }),
+  );
   boundWasiIO(wasi, limits);
 
-  let code: number;
+  // proc_exit returns to the guest, which traps on the injected unreachable;
+  // the shim's WASIProcExit would unwind through guest catch handlers.
+  wasi.wasiImport.proc_exit = (code: number) => halt({ kind: "exit", code });
+  // Outermost: no host exception reaches guest frames, where catch_all could
+  // intercept it; it stops the guest like a trap instead.
+  for (const [name, original] of Object.entries(wasi.wasiImport)) {
+    wasi.wasiImport[name] = (...values: unknown[]) => {
+      if (stop) return ERRNO_INTR;
+      try {
+        return original(...values);
+      } catch (error) {
+        halt({ kind: "failure", error });
+        return ERRNO_INTR;
+      }
+    };
+  }
+  const interrupt = () => {
+    if (stop) return 1;
+    if (!control.cancelled()) return 0;
+    halt({ kind: "cancel" });
+    return 1;
+  };
+
+  let code = 0;
+  let failure: { error: unknown } | undefined;
   let generated: Record<string, Uint8Array> = {};
   try {
     const instance = await WebAssembly.instantiate(module, {
       wasi_snapshot_preview1: wasi.wasiImport,
-      // compileBounded's checks poll here; nothing interrupts a guest yet.
-      [interruptModule]: { [interruptName]: () => 0 },
+      [interruptModule]: { [interruptName]: interrupt },
     });
-    const { memory, _start } = instance.exports;
+    const { memory, _start, [countdownExport]: counter } = instance.exports;
     if (
       !(memory instanceof WebAssembly.Memory) || typeof _start !== "function"
     ) {
       throw new Error("WASI command must export memory and _start");
     }
+    if (!(counter instanceof WebAssembly.Global)) {
+      throw new Error("WASI command was not instrumented for interruption");
+    }
+    countdown = counter;
+    if (stop) countdown.value = 0;
     code = wasi.start({ exports: { memory, _start: () => _start() } });
-    if (code === 0 && !readonly) generated = collectFiles(root, limits);
-  } catch (cause) {
-    const stderr = new TextDecoder().decode(new Uint8Array(errors.file.data));
-    const message = cause instanceof Error ? cause.message : String(cause);
+  } catch (error) {
+    // A trap after a stop is the stop itself; any other is the failure.
+    if (!stop) failure = { error };
+  }
+  const stderr = () =>
+    new TextDecoder().decode(new Uint8Array(errors.file.data));
+  if (stop?.kind === "cancel") throw new Cancelled(control.reason, stderr());
+  if (stop?.kind === "failure") failure = { error: stop.error };
+  if (stop?.kind === "exit") code = stop.code;
+  if (!failure && code === 0 && !readonly) {
+    try {
+      generated = collectFiles(root, limits);
+    } catch (error) {
+      failure = { error };
+    }
+  }
+  if (failure) {
+    const { error } = failure;
+    const text = stderr();
+    const message = error instanceof Error ? error.message : String(error);
     throw new CommandError(
-      `WASI command failed: ${message}${stderr ? `\n${stderr}` : ""}`,
-      stderr,
-      cause,
+      `WASI command failed: ${message}${text ? `\n${text}` : ""}`,
+      text,
+      error,
     );
   }
   return {
     code,
     stdout: new Uint8Array(output.file.data),
-    stderr: new TextDecoder().decode(new Uint8Array(errors.file.data)),
+    stderr: stderr(),
     files: generated,
   };
 }
