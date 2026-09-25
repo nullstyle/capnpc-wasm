@@ -205,7 +205,8 @@ export async function setupConformance(
           CompileError: state.sdk.CompileError,
           create: (modules, options) =>
             state.sdk.createCompiler(modules, options),
-          jobOptions: () => undefined,
+          jobOptions: (spec) =>
+            spec.deadlineMs ? { timeoutMs: spec.deadlineMs } : undefined,
         }),
         "browser-worker": runner.cachingHost({
           CompileError: state.sdk.CompileError,

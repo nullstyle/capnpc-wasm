@@ -67,28 +67,42 @@ suite.test(`${expectedPath} covers every case with reasoned divergences`, async 
   assert(problems.length === 0, problems.join("\n"));
 });
 
-suite.test("the TypeScript classifier reads the innermost cause, not guest stderr", () => {
+suite.test("the TypeScript classifier reads CompileError.kind and the innermost cause, not guest stderr", () => {
   const failure = (
     message: string,
+    kind: string,
     chain: { name: string; message: string }[],
-    exitCode?: number,
+    extra: Partial<ErrorSummary> = {},
   ): ErrorSummary => ({
     name: "CompileError",
     message,
     isCompileError: true,
     isTypeError: false,
     stage: "cpp",
-    exitCode,
+    kind,
     diagnostics: [],
     hasOutputs: false,
     chain,
+    ...extra,
   });
-  // The wrapper carries the guest's stderr; only the innermost cause counts.
-  const wrapped = (stderr: string, name: string, message: string) =>
-    failure(`cpp trapped: WASI command failed: ${message}\n${stderr}`, [
-      { name: "CommandError", message: `WASI command failed: ${message}` },
-      { name, message },
-    ]);
+  // The wrapper carries the guest's stderr; only the kind and the innermost
+  // cause count.
+  const wrapped = (
+    stderr: string,
+    name: string,
+    message: string,
+    kind = "trap",
+    extra: Partial<ErrorSummary> = {},
+  ) =>
+    failure(
+      `cpp trapped: WASI command failed: ${message}\n${stderr}`,
+      kind,
+      [
+        { name: "CommandError", message: `WASI command failed: ${message}` },
+        { name, message },
+      ],
+      extra,
+    );
   const cases: [ErrorSummary, string][] = [
     [wrapped("error: stack overflow", "RuntimeError", "unreachable"), "trap"],
     [
@@ -109,20 +123,49 @@ suite.test("the TypeScript classifier reads the innermost cause, not guest stder
       "error:RangeError",
     ],
     [
-      wrapped("", "LimitError", "stderrBytes resource limit exceeded"),
+      wrapped(
+        "",
+        "LimitError",
+        "stderrBytes resource limit exceeded",
+        "limit",
+        {
+          limit: "stderrBytes",
+        },
+      ),
       "limit:stderrBytes",
     ],
     [
-      wrapped("", "TypeError", "path exceeds pathBytes limit"),
+      wrapped("", "LimitError", "pathBytes resource limit exceeded", "limit", {
+        limit: "pathBytes",
+      }),
       "limit:pathBytes",
     ],
     [
       wrapped("", "Error", 'invalid filesystem entry name: "a\\\\b"'),
       "policy:output-name",
     ],
-    [failure("compiler emitted no request", []), "protocol"],
-    [failure("cpp generator unexpectedly wrote to stdout", []), "protocol"],
-    [failure("cpp exited with status 1", [], 1), "exit(1)"],
+    [failure("compiler emitted no request", "protocol", []), "protocol"],
+    [
+      failure("cpp generator unexpectedly wrote to stdout", "protocol", []),
+      "protocol",
+    ],
+    [
+      failure("cpp exited with status 1", "exit", [], { exitCode: 1 }),
+      "exit(1)",
+    ],
+    // The kind decides, not a message that reads like another failure.
+    [
+      failure("compiler emitted no request", "trap", [
+        { name: "RuntimeError", message: "unreachable" },
+      ]),
+      "trap",
+    ],
+    [
+      failure("cpp exited with status 1", "limit", [], {
+        limit: "stdoutBytes",
+      }),
+      "limit:stdoutBytes",
+    ],
   ];
   for (const [summary, expected] of cases) {
     const outcome = classifyError(summary);

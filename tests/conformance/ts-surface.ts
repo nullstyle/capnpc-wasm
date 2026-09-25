@@ -98,9 +98,7 @@ export async function runTsSurface(
         ? createCompiler(modules, options)
         : createWorkerCompiler(workerURL, modules, options),
     jobOptions: (spec) =>
-      surface === "ts-worker" && spec.deadlineMs
-        ? { timeoutMs: spec.deadlineMs }
-        : undefined,
+      spec.deadlineMs ? { timeoutMs: spec.deadlineMs } : undefined,
   });
   const rows: Row[] = [];
   try {

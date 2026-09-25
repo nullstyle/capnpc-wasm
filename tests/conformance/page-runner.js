@@ -15,6 +15,8 @@
  *   isTypeError: boolean,
  *   stage?: string,
  *   exitCode?: number,
+ *   kind?: string,
+ *   limit?: string,
  *   diagnostics: { stage: string, stderrBytes: number }[],
  *   hasOutputs: boolean,
  *   chain: CauseLink[],
@@ -82,6 +84,8 @@ export function summarizeError(error, CompileError) {
     exitCode: typeof failure?.exitCode === "number"
       ? failure.exitCode
       : undefined,
+    kind: typeof failure?.kind === "string" ? failure.kind : undefined,
+    limit: typeof failure?.limit === "string" ? failure.limit : undefined,
     diagnostics: summarizeDiagnostics(failure?.diagnostics),
     hasOutputs: error !== null && typeof error === "object" &&
       "outputs" in error,

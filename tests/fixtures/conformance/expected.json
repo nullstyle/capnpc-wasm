@@ -241,12 +241,6 @@
     "compiler-timeout": {
       "expect": "timeout",
       "surfaces": {
-        "ts-direct": {
-          "skip": "direct execution has no deadline"
-        },
-        "browser-direct": {
-          "skip": "direct execution has no deadline"
-        },
         "studio": {
           "skip": "the adapter runs the bundled modules only"
         }
@@ -515,12 +509,6 @@
     "generator-timeout": {
       "expect": "timeout",
       "surfaces": {
-        "ts-direct": {
-          "skip": "direct execution has no deadline"
-        },
-        "browser-direct": {
-          "skip": "direct execution has no deadline"
-        },
         "studio": {
           "skip": "the adapter runs the bundled modules only"
         }

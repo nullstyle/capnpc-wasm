@@ -140,6 +140,5 @@ recorded:
 Cases a surface skips: the budget rows and `generator-long-name` on the launcher
 (no configurable budgets) and in Studio (fixed budgets); the custom guests in
 Studio (bundled modules only); the import-root and source-prefix rows in Studio
-(the adapter sets neither); the 4,096- and 4,097-byte paths on the launcher (the
-host filesystem cannot stage them); and the deadline rows in direct execution
-(no deadline).
+(the adapter sets neither); and the 4,096- and 4,097-byte paths on the launcher
+(the host filesystem cannot stage them).

@@ -15,13 +15,11 @@
 //   timeout            the host deadline stopped the job
 //
 // The TypeScript classification reads the error class, the phase that threw,
-// and the innermost cause: the engine's or the host's own error, whose name
-// and message survive the worker protocol. It never reads guest stderr (the
-// SDK appends that to its wrapper messages), so a guest cannot steer it. When
-// CompileError gains `kind` and `limit`, those fields replace the class-based
-// split into exit, limit, trap, and protocol without changing an expectation;
-// trap:stack and policy:output-name stay derived from the innermost cause,
-// because the planned kinds cannot express them.
+// CompileError's `kind` (exit, limit, trap, or protocol) and `limit`, and, to
+// refine a trap into trap:stack or policy:output-name, which no kind
+// expresses, the innermost cause: the engine's or the host's own error, whose
+// name and message survive the worker protocol. It never reads guest stderr
+// (the SDK appends that to its wrapper messages), so a guest cannot steer it.
 
 export type Surface =
   | "ts-direct"
@@ -50,6 +48,9 @@ export interface ErrorSummary {
   isTypeError: boolean;
   stage?: string;
   exitCode?: number;
+  /** CompileError's `kind` and, for kind `limit`, its `limit`. */
+  kind?: string;
+  limit?: string;
   diagnostics: { stage: string; stderrBytes: number }[];
   hasOutputs: boolean;
   /** name and message of each `cause`, outermost first. */
@@ -96,10 +97,6 @@ export function isStackExhaustion(name: string, message: string): boolean {
     (name === "InternalError" && message === "too much recursion");
 }
 
-/** The two CompileErrors the SDK raises when a guest exits 0 against its contract. */
-const protocolMessage =
-  /^(compiler emitted no request|\w+ generator unexpectedly wrote to stdout)$/;
-
 /** The outcome word for a TypeScript SDK rejection. */
 export function classifyError(summary: ErrorSummary): string {
   if (summary.name === "TimeoutError" || summary.name === "AbortError") {
@@ -110,24 +107,24 @@ export function classifyError(summary: ErrorSummary): string {
     return budget ? `validation:${budget[1]}` : "validation";
   }
   if (!summary.isCompileError) return `error:${summary.name}`;
-  if (summary.exitCode !== undefined) return `exit(${summary.exitCode})`;
+  switch (summary.kind) {
+    case "exit":
+      return `exit(${summary.exitCode})`;
+    case "limit":
+      return summary.limit
+        ? `limit:${summary.limit}`
+        : "error:CompileError(limit without a name)";
+    case "protocol":
+      return "protocol";
+    case "trap":
+      break;
+    default:
+      return `error:CompileError(kind ${summary.kind})`;
+  }
   // The innermost cause is the engine's or the host's own error; the wrappers
   // above it carry the guest's stderr in their messages.
   const cause = summary.chain.at(-1);
-  if (!cause) {
-    return protocolMessage.test(summary.message)
-      ? "protocol"
-      : "error:CompileError";
-  }
-  if (cause.name === "LimitError") {
-    const limit = /^(\w+) resource limit exceeded$/.exec(cause.message);
-    return limit ? `limit:${limit[1]}` : "error:LimitError";
-  }
-  if (cause.name === "TypeError") {
-    // Output collection bounds each generated path after a zero exit.
-    const limit = /^path exceeds (\w+) limit$/.exec(cause.message);
-    return limit ? `limit:${limit[1]}` : "error:TypeError";
-  }
+  if (!cause) return "error:CompileError(trap without a cause)";
   if (
     cause.name === "Error" &&
     cause.message.startsWith("invalid filesystem entry name: ")
