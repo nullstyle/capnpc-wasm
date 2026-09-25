@@ -1,9 +1,9 @@
 # Scheduled verification that a push never exercises: a cold bootstrap from the
-# committed lock with no tool cache, the browser suites on Linux and macOS,
-# long cancellation soaks, the Go race detector, the go.mod floor toolchain, a
-# drift check against newer wazero, a non-gating worker termination canary,
-# and the reachability of every locked download. Every verification step calls
-# a mise task, so it also runs locally.
+# committed lock with no tool cache on Linux and macOS, x64 and arm64, the
+# browser suites on Linux and macOS, long cancellation soaks, the Go race
+# detector, the go.mod floor toolchain, a drift check against newer wazero, a
+# non-gating worker termination canary, and the reachability of every locked
+# download. Every verification step calls a mise task, so it also runs locally.
 name: Nightly
 
 on:
@@ -43,7 +43,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15]
+        # Per-push CI covers ubuntu-24.04 (Linux x64) and macos-15 (macOS
+        # arm64); the nightly adds the other two hosts the lockfile supports
+        # (decision D3 = A). macos-15-intel is the x86_64 build of the same
+        # macOS 15 image, which GitHub keeps until August 2027; move to
+        # macos-26-intel before it retires.
+        os: [ubuntu-24.04, macos-15, ubuntu-24.04-arm, macos-15-intel]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
