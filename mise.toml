@@ -369,22 +369,27 @@ if [[ "${CAPNP_CANARY_LATEST:-1}" != 0 ]]; then
     Darwin-x86_64) target=x86_64-apple-darwin ;;
     *) echo "no Deno release for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
   esac
-  latest="build/test/termination-canary/deno-$version"
+  # Only a checked, fully unpacked download is renamed to the -verified
+  # directory, so a binary an older unchecked task left in deno-$version, or
+  # an interrupted download, is never run.
+  latest="build/test/termination-canary/deno-$version-verified"
   if [[ ! -x "$latest/deno" ]]; then
-    rm -rf "$latest"
-    mkdir -p "$latest"
-    curl -fsSL -o "$latest/deno.zip" "https://dl.deno.land/release/$version/deno-$target.zip"
+    download="build/test/termination-canary/deno-$version-download"
+    rm -rf "$latest" "$download"
+    mkdir -p "$download"
+    curl -fsSL -o "$download/deno.zip" "https://dl.deno.land/release/$version/deno-$target.zip"
     # Check the archive against the release's own checksum file on GitHub,
     # not against the host that served it, before anything is unpacked.
-    curl -fsSL -o "$latest/deno.zip.sha256sum" "https://github.com/denoland/deno/releases/download/$version/deno-$target.zip.sha256sum"
-    expected="$( { grep -Eo '[0-9a-fA-F]{64}' "$latest/deno.zip.sha256sum" || true; } | head -n 1 | tr 'A-F' 'a-f')"
-    actual="$(shasum -a 256 "$latest/deno.zip" | cut -d ' ' -f 1)"
+    curl -fsSL -o "$download/deno.zip.sha256sum" "https://github.com/denoland/deno/releases/download/$version/deno-$target.zip.sha256sum"
+    expected="$( { grep -Eo '[0-9a-fA-F]{64}' "$download/deno.zip.sha256sum" || true; } | head -n 1 | tr 'A-F' 'a-f')"
+    actual="$(shasum -a 256 "$download/deno.zip" | cut -d ' ' -f 1)"
     if [[ -z "$expected" || "$actual" != "$expected" ]]; then
       echo "deno-$target.zip $version has sha256 $actual, but its release checksum file lists ${expected:-no digest}" >&2
-      rm -rf "$latest"
+      rm -rf "$download"
       exit 1
     fi
-    unzip -q "$latest/deno.zip" -d "$latest"
+    unzip -q "$download/deno.zip" -d "$download"
+    mv "$download" "$latest"
   fi
   runtimes+=("latest=$latest/deno")
 fi
