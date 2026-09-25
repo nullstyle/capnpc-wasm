@@ -49,6 +49,11 @@ release status; update it instead of restating status here.
   byte-oriented workspaces, fresh guest instances, read-only inputs, and
   transactional outputs. Cancellation terminates guest execution; a rejected
   promise alone is insufficient.
+- The TypeScript SDK validates and instruments every guest
+  (`sdk/typescript/rewriter.ts`), so a stop is a trap and `Worker.terminate()`
+  is a fallback. The rewriter fails closed: input it cannot rewrite exactly is a
+  `TypeError`. `test:browser` validates the instrumented `dist/wasm` modules
+  with the pinned wasm-tools, so run it after rewriter changes.
 - The two SDKs implement one contract,
   [docs/sdk-contract.md](docs/sdk-contract.md): keep request fields, limits
   (pinned by `tests/fixtures/contract/limits.json`), stage names, and error
@@ -58,7 +63,15 @@ release status; update it instead of restating status here.
   the TypeScript, Go, and browser tests. Read embeds as bytes; compare the
   complete canonical request and every generated source byte with native output
   when adding schema coverage.
-- Test harnesses under `tests/hosts/` stay separate from the SDKs.
+- Test harnesses under `tests/hosts/` stay separate from the SDKs; the Deno host
+  alone imports the SDK's shim facade and ABI corrections
+  (`sdk/typescript/shim.ts`, `shim-abi.ts`), so its parity rows run the shipped
+  adapter.
+- Test guests live as WebAssembly text in `tests/browser/guests/` (hostile) and
+  `tests/browser/guests/interrupt/`, embedded as pinned wasm-tools output in
+  `sdk/typescript/testdata/hostile_guests.ts` and `interrupt_guests.ts`.
+  `test:browser` fails when a pair drifts: after editing a `.wat` file,
+  regenerate its hex with the command in the embedding file's header.
 - Generated files and build trees go under `build/`, distributable output under
   `dist/`, caches under `.cache/`, ad-hoc probes under `build/scratch/`.
 - Shipped Wasm modules meet the contract in `scripts/check-wasm-artifacts.ts`
@@ -194,11 +207,9 @@ finish with `mise run ci` before a rebase or hand-off.
 
 ## Deno versions
 
-- `mise.toml` pins Deno 2.9.6 for tooling and direct execution.
-- Worker execution requires Deno 2.6.8 (`supportedDenoWorkerVersion` in
-  `sdk/typescript/environment.ts`), installed as the locked tool `deno-worker`
-  by `deno-worker:install`. `sdk/typescript/sdk_test.ts` ignores worker tests on
-  every other version, so `mise run test` on the pinned Deno does not cover
-  worker cancellation. Run the CI lane locally with the commands in
-  [CONTRIBUTING.md](CONTRIBUTING.md#reproducing-the-ci-lanes)
-  (`mise run test:deno-worker`).
+- `mise.toml` pins Deno 2.9.6 for tooling and for direct and worker execution.
+- Worker execution is admitted on every Deno release, and `mise run test` covers
+  worker cancellation on the pinned Deno. `supportedDenoWorkerVersion`
+  (`sdk/typescript/environment.ts`) is deprecated: the SDK no longer checks it,
+  and the termination canary reads it. `mise run test:deno-worker` also runs the
+  SDK tests on Deno 2.6.8, the locked tool `deno-worker`.
