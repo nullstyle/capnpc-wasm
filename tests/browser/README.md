@@ -268,8 +268,7 @@ the run summary repeats.
 Hosted CI runs this complete three-engine suite and the Schema Studio suite in a
 separate Linux job after installing the browser system libraries with the pinned
 Playwright CLI; the clean-checkout job on Linux and macOS runs `mise run check`,
-`mise run test:package`, the Deno 2.6.8 worker lane, and the Go race tests. The
-lanes are listed in
+`mise run test:package`, and the Go race tests. The lanes are listed in
 [CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes). Build trees
 are not restored from caches, and failed test fixtures plus the exact tested
 Wasm modules and SDK bundles are retained as workflow artifacts.

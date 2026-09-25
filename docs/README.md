@@ -14,7 +14,7 @@ provenance, not for guidance.
 | [Releases](releases.md)                               | Published archives and their digests, candidate preparation and verification, launcher and package details     |
 | [API stability](api-stability.md)                     | Stable and experimental interfaces, the 0.x version rules, deprecation, and the names of packages and tags     |
 | [Release readiness](release-readiness.md)             | The gate table, the 0.1.0 definition of done, and the nightly ledger                                           |
-| [Deno worker termination](deno-worker-termination.md) | The evidence behind the Deno 2.6.8 worker requirement                                                          |
+| [Deno worker termination](deno-worker-termination.md) | How each engine's `Worker.terminate()` behaves, the canary that tracks it, and why the SDK does not rely on it |
 | [Release evidence](release-evidence/)                 | Machine-readable receipts referenced by the readiness page and the history narrative                           |
 
 Root documents: [README](../README.md) for the consumer quick start, support

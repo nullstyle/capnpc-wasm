@@ -29,7 +29,7 @@ changes. Examples from history:
 | C++ port: `patches/capnproto/`, `cmake/`, `scripts/build-wasm.sh`                                                       | `mise run test`                                                                                 |
 | Generator wrappers and consumers: `generators/`, `tests/consumers/`                                                     | `mise run test`                                                                                 |
 | Zig reference or mirrored fixtures: `ref/capnp-zig`, `generators/zig/sync.json`                                         | `mise run build:zig` (runs `check:zig-sync`), then `mise run test`                              |
-| TypeScript SDK: `sdk/typescript/`                                                                                       | `mise run test`, `mise run test:browser`, and `mise run test:deno-worker`                       |
+| TypeScript SDK: `sdk/typescript/`                                                                                       | `mise run test` and `mise run test:browser`                                                     |
 | Go SDK: `sdk/go/`                                                                                                       | `mise run test:sdk-go` and `mise run test:sdk-go-race` (`mise run lint` runs the vet)           |
 | Schema Studio: `examples/browser/`, `scripts/build-studio.ts`, `scripts/serve-example.ts`                               | `mise run test:studio-unit`, then `mise run test:studio`                                        |
 | Packaging: `scripts/release.ts`, `scripts/templates/`, `bin/capnp-wasm`, `sdk/typescript/README.md`, `sdk/go/README.md` | `mise run test:package`, `mise run test:launcher`, `mise run test:compiler-host-package`        |
@@ -56,15 +56,13 @@ Clean checkout (ubuntu-24.04 and macos-15):
 mise run setup
 mise run check
 mise run test:package
-mise run test:deno-worker
 mise run test:sdk-go-race
 test -z "$(git status --porcelain)"
 ```
 
 `mise install` and `mise uninstall` run from the project root rewrite
-`mise.lock`; `deno-worker:install`, which `test:deno-worker` depends on, runs
-`mise install --locked deno-worker`, which never rewrites it, and checks the
-binary against `sdk/typescript/environment.ts`.
+`mise.lock`; CI installs the pinned tools with `mise install --locked`, which
+never rewrites it.
 
 Browsers (ubuntu-24.04):
 
@@ -85,9 +83,9 @@ mise run test:studio chromium firefox webkit
    `mise lock` also re-resolves the conda packages), and review the `mise.lock`
    diff. Keep `lockfile_version = 1` (CI's mise 2026.9.1 cannot read version 2)
    and all four `lockfile_platforms` entries; a plain `mise install` of an extra
-   tool inside the project can prune the other platforms' WASI SDK entries (see
-   the comment in `ci.yml`), which is why CI installs Deno 2.6.8 with `--cd`
-   elsewhere and `deno-worker:install` passes `--locked`.
+   tool inside the project can prune the other platforms' WASI SDK entries,
+   which is why ad hoc tools such as osv-scanner run from outside the project
+   (`mise --cd`) and CI installs the pinned tools with `--locked`.
 3. Run `mise run check`.
 
 Zig must equal the `zig` line of `ref/capnp-zig/mise.toml` (both are
@@ -97,10 +95,8 @@ that `mise.lock` records with minisign provenance, so after a Zig bump run
 `mise lock zig`, then `mise run mirror:zig -- lock --write`, which records the
 checksums from signature-verified downloads. The Wasmtime pin is copied into
 every tools archive as the required runtime version, so bumping it changes the
-launcher contract for consumers. The Deno pin is the direct-execution version;
-the worker version, 2.6.8, is the locked tool `deno-worker` in `mise.toml`,
-which must equal `supportedDenoWorkerVersion` in `sdk/typescript/environment.ts`
-and the version `ci.yml` installs.
+launcher contract for consumers. The Deno pin is the version for direct and
+worker execution.
 
 ### Reference bump checklist
 

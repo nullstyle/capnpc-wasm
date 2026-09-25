@@ -400,10 +400,7 @@ exit, a budget overrun, or a host error); and the worker client
 path without `SharedArrayBuffer`, the `terminate()` fallback, no restart after
 ordinary errors, identical error classes and messages in both modes, result
 shapes, script load and initialization failures, aborted initialization, and
-disposal of a running job). Per-push CI also runs `sdk_test.ts` and the external
-compiler-host package consumer on Deno 2.6.8, a lane kept from when worker
-execution required that release, and `mise run test:deno-worker` runs the whole
-suite there; the exact lanes are listed in
+disposal of a running job). The CI lanes are listed in
 [CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes). The SDK, its
 tests, and their test data also type-check in strict mode against a typed facade
 of the pinned shim (`shim.ts`, `shim.d.ts`); `mise run lint` runs

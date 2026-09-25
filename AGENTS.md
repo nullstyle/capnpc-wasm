@@ -94,10 +94,9 @@ release status; update it instead of restating status here.
 `doctor`, and `test`: the parity, Zig, SDK, and feature-corpus suites, the
 conformance corpus (`test:conformance`), and `test:studio-unit`, one
 `test:<suite>` task each, building only what it reads. `test:browser`,
-`test:studio`, `test:package`, `test:launcher`, and `test:deno-worker` are
-separate and run only when named. The CI clean-checkout job (setup, `check`,
-`test:package`, and the Deno 2.6.8 lane) took 9 minutes on ubuntu-24.04 and 10
-minutes on macos-15
+`test:studio`, `test:package`, and `test:launcher` are separate and run only
+when named. The CI clean-checkout job (setup, `check`, and `test:package`) took
+9 minutes on ubuntu-24.04 and 10 minutes on macos-15
 ([run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070));
 a local cold build is comparable. For quick iteration, run one suite task, or
 `mise run --skip-deps test:<suite>` to rerun it without rebuilding.
@@ -113,9 +112,7 @@ step or per-engine deadline.
 - Rust, Go, or Zig generators: `mise run test`; generated-code consumers
   exercise the pinned runtimes as well as comparing source output.
 - TypeScript runtime or bundle: `mise run test`, then `mise run test:browser`
-  (after `mise run browser:install` once), and the Deno 2.6.8 worker lane in
-  [CONTRIBUTING.md](CONTRIBUTING.md#reproducing-the-ci-lanes)
-  (`mise run test:deno-worker`).
+  (after `mise run browser:install` once).
 - Go SDK: `mise run test:sdk-go` and `mise run test:sdk-go-race` (`lint` runs
   the vet).
 - Schema Studio (`examples/browser/`, `scripts/build-studio.ts`,
@@ -146,22 +143,21 @@ build check. Arguments after `--` reach the suite: `--filter <name>` selects a
 host or fixture in the Deno suites, `test:sdk-go` takes `-run <name>`, and
 `test:zig-unit` fixes its own filters. Warm suites take 1 to 40 s,
 `mise run test` about two minutes, `mise run lint` seconds with no build. Then
-run the area's gate from Verification by area. The worker runtime is the locked
-tool `deno-worker` (`deno-worker:install`, a dependency of `test:deno-worker`).
-The scheduled checks `audit:osv`, `audit:govulncheck`, `audit:advisories`, and
-`check:lock-urls`, the soak and floor tasks `test:browser-soak`,
-`test:deno-worker-soak`, and `test:sdk-go-floor`, the drift signal
-`test:sdk-go-wazero-latest`, and the canary `test:termination-canary` need the
-network and run only when named; the drift signal and the canary are not gates.
-`audit:nightly` also needs the network (read-only `gh`): it rewrites
-`docs/release-evidence/nightly-confidence.json`, and `-- --check` only compares.
+run the area's gate from Verification by area. The scheduled checks `audit:osv`,
+`audit:govulncheck`, `audit:advisories`, and `check:lock-urls`, the soak and
+floor tasks `test:browser-soak`, `test:sdk-ts-soak`, and `test:sdk-go-floor`,
+the drift signal `test:sdk-go-wazero-latest`, and the canary
+`test:termination-canary` need the network and run only when named; the drift
+signal and the canary are not gates. `audit:nightly` also needs the network
+(read-only `gh`): it rewrites `docs/release-evidence/nightly-confidence.json`,
+and `-- --check` only compares.
 
 | Change                                     | Fastest check                                                                                  |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
 | `patches/`, `cmake/`, `scripts/build-*.sh` | `test:toolchain` (`-- --filter wasmtime` for one host)                                         |
 | `generators/rust`, `generators/go`         | `test:toolchain`, `test:features`                                                              |
 | `generators/zig`, Zig fixtures             | `test:zig-unit`, then `test:wire`, `test:reflection`, `test:generator-api`, `test:rpc-codegen` |
-| `sdk/typescript/`                          | `test:sdk-ts`, `test:features`; `test:deno-worker` for the worker path                         |
+| `sdk/typescript/`                          | `test:sdk-ts` (direct and worker paths), `test:features`, `test:conformance`                   |
 | `sdk/go/`                                  | `test:sdk-go`                                                                                  |
 | `scripts/*.ts`, `bin/`, `release.json`     | `lint`, then `test:package`                                                                    |
 | `examples/browser/`, Studio scripts        | `test:studio-unit`, `build:studio`, then `test:studio`                                         |
@@ -227,5 +223,8 @@ finish with `mise run ci` before a rebase or hand-off.
 - Worker execution is admitted on every Deno release, and `mise run test` covers
   worker cancellation on the pinned Deno. `supportedDenoWorkerVersion`
   (`sdk/typescript/environment.ts`) is deprecated: the SDK no longer checks it,
-  and the termination canary reads it. `mise run test:deno-worker` also runs the
-  SDK tests on Deno 2.6.8, the locked tool `deno-worker`.
+  and it can be removed in `0.2.0`.
+- `mise run test:termination-canary` tracks upstream and is not a gate: it
+  checks whether `Worker.terminate()` stops a spinning guest on the pinned and
+  the newest Deno against the record in `docs/deno-worker-termination.md`. The
+  SDK does not rely on `terminate()`.

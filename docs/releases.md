@@ -93,9 +93,10 @@ changes another flavor's version.
    a successful CI run, or runs `mise run check` itself; builds from the clean
    checkout; runs `scripts/release.ts --publish`, which refuses a dirty tree, a
    `HEAD` that does not carry the tag, and an existing destination; runs
-   `test:package`, `test:launcher`, and `test:deno-worker`; and verifies with
-   `scripts/verify-release.ts` that the manifest names the tagged commit with
-   `dirty: false` and that the archive extracts to exactly that manifest.
+   `test:package` (which includes the compiler-host package gate) and
+   `test:launcher`; and verifies with `scripts/verify-release.ts` that the
+   manifest names the tagged commit with `dirty: false` and that the archive
+   extracts to exactly that manifest.
 3. The `publish` job (tag pushes only, and only if no release exists for the
    tag) re-verifies the uploaded assets, attaches build-provenance and SBOM
    attestations, and creates a **draft prerelease** titled `<flavor> <version>`

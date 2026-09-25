@@ -116,8 +116,8 @@ the defaults.
 mise run build        # native reference tools, WASI modules, and the dist/ SDK bundle
 mise run test         # builds what each suite reads, then runs every suite in parallel
 mise run check        # lint (static checks, no build) + doctor + test
-mise run ci           # the CI check job: check, package gates, Deno worker lane,
-                      # test:sdk-go-race, test:browser-bootstrap, clean tree
+mise run ci           # the CI check job: check, package gates, test:sdk-go-race,
+                      # test:browser-bootstrap, clean tree
 mise run test:browser # Chromium, Firefox, WebKit: offline execution, cancellation,
                       # the termination acceptance, and the conformance corpus
 ```
@@ -128,11 +128,10 @@ mise run test:browser # Chromium, Firefox, WebKit: offline execution, cancellati
 | `test:zig-unit`                                                          | capnp-zig unit tests                                                                                                                                  | Zig generator                                 |
 | `test:toolchain`                                                         | compiler and generators in Wasmtime, wazero, and Deno against native output                                                                           | everything                                    |
 | `test:wire`, `test:reflection`, `test:generator-api`, `test:rpc-codegen` | Zig wire conformance, reflection, generator API, RPC codegen                                                                                          | native tools, Zig generator                   |
-| `test:sdk-ts`                                                            | `sdk/typescript/` on the pinned Deno (worker tests ignored there)                                                                                     | Wasm generators                               |
+| `test:sdk-ts`                                                            | `sdk/typescript/` on the pinned Deno, direct and worker execution                                                                                     | Wasm generators                               |
 | `test:features`                                                          | schema feature corpus through the SDK, compiled with the pinned runtimes                                                                              | native tools, Wasm generators                 |
 | `test:conformance`                                                       | failure and limit conformance corpus: fixtures against their sources, then the TypeScript direct surface (other surfaces run it in their own suites)  | Wasm generators                               |
 | `test:sdk-go`                                                            | Go SDK                                                                                                                                                | native tools, Wasm generators                 |
-| `test:deno-worker`                                                       | `sdk/typescript/` and the compiler-host gate on Deno 2.6.8, including worker termination                                                              | native tools, SDK bundle                      |
 | `test:package`, `test:compiler-host-package`                             | release archives and external consumers                                                                                                               | native tools, SDK bundle                      |
 | `test:launcher`                                                          | the packaged Wasmtime launcher                                                                                                                        | SDK bundle                                    |
 | `test:browser-bootstrap`                                                 | Playwright permission boundary, browser step deadlines, and termination verdicts, with no browser launched                                            | nothing                                       |

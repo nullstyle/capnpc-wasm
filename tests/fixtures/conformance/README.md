@@ -67,7 +67,7 @@ validation rows do with "is not a directory in files".
 | Surface          | Runner                                                                 | Task                              |
 | ---------------- | ---------------------------------------------------------------------- | --------------------------------- |
 | `ts-direct`      | `sdk/typescript/conformance_test.ts`, `tests/conformance`              | `test:sdk-ts`, `test:conformance` |
-| `ts-worker`      | `sdk/typescript/conformance_test.ts` on the supported worker runtime   | `test:deno-worker`                |
+| `ts-worker`      | `sdk/typescript/conformance_test.ts`, `createWorkerCompiler`           | `test:sdk-ts`                     |
 | `go`             | `sdk/go/conformance_test.go`                                           | `test:sdk-go`                     |
 | `launcher`       | `tests/package/launcher.ts`                                            | `test:launcher`, `test:package`   |
 | `browser-direct` | `tests/browser/test.ts`, `createCompiler` in each engine               | `test:browser`                    |
