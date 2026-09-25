@@ -145,11 +145,14 @@ version that ships them.
   (`test:cli-parity` 80 s to 56 s); `clean:all` runs without Go.
 - Release evidence: every receipt in `docs/release-evidence/` carries a schema
   version and validates against its type's JSON Schema in `schemas/`
-  (`mise run check:evidence`, part of `lint`); the nightly-confidence ledger
-  measures this repository's scheduled `nightly.yml` at the `ref/capnp-zig`
-  gitlink (decision D5 = A) and is regenerated from the GitHub API by
-  `mise run audit:nightly` (streak 0 until the held workflow runs from `main`);
-  the capnp-zig-based ledger is kept as `capnp-zig-nightly-confidence.json`.
+  (`mise run check:evidence`, part of `lint`, which also checks the ledger's
+  counters against its cycles and its gitlink against the index); the
+  nightly-confidence ledger measures this repository's scheduled `nightly.yml`
+  at the `ref/capnp-zig` gitlink (decision D5 = A), counts only first-attempt
+  successes, and is regenerated from the GitHub API by `mise run audit:nightly`
+  (streak 0 until the held workflow runs from `main`); `mise run test:evidence`
+  tests both scripts; the capnp-zig-based ledger is kept as
+  `capnp-zig-nightly-confidence.json`.
 - Support matrix: per-push claims name only the tested hosts, Linux x64 and
   macOS arm64; the nightly workflow (held until it reaches `main`) tests Linux
   arm64, macOS x64 (`macos-15-intel`), browsers on macOS, and the Go SDK on

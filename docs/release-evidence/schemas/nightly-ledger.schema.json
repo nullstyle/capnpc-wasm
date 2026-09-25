@@ -98,7 +98,10 @@
       "properties": {
         "scheduledDateUtc": { "$ref": "#/$defs/date" },
         "runId": { "type": "integer", "minimum": 1 },
-        "runAttempt": { "type": "integer", "minimum": 1 },
+        "runAttempt": {
+          "description": "Only a first attempt qualifies; a run that passed on a re-run ends the streak.",
+          "const": 1
+        },
         "runUrl": {
           "type": "string",
           "pattern": "^https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$"

@@ -5,13 +5,16 @@ Machine-readable receipts behind the
 in this directory, and its file name selects its type. [`schemas/`](schemas/)
 holds one JSON Schema (draft 2020-12) per type. `mise run check:evidence`, part
 of `mise run lint`, validates every receipt against its schema, checks that
-every receipt a receipt names exists, and fails on a file that no schema claims.
-It runs offline.
+every receipt a receipt names exists, checks the ledger's counters, dates, and
+`ref/capnp-zig` gitlink against its cycles and the index, and fails on a file
+that no schema claims or anything else in the directory. It runs offline.
+`mise run test:evidence`, part of `mise run test`, runs the streak computation
+on synthetic runs and the checker on copies with planted defects.
 
 | Receipt                             | Type                                                                                      | Producer                                                   |
 | ----------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `nightly-confidence.json`           | [Nightly-confidence ledger](schemas/nightly-ledger.schema.json)                           | `mise run audit:nightly` (generated)                       |
-| `capnp-zig-nightly-confidence.json` | [Superseded capnp-zig ledger](schemas/capnp-zig-ledger.schema.json), frozen on 2026-09-09 | Kept by hand until decision D5                             |
+| `capnp-zig-nightly-confidence.json` | [Superseded capnp-zig ledger](schemas/capnp-zig-ledger.schema.json), frozen on 2026-09-09 | Frozen; superseded by `nightly-confidence.json` (D5 = A)   |
 | `nightly-<date>-hosted.json`        | [Scheduled capnp-zig Nightly jobs and steps](schemas/hosted-nightly.schema.json)          | Hand audit                                                 |
 | `nightly-<date>-fuzz.json`          | [Scheduled capnp-zig Nightly fuzz audit](schemas/fuzz-nightly.schema.json)                | Hand audit                                                 |
 | `<commit>-manual-nightly.json`      | [Manual capnp-zig Nightly fuzz receipts](schemas/manual-nightly.schema.json)              | Hand audit                                                 |
@@ -32,7 +35,9 @@ writes nothing and fails when the committed ledger is stale. The nightly
 workflow, held on the `quality/held-workflows` branch until it reaches `main`,
 runs the task in a `ledger` job after its other jobs and uploads the result as
 an artifact; CI never commits it. Commit a regenerated ledger with any
-`ref/capnp-zig` bump, since the bump restarts the streak.
+`ref/capnp-zig` bump, since the bump restarts the streak; until then
+`check:evidence` fails because the ledger names the previous gitlink. Only a
+first-attempt success counts: a run that passed on a re-run ends the streak.
 
 ## Versions
 

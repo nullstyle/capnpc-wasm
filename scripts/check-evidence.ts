@@ -3,14 +3,20 @@
 // schemas/ subdirectory through that schema's x-fileNamePattern, carry the
 // schema version the schema requires, validate against the schema, and name
 // only existing receipts in the fields the schema marks with x-evidenceFile.
-// Every schema must match at least one receipt.
+// Every schema must match at least one receipt, and the directory holds
+// nothing but receipts, README.md, and schemas/. The nightly-confidence ledger
+// must also pass ledgerProblems from scripts/audit-nightly.ts: counters and
+// dates that match its cycles, and the ref/capnp-zig gitlink the index pins,
+// read with `git ls-files`.
 //
 // The schemas are JSON Schema 2020-12 documents limited to the keywords this
 // script implements; a schema using any other keyword fails the check, so this
 // script and a full validator accept the same receipts. Offline: nothing is
 // fetched. `mise run check:evidence` runs it as part of `lint`.
 //
-// Usage: deno run --allow-read scripts/check-evidence.ts [directory]
+// Usage: deno run --allow-read --allow-run=git scripts/check-evidence.ts [directory]
+
+import { indexGitlink, type Ledger, ledgerProblems } from "./audit-nightly.ts";
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 type JsonObject = { [key: string]: Json };
@@ -339,24 +345,71 @@ async function readJson(path: string): Promise<Json> {
   return JSON.parse(await Deno.readTextFile(path));
 }
 
-async function jsonFiles(directory: string, suffix: string): Promise<string[]> {
-  const names: string[] = [];
+// Checks a type's schema cannot express, keyed by schema file name; they run
+// only on a receipt that already validates against its schema.
+const consistency: Record<
+  string,
+  (receipt: Json, gitlink: () => Promise<string>) => Promise<string[]>
+> = {
+  "nightly-ledger.schema.json": async (receipt, gitlink) =>
+    ledgerProblems(receipt as unknown as Ledger, await gitlink()),
+};
+
+type Entries = { receipts: string[]; schemas: string[]; unexpected: string[] };
+
+/** The receipts, the schemas, and anything else in an evidence directory. */
+async function entries(directory: string): Promise<Entries> {
+  const found: Entries = { receipts: [], schemas: [], unexpected: [] };
   for await (const entry of Deno.readDir(directory)) {
-    if (entry.isFile && entry.name.endsWith(suffix)) names.push(entry.name);
+    if (entry.name.startsWith(".")) continue;
+    if (entry.isFile && entry.name.endsWith(".json")) {
+      found.receipts.push(entry.name);
+    } else if (entry.isDirectory && entry.name === "schemas") {
+      for await (const schema of Deno.readDir(`${directory}/schemas`)) {
+        if (schema.name.startsWith(".")) continue;
+        if (schema.isFile && schema.name.endsWith(".schema.json")) {
+          found.schemas.push(schema.name);
+        } else {
+          found.unexpected.push(`schemas/${schema.name}`);
+        }
+      }
+    } else if (!(entry.isFile && entry.name === "README.md")) {
+      found.unexpected.push(entry.name);
+    }
   }
-  return names.sort();
+  for (const list of Object.values(found)) list.sort();
+  return found;
 }
 
-if (import.meta.main) {
-  if (Deno.args.length > 1) {
-    console.error("usage: check-evidence.ts [directory]");
-    Deno.exit(2);
-  }
-  const directory = Deno.args[0] ?? "docs/release-evidence";
+export type EvidenceReport = {
+  lines: string[];
+  failures: string[];
+  receipts: number;
+  schemas: number;
+};
+
+/**
+ * Check every receipt and schema in `directory`. `gitlink` reads the
+ * ref/capnp-zig gitlink a nightly-confidence ledger must name; it runs once,
+ * and only when the directory holds such a ledger.
+ */
+export async function checkEvidence(
+  directory: string,
+  gitlink: () => Promise<string> = indexGitlink,
+): Promise<EvidenceReport> {
+  const lines: string[] = [];
   const failures: string[] = [];
+  const found = await entries(directory);
+  for (const name of found.unexpected) {
+    failures.push(
+      `${name}: not a receipt (*.json directly in the directory), README.md, or a schema`,
+    );
+  }
+  let pinned: Promise<string> | undefined;
+  const readGitlink = () => (pinned ??= gitlink());
 
   const schemas = new Map<string, JsonObject>();
-  for (const name of await jsonFiles(`${directory}/schemas`, ".schema.json")) {
+  for (const name of found.schemas) {
     let schema: Json;
     try {
       schema = await readJson(`${directory}/schemas/${name}`);
@@ -376,9 +429,9 @@ if (import.meta.main) {
     }
   }
 
-  const receipts = new Set(await jsonFiles(directory, ".json"));
+  const receipts = new Set(found.receipts);
   const used = new Set<string>();
-  for (const name of receipts) {
+  for (const name of found.receipts) {
     const matching = [...schemas].filter(([, schema]) =>
       new RegExp(String(schema["x-fileNamePattern"]), "u").test(name)
     );
@@ -403,30 +456,50 @@ if (import.meta.main) {
     }
     const context: Context = { root: schema, receipts, problems: [] };
     validate(receipt, schema, name, context);
+    const check = consistency[schemaName];
+    if (context.problems.length === 0 && check) {
+      try {
+        for (const problem of await check(receipt, readGitlink)) {
+          context.problems.push(`${name}: ${problem}`);
+        }
+      } catch (error) {
+        context.problems.push(`${name}: ${error}`);
+      }
+    }
     if (context.problems.length > 0) {
       failures.push(...context.problems);
-      console.log(`FAIL ${name} (${schemaName})`);
+      lines.push(`FAIL ${name} (${schemaName})`);
       continue;
     }
     const version = versionKeys.find((key) =>
       isObject(receipt) && Object.hasOwn(receipt, key)
-    )!;
-    console.log(
+    );
+    lines.push(
       `PASS ${name} (${schemaName}, ${version} ${
-        (receipt as JsonObject)[version]
+        (receipt as JsonObject)[String(version)]
       })`,
     );
   }
   for (const name of schemas.keys()) {
     if (!used.has(name)) failures.push(`schemas/${name}: matches no receipt`);
   }
+  return { lines, failures, receipts: receipts.size, schemas: schemas.size };
+}
 
-  if (failures.length > 0) {
-    for (const failure of failures) console.error(failure);
-    console.error(`${failures.length} problems in ${directory}`);
+if (import.meta.main) {
+  if (Deno.args.length > 1) {
+    console.error("usage: check-evidence.ts [directory]");
+    Deno.exit(2);
+  }
+  const directory = Deno.args[0] ?? "docs/release-evidence";
+  const report = await checkEvidence(directory);
+  for (const line of report.lines) console.log(line);
+  if (report.failures.length > 0) {
+    for (const failure of report.failures) console.error(failure);
+    console.error(`${report.failures.length} problems in ${directory}`);
     Deno.exit(1);
   }
   console.log(
-    `${receipts.size} receipts valid against ${schemas.size} schemas in ${directory}`,
+    `${report.receipts} receipts valid against ${report.schemas} schemas in ${directory}`,
   );
 }

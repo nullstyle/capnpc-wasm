@@ -30,7 +30,7 @@ candidate.
 | Release signing or attestation                                                                                                                                          | Signed `SHA256SUMS` or a provenance attestation, plus verification instructions                                             | Not started. `manifest.json` detects tampering but is not a signature                                                                                                                                                                                                     | 2026-09-22    | None                                                                                                  |
 | Registry publication path: npm or JSR package and a `sdk/go/v…` module tag                                                                                              | A tag-triggered release job that builds, verifies, and publishes with provenance                                            | Not started. `scripts/release.ts` accepts only `X.Y.Z-rc.N` with `private: true`; no `sdk/go/v*` tag exists; CI has no release job                                                                                                                                        | 2026-09-22    | None                                                                                                  |
 | Stable SDK interface                                                                                                                                                    | A written contract shared by the TypeScript and Go SDKs, frozen public types, and conformance tests across hosts            | Contract written in [docs/sdk-contract.md](sdk-contract.md); the Go SDK implements it (import roots, limits, typed stages, sentinels, exit codes), limit defaults are pinned in `tests/fixtures/contract/limits.json`, and cross-host conformance tests are pending (T13) | 2026-09-23    | None                                                                                                  |
-| Platform coverage beyond per-push CI                                                                                                                                    | Results for each host the [support matrix](../README.md#support-matrix) claims                                              | Untested: linux-arm64, macOS x64, Windows, browsers on macOS, Node, and Bun                                                                                                                                                                                               | 2026-09-22    | None                                                                                                  |
+| Platform coverage beyond per-push CI                                                                                                                                    | Results for each host the [support matrix](../README.md#support-matrix) claims                                              | Nightly jobs defined, held with no scheduled run yet: Linux arm64 and macOS x64 cold bootstrap, browsers on macOS, and the Go SDK on Windows. Node.js and Bun: direct execution best effort, worker execution rejected                                                    | 2026-09-24    | `.github/workflows/nightly.yml` (held): jobs `bootstrap`, `browsers`, `windows-go-sdk`                |
 | Explicit publication decision                                                                                                                                           | `publicationAuthorized: true` in the ledger and a recorded decision on channels, versioning per flavor, and artifact naming | `false`. The decision is open (quality-plan decision D2, tracked outside this repository)                                                                                                                                                                                 | 2026-09-09    | Manual                                                                                                |
 
 ## 0.1.0 definition of done
@@ -53,11 +53,11 @@ candidate.
   executable `bin/capnp-wasm` in the archive, symlink-safe package-root
   resolution, and either transactional output with a read-only workspace or
   documented native-equivalent semantics; `test:launcher` covers each item.
-- Nightly streak: seven consecutive scheduled Nightly successes measured on the
-  native revision this repository pins, with per-target fuzz receipts audited
-  and the ledger updated for each cycle. How the streak is measured (a scheduled
-  workflow here against the gitlink, or capnp-zig `main` with a matching
-  reference bump) is decision D5.
+- Nightly streak: seven consecutive successful scheduled runs of this
+  repository's nightly workflow at the pinned `ref/capnp-zig` revision (decision
+  D5 = A), recorded in the generated ledger (`mise run audit:nightly`). This
+  repository's nightly runs no fuzz jobs; capnp-zig's own nightly fuzz receipts
+  are supporting evidence only.
 - Signing: `SHA256SUMS` for every published asset is signed or attested, and the
   release guide tells consumers how to verify it.
 - Registry workflow: a tag-triggered CI job builds the archives from a clean
@@ -82,6 +82,11 @@ UTC. It is held on the `quality/held-workflows` branch and has never run from
 `main`, and GitHub schedules a workflow only from the default branch, so the
 streak starts with the first scheduled run after the held workflows reach `main`
 on GitHub. Runs on verification branches (push or manual triggers) never count.
+A push-triggered verification run of the held workflow
+([36095603432](https://github.com/nullstyle/capnpc-wasm/actions/runs/36095603432),
+2026-09-25) failed on macOS at the Wasm artifact check, a false positive fixed
+in `c74a7aa`, and in the Linux cold bootstrap at the Zig community mirror, which
+lacks the `.minisig` file; that waits on the upload of the project's own mirror.
 
 The ledger, [nightly-confidence.json](release-evidence/nightly-confidence.json),
 is generated. `mise run audit:nightly` reads the gitlink from the index and the
@@ -90,22 +95,26 @@ rewrites the counters: `status`, `currentConsecutiveScheduledRuns`,
 `firstQualifyingScheduledDateUtc`, `lastQualifyingScheduledDateUtc`, the
 qualifying `cycles`, and `streakEnd`, the run or missed date that ends the
 streak. `mise run audit:nightly -- --check` fails when the committed ledger is
-stale, and `mise run check:evidence` validates it against its
-[schema](release-evidence/schemas/nightly-ledger.schema.json). The workflow's
-`ledger` job runs the audit after the other jobs and uploads the regenerated
-ledger as an artifact; CI never commits it. Commit a regenerated ledger to
-record progress and with every `ref/capnp-zig` bump, which restarts the count.
-The ledger now records `"status": "no_scheduled_runs"` and a streak of 0 of 7
-for `295ff5e`. `publicationAuthorized` remains `false`.
+stale. `mise run check:evidence` validates it against its
+[schema](release-evidence/schemas/nightly-ledger.schema.json) and checks,
+offline, that its counters and dates match its cycles and that it names the
+gitlink the index pins, so a bump without a regenerated ledger fails `lint`. The
+workflow's `ledger` job runs the audit after the other jobs and uploads the
+regenerated ledger as an artifact; CI never commits it. Commit a regenerated
+ledger to record progress and with every `ref/capnp-zig` bump, which restarts
+the count. The ledger now records `"status": "no_scheduled_runs"` and a streak
+of 0 of 7 for `295ff5e`. `publicationAuthorized` remains `false`.
 
 Rules, from the JSON: a cycle is a scheduled run of the workflow. It qualifies
-when the run concluded `success`, so every job without `continue-on-error`
-succeeded, and the gitlink at its head commit is the pinned revision. Manual and
-local runs never count. Qualifying cycles fall on consecutive UTC dates, the
-newest today or yesterday; a scheduled run that failed, was cancelled, or tested
-another native revision ends the streak, and so does a date without a completed
-scheduled run. A gitlink bump restarts the count; changes to this repository's
-other sources do not, because per-push CI gates them.
+when the run concluded `success` on its first attempt, so every job without
+`continue-on-error` succeeded without a re-run, and the gitlink at its head
+commit is the pinned revision. Manual and local runs never count. Qualifying
+cycles fall on consecutive UTC dates, the newest today or yesterday; a scheduled
+run that failed, was cancelled, passed only on a re-run, or tested another
+native revision ends the streak, and so does a date without a completed
+scheduled run, even while a re-run of that date's run is in progress. A gitlink
+bump restarts the count; changes to this repository's other sources do not,
+because per-push CI gates them.
 
 ### capnp-zig scheduled Nightly
 

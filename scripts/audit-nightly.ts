@@ -14,9 +14,11 @@
 // writes nothing and exits 1 when the committed ledger differs from the
 // computed one. Until the workflow has a completed scheduled run on GitHub, the
 // ledger records status "no_scheduled_runs" and a streak of 0; that is a
-// result, not an error.
+// result, not an error. scripts/check-evidence.ts applies ledgerProblems to the
+// committed ledger offline.
 
 const ledgerPath = "docs/release-evidence/nightly-confidence.json";
+const ledgerName = "nightly-confidence.json";
 const nativeReference = "ref/capnp-zig";
 const commitPattern = /^[0-9a-f]{40}$/;
 
@@ -49,18 +51,44 @@ export type StreakEnd = {
 
 export type Streak = { cycles: Cycle[]; streakEnd: StreakEnd | null };
 
+/** The ledger this script writes (schema version 2). */
+export type Ledger = {
+  schemaVersion: number;
+  phase: string;
+  workflow: { repository: string; path: string; event: string };
+  nativeReference: string;
+  nativeRevision: string;
+  requiredConsecutiveScheduledRuns: number;
+  status: "no_scheduled_runs" | "measured";
+  statusDetail: string | null;
+  currentConsecutiveScheduledRuns: number;
+  firstQualifyingScheduledDateUtc: string | null;
+  lastQualifyingScheduledDateUtc: string | null;
+  cycles: Cycle[];
+  streakEnd: StreakEnd | null;
+  rules: string[];
+  publicationAuthorized: boolean;
+  supersedes: string;
+};
+
 export function dayBefore(date: string): string {
   const time = Date.parse(`${date}T00:00:00Z`) - 86_400_000;
   return new Date(time).toISOString().slice(0, 10);
 }
 
 /**
- * The current streak, newest cycle first. A cycle is a completed scheduled
- * run that concluded success at the pinned native revision; cycles fall on
- * consecutive UTC dates, the newest on `today` or the day before (today's run
- * may not have happened yet). A second run on a counted date must qualify too
- * but adds no cycle. Runs that have not completed are neither counted nor
- * break the streak, so the nightly's own ledger job sees the previous runs.
+ * The current streak, newest cycle first. A cycle is a scheduled run that
+ * concluded success on its first attempt at the pinned native revision; the
+ * API reports only a run's latest attempt, so a run that passed on a re-run
+ * ends the streak. Cycles fall on consecutive UTC dates, the newest on `today`
+ * or the day before (today's run may not have happened yet), and a second run
+ * on a counted date must qualify too but adds no cycle.
+ *
+ * Runs that have not completed are never counted. On the newest dates they
+ * leave the streak to the completed runs before them, so the nightly's own
+ * ledger job, which runs inside a pending run, counts the runs before it. On
+ * an older date, a pending run, such as a re-run in progress, leaves that date
+ * without a completed run and ends the streak there; the detail names it.
  */
 export async function computeStreak(
   runs: readonly Run[],
@@ -68,9 +96,10 @@ export async function computeStreak(
   today: string,
   nativeRevisionOf: (run: Run) => Promise<string>,
 ): Promise<Streak> {
-  const completed = runs
-    .filter((run) => run.event === "schedule" && run.status === "completed")
+  const scheduled = runs
+    .filter((run) => run.event === "schedule")
     .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+  const completed = scheduled.filter((run) => run.status === "completed");
   const cycles: Cycle[] = [];
   const end = (
     scheduledDateUtc: string,
@@ -86,13 +115,31 @@ export async function computeStreak(
     const date = run.created_at.slice(0, 10);
     const due = dayBefore(counted ?? today);
     if (date !== counted && date < due) {
-      return end(due, "missed", `no completed scheduled run on ${due}`, null);
+      const pending = scheduled.find((other) =>
+        other.status !== "completed" && other.created_at.slice(0, 10) === due
+      );
+      return end(
+        due,
+        "missed",
+        pending
+          ? `no completed scheduled run on ${due}; run ${pending.id} (attempt ${pending.run_attempt}) is ${pending.status}`
+          : `no completed scheduled run on ${due}`,
+        pending?.html_url ?? null,
+      );
     }
     if (run.conclusion !== "success") {
       return end(
         date,
         "conclusion",
         `run ${run.id} concluded ${run.conclusion ?? "without a conclusion"}`,
+        run.html_url,
+      );
+    }
+    if (run.run_attempt !== 1) {
+      return end(
+        date,
+        "conclusion",
+        `run ${run.id} passed only on attempt ${run.run_attempt}`,
         run.html_url,
       );
     }
@@ -121,6 +168,95 @@ export async function computeStreak(
   return { cycles, streakEnd: null };
 }
 
+/**
+ * Invariants of a ledger that its schema cannot express: the counters and
+ * dates match the cycle list, cycles are first-attempt runs of the ledger's
+ * own repository on consecutive dates, newest first, the status agrees with
+ * the runs, and nativeRevision is the gitlink the index pins now, so a
+ * reference bump without a regenerated ledger fails.
+ */
+export function ledgerProblems(ledger: Ledger, gitlink: string): string[] {
+  const problems: string[] = [];
+  const { cycles, streakEnd } = ledger;
+  if (ledger.nativeRevision !== gitlink) {
+    problems.push(
+      `nativeRevision ${ledger.nativeRevision} is not the ${nativeReference} gitlink in the index, ${gitlink}; run mise run audit:nightly`,
+    );
+  }
+  if (ledger.currentConsecutiveScheduledRuns !== cycles.length) {
+    problems.push(
+      `currentConsecutiveScheduledRuns is ${ledger.currentConsecutiveScheduledRuns} but the ledger lists ${cycles.length} cycles`,
+    );
+  }
+  const oldest = cycles.at(-1)?.scheduledDateUtc ?? null;
+  const newest = cycles[0]?.scheduledDateUtc ?? null;
+  if (ledger.firstQualifyingScheduledDateUtc !== oldest) {
+    problems.push(
+      `firstQualifyingScheduledDateUtc is ${ledger.firstQualifyingScheduledDateUtc} but the oldest cycle is ${oldest}`,
+    );
+  }
+  if (ledger.lastQualifyingScheduledDateUtc !== newest) {
+    problems.push(
+      `lastQualifyingScheduledDateUtc is ${ledger.lastQualifyingScheduledDateUtc} but the newest cycle is ${newest}`,
+    );
+  }
+  const runs = `https://github.com/${ledger.workflow.repository}/actions/runs/`;
+  cycles.forEach((cycle, index) => {
+    if (cycle.runUrl !== `${runs}${cycle.runId}`) {
+      problems.push(
+        `cycles[${index}].runUrl ${cycle.runUrl} is not run ${cycle.runId} of ${ledger.workflow.repository}`,
+      );
+    }
+    if (cycle.runAttempt !== 1) {
+      problems.push(
+        `cycles[${index}] passed on attempt ${cycle.runAttempt}; only first attempts qualify`,
+      );
+    }
+    const previous = cycles[index - 1]?.scheduledDateUtc;
+    if (previous && cycle.scheduledDateUtc !== dayBefore(previous)) {
+      problems.push(
+        `cycles[${index}] is dated ${cycle.scheduledDateUtc}, not ${
+          dayBefore(previous)
+        }, the day before cycles[${index - 1}]`,
+      );
+    }
+  });
+  if (streakEnd) {
+    if (streakEnd.runUrl !== null && !streakEnd.runUrl.startsWith(runs)) {
+      problems.push(
+        `streakEnd.runUrl ${streakEnd.runUrl} is not a run of ${ledger.workflow.repository}`,
+      );
+    }
+    if (
+      oldest && streakEnd.scheduledDateUtc !== oldest &&
+      streakEnd.scheduledDateUtc !== dayBefore(oldest)
+    ) {
+      problems.push(
+        `streakEnd is dated ${streakEnd.scheduledDateUtc}, not the oldest cycle's date ${oldest} or the day before`,
+      );
+    }
+  }
+  if (ledger.status === "no_scheduled_runs") {
+    if (cycles.length > 0 || streakEnd !== null) {
+      problems.push("status no_scheduled_runs, but the ledger records runs");
+    }
+    if (ledger.statusDetail === null) {
+      problems.push("status no_scheduled_runs needs a statusDetail");
+    }
+  } else {
+    if (ledger.statusDetail !== null) {
+      problems.push("status measured takes no statusDetail");
+    }
+    if (cycles.length === 0 && streakEnd === null) {
+      problems.push("status measured, but the ledger records no run");
+    }
+  }
+  if (ledger.supersedes === ledgerName) {
+    problems.push("supersedes names the ledger itself");
+  }
+  return problems;
+}
+
 async function output(command: string, args: string[]): Promise<string> {
   const result = await new Deno.Command(command, {
     args,
@@ -138,7 +274,7 @@ async function output(command: string, args: string[]): Promise<string> {
 }
 
 /** The ref/capnp-zig gitlink recorded in the index, as scripts/lib/refs.sh reads it. */
-async function pinnedRevision(): Promise<string> {
+export async function indexGitlink(): Promise<string> {
   const lines = (await output("git", [
     "ls-files",
     "--stage",
@@ -190,17 +326,18 @@ function parseArgs(args: string[]) {
   return { ...options, check };
 }
 
-type Ledger = {
-  schemaVersion: number;
-  requiredConsecutiveScheduledRuns: number;
-  rules: string[];
-  publicationAuthorized: boolean;
-  supersedes: string;
-};
+type HandFields = Pick<
+  Ledger,
+  | "schemaVersion"
+  | "requiredConsecutiveScheduledRuns"
+  | "rules"
+  | "publicationAuthorized"
+  | "supersedes"
+>;
 
 /** The hand-maintained fields of the committed ledger. */
-function committedFields(text: string): Ledger {
-  const ledger = JSON.parse(text) as Partial<Ledger>;
+function committedFields(text: string): HandFields {
+  const ledger = JSON.parse(text) as Partial<HandFields>;
   const problems: string[] = [];
   if (ledger.schemaVersion !== 2) {
     problems.push(
@@ -226,7 +363,7 @@ function committedFields(text: string): Ledger {
   if (problems.length > 0) {
     throw new Error(`${ledgerPath}: ${problems.join("; ")}`);
   }
-  return ledger as Ledger;
+  return ledger as HandFields;
 }
 
 if (import.meta.main) {
@@ -234,7 +371,7 @@ if (import.meta.main) {
   const workflowPath = `.github/workflows/${workflow}`;
   const committedText = await Deno.readTextFile(ledgerPath);
   const committed = committedFields(committedText);
-  const pinned = await pinnedRevision();
+  const pinned = await indexGitlink();
 
   const registered = (await output("gh", [
     "api",
@@ -291,7 +428,7 @@ if (import.meta.main) {
   const statusDetail = completedRuns === 0
     ? `no completed scheduled run of ${workflowPath} in ${repo} yet; GitHub schedules the workflow only from the default branch, and the streak starts with its first scheduled run there`
     : null;
-  const ledger = {
+  const ledger: Ledger = {
     schemaVersion: 2,
     phase: "scheduled_nightly_confidence",
     workflow: { repository: repo, path: workflowPath, event: "schedule" },
@@ -310,6 +447,12 @@ if (import.meta.main) {
     publicationAuthorized: committed.publicationAuthorized,
     supersedes: committed.supersedes,
   };
+  const inconsistent = ledgerProblems(ledger, pinned);
+  if (inconsistent.length > 0) {
+    throw new Error(
+      `computed an inconsistent ledger: ${inconsistent.join("; ")}`,
+    );
+  }
   const text = JSON.stringify(ledger, null, 2) + "\n";
 
   console.log(
@@ -333,13 +476,12 @@ if (import.meta.main) {
       `  streak ends ${streakEnd.scheduledDateUtc}: ${streakEnd.detail}`,
     );
   }
-  const pending = runs.filter((run) =>
-    run.event === "schedule" && run.status !== "completed"
-  );
-  for (const run of pending) {
-    console.log(
-      `  pending ${run.html_url} (${run.status}), counted once it completes`,
-    );
+  for (const run of runs) {
+    if (run.event === "schedule" && run.status !== "completed") {
+      console.log(
+        `  pending ${run.html_url} (${run.status}, attempt ${run.run_attempt})`,
+      );
+    }
   }
   console.log(
     `streak: ${cycles.length} of ${committed.requiredConsecutiveScheduledRuns} consecutive qualifying scheduled runs`,
