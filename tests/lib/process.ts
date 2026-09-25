@@ -3,6 +3,7 @@
 // environment built from one pass-through list.
 
 import { root } from "./paths.ts";
+import { scaled } from "./timeout-scale.ts";
 
 /**
  * Host environment variables that child processes receive. Everything else is
@@ -17,10 +18,12 @@ import { root } from "./paths.ts";
  * the default macOS SDK cannot link (see ldflags() for the LDFLAGS caveat).
  * The remaining names are the mise `[env]` cache locations plus the Rust
  * toolchain selection: the rustup proxy in CARGO_HOME resolves the pinned
- * toolchain only through RUSTUP_TOOLCHAIN.
+ * toolchain only through RUSTUP_TOOLCHAIN. CAPNP_TEST_TIMEOUT_SCALE
+ * (timeout-scale.ts) reaches nested Deno helpers, so they scale alike.
  */
 export const ENV_PASSTHROUGH: readonly string[] = [
   "CAPNP_KEEP_TEST_DIRS",
+  "CAPNP_TEST_TIMEOUT_SCALE",
   "PATH",
   "HOME",
   "TMPDIR",
@@ -119,8 +122,9 @@ export interface RunOptions {
    * stdout and stderr are no longer awaited, so a grandchild that inherited
    * the pipes (a `cargo test` or `zig test` binary, say) cannot hold the call
    * open; the output captured until then is returned with `timedOut` set.
-   * Defaults to 60 s; a step that compiles code uses buildTimeoutMs and runs
-   * what it built as a separate step under this default.
+   * Defaults to defaultTimeoutMs (60 s times CAPNP_TEST_TIMEOUT_SCALE); a
+   * step that compiles code uses buildTimeoutMs and runs what it built as a
+   * separate step under the default.
    */
   timeoutMs?: number;
   /** Grace between SIGTERM and SIGKILL after a timeout; defaults to 5 s. */
@@ -136,9 +140,14 @@ export interface RunOptions {
  * fails ten minutes in. Such a step only builds (`zig test --test-no-exec`,
  * `cargo test --no-run`, `go test -run '^$'`); the program it built runs as
  * its own step under the default, so a hung program fails in 60 s and the
- * timeout stops that program, not the compiler that started it.
+ * timeout stops that program, not the compiler that started it. Both
+ * timeouts scale by CAPNP_TEST_TIMEOUT_SCALE (timeout-scale.ts): at 3, a hung
+ * program fails in 3 minutes and a hung compiler in 30 (ledger row 143).
  */
-export const buildTimeoutMs = 10 * 60_000;
+export const buildTimeoutMs = scaled(10 * 60_000);
+
+/** run()'s timeout when the caller passes none: 60 s, scaled. */
+export const defaultTimeoutMs = scaled(60_000);
 
 /** A command's output; `timedOut` marks a run that hit `timeoutMs`. */
 export interface RunResult extends Deno.CommandOutput {
@@ -155,7 +164,7 @@ export async function run(
     stdinFile,
     cwd = root,
     env = {},
-    timeoutMs = 60_000,
+    timeoutMs = defaultTimeoutMs,
     killAfterMs = 5_000,
   } = options;
   if (stdin && stdinFile) {
