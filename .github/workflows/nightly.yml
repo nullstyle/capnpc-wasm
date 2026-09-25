@@ -2,8 +2,9 @@
 # committed lock with no tool cache on Linux and macOS, x64 and arm64, the
 # browser suites on Linux and macOS, long cancellation soaks, the Go race
 # detector, the go.mod floor toolchain, a drift check against newer wazero, a
-# non-gating worker termination canary, and the reachability of every locked
-# download. Every verification step calls a mise task, so it also runs locally.
+# non-gating worker termination canary, the reachability of every locked
+# download, the Go SDK tests on Windows, and the nightly-confidence ledger.
+# Every other verification step calls a mise task, so it also runs locally.
 name: Nightly
 
 on:
@@ -282,6 +283,93 @@ jobs:
       - name: Request every download URL recorded in mise.lock
         run: mise run check:lock-urls
 
+  # Windows is supported for the Go SDK only (decision D3 = A); the build and
+  # every other tool need Linux or macOS. This job builds the Wasm command
+  # modules on Linux (build:sdk, no native oracle) for the Windows job.
+  windows-go-modules:
+    name: Wasm modules for the Windows Go SDK tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      go-version: ${{ steps.go.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install Linux host development libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-14 pkg-config
+      # The cold check is the bootstrap job's; this job may restore the cache.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: 2026.9.1
+      - name: Initialize only pinned top-level references
+        run: mise run setup
+      - name: Build the Wasm command modules
+        run: mise run build:sdk
+      # The Windows job installs the same Go release as mise.toml; the lock
+      # has no Windows entries, so mise does not run there.
+      - name: Report the pinned Go release
+        id: go
+        run: |
+          version="$(mise exec -- go env GOVERSION)"
+          echo "version=${version#go}" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-windows-go-modules
+          path: |
+            dist/wasm/capnp.wasm
+            dist/wasm/capnpc-c++.wasm
+            dist/wasm/capnpc-rust.wasm
+            dist/wasm/capnpc-go.wasm
+            dist/wasm/capnpc-zig.wasm
+          if-no-files-found: error
+          retention-days: 7
+
+  # The Go SDK tests on Windows against the modules built above
+  # (CAPNPC_WASM_TEST_MODULES), in a checkout, so a missing module or fixture
+  # fails instead of skipping. Three tests compare with the native oracle, a
+  # Linux or macOS build that cannot run here, so they are skipped; the
+  # per-push jobs compare the same module bytes with native output.
+  windows-go-sdk:
+    name: Go SDK (windows-latest)
+    needs: windows-go-modules
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      # The repository's .gitattributes keeps its own text files LF; this
+      # keeps the two references' schemas byte-identical to Linux as well.
+      - name: Check out text files unconverted
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # The tests read c++.capnp from ref/capnproto and go.capnp from
+      # ref/go-capnp, at their recorded commits.
+      - name: Initialize the references the Go SDK tests read
+        run: git submodule update --init --depth 1 -- ref/capnproto ref/go-capnp
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: nightly-windows-go-modules
+          path: ${{ runner.temp }}/wasm
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: ${{ needs.windows-go-modules.outputs.go-version }}
+          cache: false
+      - name: Test the Go SDK against the Linux-built modules
+        env:
+          CAPNPC_WASM_TEST_MODULES: ${{ runner.temp }}/wasm
+          GOTOOLCHAIN: local
+        run: >-
+          go -C sdk/go test -count=1 -mod=readonly
+          -skip '^TestCompiler$/^native_parity$|^TestSchemaFeatures$|^TestCompilerPathFixtureMatchesNative$'
+          ./...
+
   # The nightly-confidence ledger (decision D5 = A): the streak of successful
   # scheduled runs of this workflow at the pinned ref/capnp-zig revision,
   # recomputed from the Actions API once the other jobs have finished. This
@@ -291,7 +379,14 @@ jobs:
   # Non-gating, so an API failure here cannot fail the run it measures.
   ledger:
     name: Nightly-confidence ledger (non-gating)
-    needs: [bootstrap, browsers, go-compat, lock-urls]
+    needs:
+      - bootstrap
+      - browsers
+      - go-compat
+      - termination-canary
+      - lock-urls
+      - windows-go-modules
+      - windows-go-sdk
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
