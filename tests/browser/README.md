@@ -162,7 +162,7 @@ a core busy until the browser closes.
 
 | Engine                         | Pure-Wasm guest stops after | Host-calling guest stops after |
 | ------------------------------ | --------------------------- | ------------------------------ |
-| Chromium 153.0.8010.12 (macOS) | 2021-2052 ms                | 2019-2047 ms                   |
+| Chromium 153.0.8010.12 (macOS) | 2017-2052 ms                | 2017-2047 ms                   |
 | WebKit 26.6 (macOS, Linux CI)  | never (expected failure)    | 51-358 ms (macOS)              |
 | Firefox 155.0 (Linux CI)       | within the bound (asserted) | within the bound (asserted)    |
 
