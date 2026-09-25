@@ -197,9 +197,9 @@ guest stage starts and `timeoutMs` bounds the running one.
 `createWorkerCompiler(workerURL, modules, options?)` executes off the main
 thread. Its `compile(request, { signal, timeoutMs })` accepts an `AbortSignal`
 and defaults to a 30-second deadline, including any wait for a worker to start
-or recover. `dispose()` stops any running guest, rejects pending work, and
-terminates the client permanently. One job may be active per worker client; use
-separate clients for parallel jobs.
+or recover. `dispose()` rejects pending work, closes the client permanently, and
+stops a running guest as an abort would. One job may be active per worker
+client; use separate clients for parallel jobs.
 
 Cancellation stops the guest, not only the promise. A timeout, an abort, or
 `dispose()` rejects the job at once. Where a `SharedArrayBuffer` can reach the
@@ -220,11 +220,11 @@ invalid input and `CompileError` for schema errors, traps and budget overruns,
 keep the worker: every job already runs fresh guest instances and filesystems,
 so the next job starts immediately with no restart and no recompilation.
 
-Without cross-origin isolation an abort therefore terminates the worker, and
-nothing can stop its running guest early. Where `terminate()` does not stop a
-running Wasm guest (WebKit never does, Chromium does after about 2 s, and Deno
-2.7.6 and later do not stop a spinning worker), the guest runs until its own
-`timeoutMs` deadline and then traps. Serve pages with
+Without cross-origin isolation an abort or `dispose()` therefore terminates the
+worker, and nothing can stop its running guest early. Where `terminate()` does
+not stop a running Wasm guest (WebKit never does, Chromium does after about 2 s,
+and Deno 2.7.6 and later do not stop a spinning worker), the guest runs until
+its own `timeoutMs` deadline and then traps. Serve pages with
 `Cross-Origin-Opener-Policy: same-origin` and
 `Cross-Origin-Embedder-Policy: require-corp` so that aborts stop guests at once,
 and keep `timeoutMs` short where they cannot.
@@ -252,29 +252,40 @@ workers can be loaded.
 
 ### Interruption
 
-Before it compiles a guest, the SDK rewrites the module in the same pass that
-bounds its memory. The rewrite adds one import, `capnp_wasm.interrupt`, and a
-countdown that ticks at every loop header, at the entry of every function that
-can call guest code, and after every call to an import. Every 65,536 ticks (a
-fraction of a millisecond of guest execution) the guest asks the host whether to
-stop, and the host checks the job's deadline, its abort signal, and the shared
-cell. A stop executes `unreachable`, a trap, which guest exception handlers
-(`try_table`, C++ `catch (...)`, and cleanup code) cannot intercept, so no guest
-code runs after a stop. The host stops a guest the same way after `proc_exit`,
-after a budget overrun, and after any host error inside a WASI import; it never
-throws into the guest. A guest sleeping in `poll_oneoff` waits with
-`Atomics.wait` instead of spinning where the thread may block, and wakes at the
-deadline or on cancellation.
+Before it compiles a guest, the SDK validates the module and then rewrites it in
+the same pass that bounds its memory. The rewrite adds one import,
+`capnp_wasm.interrupt`, and a countdown that ticks at every loop header, at the
+entry of every function that can call guest code, and after every call to an
+import, including calls through a table or a function reference, which reach the
+import through an added function that checks after it. Bulk memory and table
+operations (`memory.fill`, `memory.copy`, `table.fill` and the like) are charged
+by size, one tick per KiB or per 16 table entries, so a loop of large copies
+polls as often as a loop of plain instructions. Every 65,536 ticks (a fraction
+of a millisecond of guest execution) the guest asks the host whether to stop,
+and the host checks the job's deadline, its abort signal, and the shared cell.
+Every WASI import checks the same before it acts, so a loop of costly imports
+(such as `random_get` over all of memory) stops after one call. A stop executes
+`unreachable`, a trap, which guest exception handlers (`try_table`, C++
+`catch (...)`, and cleanup code) cannot intercept, so no guest code runs after a
+stop. The host stops a guest the same way after `proc_exit`, after a budget
+overrun, and after any host error inside a WASI import, including an abort
+signal that throws when read; it never throws into the guest. A guest sleeping
+in `poll_oneoff` waits with `Atomics.wait` instead of spinning where the thread
+may block. It wakes at the deadline, and in a worker also when the shared cell
+cancels the job; nothing else runs on the thread of a direct job, so its abort
+signal cannot end the sleep early.
 
 The rewrite renumbers function indices, including the `name` section's function
-names, so trap backtraces keep naming the right functions. It drops other custom
-sections that hold code offsets or indices (the `name` section too, when it has
-label names), and it rejects module features it cannot rewrite exactly, such as
-GC types, table initializers, and unknown instructions, with a `TypeError`.
-Generated output is byte-identical with and without the checks. On the pinned
-Deno they cost about 15 to 17 percent of end-to-end job time (rpc.capnp with C++
-generation, and a workspace generating all four languages), and rewriting the
-five toolchain modules adds about 70 ms to factory start-up.
+names, so trap backtraces keep naming the right functions. It keeps the
+`producers` and `target_features` custom sections and drops every other one,
+because custom sections can hold code offsets or indices (the `name` section is
+dropped too when it has label names). It rejects module features it cannot
+rewrite exactly, such as GC types, table initializers, shared or 64-bit memory
+imports, and unknown instructions, with a `TypeError`. Generated output is
+byte-identical with and without the checks. On the pinned Deno they cost about
+10 to 16 percent of end-to-end job time (rpc.capnp with C++ generation, and a
+workspace generating all four languages), and validating and rewriting the five
+toolchain modules adds about 75 ms to factory start-up.
 
 ## Engine requirements
 

@@ -197,21 +197,28 @@ every flavor it applies to has shipped it.
   without an accepted expression. The SBOM's `capnpc-wasm` component (the
   project's own code) is versioned by the producer commit, not by the flavor's
   version.
-- TypeScript SDK: every guest module is instrumented when it is compiled: one
-  `capnp_wasm.interrupt` import polled from loop headers, from the entry of each
-  function that calls guest code, and after each import call, with a trap after
-  `proc_exit`; function indices and the `name` section's function and local
-  names are renumbered, other code-offset custom sections are dropped, and
-  constructs the rewriter cannot parse exactly (GC types, table initializers,
-  unknown opcodes) are rejected with `TypeError`. Generated output is
+- TypeScript SDK: every guest module is validated and then instrumented when it
+  is compiled: one `capnp_wasm.interrupt` import polled from loop headers, from
+  the entry of each function that calls guest code, and after each import call,
+  including calls through tables and function references, which reach the import
+  through an added function that checks after it, with a trap after `proc_exit`;
+  bulk memory and table operations are charged by size, and every WASI import
+  polls the job before it acts. Function indices and the `name` section's
+  function and local names are renumbered, custom sections other than
+  `producers` and `target_features` are dropped, and constructs the rewriter
+  cannot parse exactly (GC types, table initializers, shared or 64-bit memory
+  imports, unknown opcodes) are rejected with `TypeError`. Generated output is
   byte-identical.
 - TypeScript SDK: host stops never throw into a guest, where `catch_all` could
   intercept them: `proc_exit`, budget overruns, and host failures inside WASI
-  imports record their outcome and trap the guest at its next check, so no guest
-  handler or cleanup runs after them (exit codes, messages, and causes are
-  unchanged). `poll_oneoff` sleeps with `Atomics.wait` instead of spinning,
-  reads the subscription flags at the WASI offset (absolute clock timeouts),
-  reports the event count, and returns `EINTR` when the job is cancelled.
+  imports or while polling the job (an abort signal whose `aborted` throws)
+  record their outcome and trap the guest at its next check, so no guest handler
+  or cleanup runs after them (exit codes, messages, and causes are unchanged); a
+  stop recorded during a start function keeps `_start` from running.
+  `poll_oneoff` sleeps with `Atomics.wait` instead of spinning, reads the
+  subscription flags at the WASI offset (absolute clock timeouts), reads the
+  whole subscription before writing an event that overlaps it, reports the event
+  count, and returns `EINTR` when the job is cancelled.
 - TypeScript SDK, behavior change before the first tag: direct `compile` and
   `generate` accept the worker's `{ signal, timeoutMs }` options (`JobOptions`
   now lives in the shared types), and `timeoutMs` defaults to 30 seconds in both
