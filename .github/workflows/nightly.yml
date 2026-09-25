@@ -276,3 +276,54 @@ jobs:
           cache: false
       - name: Request every download URL recorded in mise.lock
         run: mise run check:lock-urls
+
+  # The nightly-confidence ledger (decision D5 = A): the streak of successful
+  # scheduled runs of this workflow at the pinned ref/capnp-zig revision,
+  # recomputed from the Actions API once the other jobs have finished. This
+  # run is still in progress here, so the ledger counts the runs before it;
+  # the next run, or `mise run audit:nightly` afterwards, counts this one.
+  # The regenerated ledger is an artifact: CI never commits or pushes it.
+  # Non-gating, so an API failure here cannot fail the run it measures.
+  ledger:
+    name: Nightly-confidence ledger (non-gating)
+    needs: [bootstrap, browsers, go-compat, lock-urls]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      # Only the pinned Deno; --locked never rewrites mise.lock.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+        env:
+          MISE_GITHUB_TOKEN: ${{ github.token }}
+        with:
+          version: 2026.9.1
+          install_args: --locked deno
+          cache: false
+      - name: Recompute the ledger from this repository's scheduled runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: mise run audit:nightly -- --repo "$GITHUB_REPOSITORY"
+      - name: Validate the regenerated ledger against its schema
+        run: mise run check:evidence
+      - name: Report whether the committed ledger is current
+        run: |
+          if git diff --quiet -- docs/release-evidence/nightly-confidence.json; then
+            echo "the committed ledger matches this run's computation"
+          else
+            git diff --stat -- docs/release-evidence/nightly-confidence.json
+            echo "::notice::the committed nightly-confidence ledger is stale; commit the nightly-confidence artifact or the output of mise run audit:nightly"
+          fi
+      - name: Preserve the regenerated ledger
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: nightly-confidence
+          path: docs/release-evidence/nightly-confidence.json
+          if-no-files-found: error
+          retention-days: 90
