@@ -129,6 +129,8 @@ export interface TerminationResult {
   engine: Engine;
   /** The driver's operating system (Deno.build.os). */
   os: string;
+  /** Every sample's stop time, for the OBSERVED line CI records. */
+  observed: string;
   crossOriginIsolated: boolean;
   boundMs: number;
   samples: TerminationSample[];
@@ -139,13 +141,11 @@ export interface TerminationResult {
 
 /**
  * Why WebKit may keep the pure guest running: WebKit never stops a Wasm loop
- * on Worker.terminate() (GAP2-V1, measured on macOS). Decision D1 = A has
- * T08's in-guest interruption stop it; until that lands the pure guest is an
- * expected failure. On macOS, where it was measured, the expectation is
- * strict: the test fails as soon as WebKit stops the guest, the signal to
- * remove this expectation with T08. WebKit on Linux, where CI runs it, is
- * unmeasured: there the driver accepts either behavior and prints which one
- * it observed.
+ * on Worker.terminate() (GAP2-V1), measured on macOS and on Linux (CI run
+ * 36099823012). Decision D1 = A has T08's in-guest interruption stop it;
+ * until that lands the pure guest is an expected failure on every host, and
+ * a strict one: the test fails as soon as WebKit stops the guest, the signal
+ * to remove this expectation with T08.
  */
 export const webkitExpectedFailure =
   "D1 = A: stopped by T08's in-guest interruption (GAP2-V1); remove this expectation when T08 lands";
@@ -381,6 +381,7 @@ export async function checkIsolatedTermination(
   const pure = samples.filter((sample) => sample.guest === "pure");
   const host = samples.filter((sample) => sample.guest === "host");
   const summary = `pure Wasm: ${describe(pure)}; host calls: ${describe(host)}`;
+  const observed = `${engine} termination on ${os}: ${summary}`;
   if (engine === "webkit") {
     // The guest that calls WASI stops within the bound, as in every engine.
     const hostRunning = host.filter((sample) => sample.stoppedAfterMs === null);
@@ -391,38 +392,22 @@ export async function checkIsolatedTermination(
       } (${summary})`,
     );
     const stopped = pure.filter((sample) => sample.stoppedAfterMs !== null);
-    if (os === "darwin") {
-      assert(
-        stopped.length === 0,
-        `${engine}: the pure-Wasm guest stopped after ${
-          stopped.map((sample) => sample.mode).join(", ")
-        } (${summary}), so the expected failure no longer holds (${webkitExpectedFailure}): drop the WebKit branch in checkIsolatedTermination and assert the bound for WebKit as for the other engines`,
-      );
-      return {
-        engine,
-        os,
-        crossOriginIsolated: true,
-        boundMs: terminationBoundMs,
-        samples,
-        expectedFailure: webkitExpectedFailure,
-        verdict:
-          `EXPECTED FAILURE ${engine} on ${os}: the pure-Wasm guest kept running after every cancellation (${webkitExpectedFailure}); ${summary}`,
-      };
-    }
-    const behavior = stopped.length === 0
-      ? "kept running after every cancellation"
-      : stopped.length === pure.length
-      ? "stopped after every cancellation"
-      : `stopped after ${stopped.map((sample) => sample.mode).join(", ")} only`;
+    assert(
+      stopped.length === 0,
+      `${engine} on ${os}: the pure-Wasm guest stopped after ${
+        stopped.map((sample) => sample.mode).join(", ")
+      } (${summary}), so the expected failure no longer holds (${webkitExpectedFailure}): drop the WebKit branch in checkIsolatedTermination and assert the bound for WebKit as for the other engines`,
+    );
     return {
       engine,
       os,
+      observed,
       crossOriginIsolated: true,
       boundMs: terminationBoundMs,
       samples,
       expectedFailure: webkitExpectedFailure,
       verdict:
-        `OBSERVED ${engine} on ${os}: the pure-Wasm guest ${behavior} (unmeasured here, so either is accepted; on macOS it keeps running: ${webkitExpectedFailure}); ${summary}`,
+        `EXPECTED FAILURE ${engine} on ${os}: the pure-Wasm guest kept running after every cancellation (${webkitExpectedFailure}); ${summary}`,
     };
   }
   const running = samples.filter((sample) => sample.stoppedAfterMs === null);
@@ -433,6 +418,7 @@ export async function checkIsolatedTermination(
   return {
     engine,
     os,
+    observed,
     crossOriginIsolated: true,
     boundMs: terminationBoundMs,
     samples,
@@ -471,6 +457,8 @@ export async function checkPlainTermination(
   return {
     engine,
     os: Deno.build.os,
+    observed:
+      `${engine} termination on ${Deno.build.os} without isolation: timeout rejected after ${sample.rejectionAfterMs} ms`,
     crossOriginIsolated: false,
     boundMs: terminationBoundMs,
     samples: [sample],

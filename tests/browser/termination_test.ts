@@ -76,29 +76,24 @@ Deno.test("macOS WebKit: a pure-Wasm guest that stops fails loudly", async () =>
   assert(message.includes("no longer holds"), message);
 });
 
-Deno.test("Linux WebKit: either pure-Wasm behavior passes and is reported", async () => {
-  const running = await checkIsolatedTermination(
+Deno.test("Linux WebKit: the same strict expected failure as on macOS", async () => {
+  const result = await checkIsolatedTermination(
     "webkit",
     webkitMeasured,
     "linux",
   );
   assert(
-    running.verdict.startsWith(
-      "OBSERVED webkit on linux: the pure-Wasm guest kept running",
-    ),
-    running.verdict,
-  );
-  const stopping = await checkIsolatedTermination(
-    "webkit",
-    engineThat(() => 150),
-    "linux",
+    result.verdict.startsWith("EXPECTED FAILURE webkit on linux"),
+    result.verdict,
   );
   assert(
-    stopping.verdict.startsWith(
-      "OBSERVED webkit on linux: the pure-Wasm guest stopped after every cancellation",
-    ),
-    stopping.verdict,
+    result.observed.startsWith("webkit termination on linux: pure Wasm:"),
+    result.observed,
   );
+  const message = await rejection(() =>
+    checkIsolatedTermination("webkit", engineThat(() => 150), "linux")
+  );
+  assert(message.includes("no longer holds"), message);
 });
 
 Deno.test("WebKit on any host: a host-calling guest must stop within the bound", async () => {

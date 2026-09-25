@@ -1273,6 +1273,7 @@ try {
       ? await checkIsolatedTermination(engine, evaluateOn(auditedPage))
       : await checkPlainTermination(engine, evaluateOn(auditedPage));
     termination.push(result);
+    console.log(`OBSERVED ${result.observed}`);
     console.log(result.verdict);
   }
 
