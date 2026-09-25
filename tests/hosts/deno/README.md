@@ -3,11 +3,15 @@
 This development runner loads the exact `ref/browser_wasi_shim` source into
 Deno. `--unstable-sloppy-imports` resolves that upstream source's `.js` imports
 to its `.ts` files; it is a development convenience, not a package API. The
-adapter disables upstream debug output to keep stdout binary and applies the
-SDK's own corrections to the shim's ABI from `sdk/typescript/shim-abi.ts`
-(`args_sizes_get` counts UTF-8 bytes for non-ASCII arguments, and
-`path_readlink` reports INVAL for existing non-links), so the parity rows run
-the adapter code the SDK ships. The reference source remains unchanged.
+adapter disables upstream debug output to keep stdout binary. It loads the shim
+through the SDK's typed facade (`sdk/typescript/shim.ts`) and applies the SDK's
+own corrections to the shim's ABI from `sdk/typescript/shim-abi.ts`:
+`args_sizes_get` counts UTF-8 bytes for non-ASCII arguments, `path_readlink`
+reports INVAL for existing non-links, and `poll_oneoff` serves one clock
+subscription and sleeps in `Atomics.wait` instead of spinning. The parity rows
+therefore run the adapter code the SDK ships. The SDK adds only its job
+controls: the host's sleeps are never cancelled. The reference source remains
+unchanged.
 
 Run from the repository root:
 

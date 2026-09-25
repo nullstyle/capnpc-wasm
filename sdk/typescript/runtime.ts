@@ -15,20 +15,14 @@ import {
 } from "./interrupt.ts";
 import { defaultLimits, type ResourceLimits } from "./types.ts";
 import {
-  CLOCKID_MONOTONIC,
-  CLOCKID_REALTIME,
   Directory,
   ERRNO_INTR,
-  ERRNO_INVAL,
-  ERRNO_NOTSUP,
   ERRNO_ROFS,
-  EVENTTYPE_CLOCK,
   File,
   OFLAGS_CREAT,
   OFLAGS_TRUNC,
   OpenFile,
   PreopenDirectory,
-  SUBCLOCKFLAGS_SUBSCRIPTION_CLOCK_ABSTIME,
   WASI,
 } from "./shim.ts";
 
@@ -214,58 +208,6 @@ type Stop =
   | { kind: "cancel" };
 
 /**
- * `poll_oneoff` for the single clock subscription the pinned shim supports
- * (boundWasiIO checks the count and the subscription and event pointers).
- * The shim busy-waits for the whole interval and reads the subscription
- * flags at the wrong offset; this sleeps through JobControl instead, never
- * past the job deadline, and answers EINTR when the job was cancelled, after
- * which the check following the call traps.
- * https://github.com/WebAssembly/WASI/blob/main/legacy/preview1/docs.md#poll_oneoff
- */
-function clockPoll(
-  wasi: WASI,
-  control: JobControl,
-  cancel: () => void,
-): (input: number, output: number, count: number, events: number) => number {
-  return (input, output, _count, events) => {
-    const buffer = wasi.inst.exports.memory.buffer;
-    input >>>= 0;
-    output >>>= 0;
-    events >>>= 0;
-    if (events + 4 > buffer.byteLength) return ERRNO_INVAL;
-    const view = new DataView(buffer);
-    // subscription: userdata u64 @0, tag u8 @8, clock id u32 @16,
-    // timeout u64 @24, precision u64 @32, flags u16 @40.
-    if (view.getUint8(input + 8) !== EVENTTYPE_CLOCK) return ERRNO_NOTSUP;
-    const clock = view.getUint32(input + 16, true);
-    let now: bigint;
-    if (clock === CLOCKID_MONOTONIC) {
-      now = BigInt(Math.round(performance.now() * 1_000_000));
-    } else if (clock === CLOCKID_REALTIME) {
-      now = BigInt(Date.now()) * 1_000_000n;
-    } else return ERRNO_INVAL;
-    const userdata = view.getBigUint64(input, true);
-    const timeout = view.getBigUint64(input + 24, true);
-    const absolute = view.getUint16(input + 40, true) &
-      SUBCLOCKFLAGS_SUBSCRIPTION_CLOCK_ABSTIME;
-    const remaining = absolute ? timeout - now : timeout;
-    control.sleep(remaining > 0n ? Number(remaining) / 1_000_000 : 0);
-    if (control.cancelled()) {
-      cancel();
-      return ERRNO_INTR;
-    }
-    // event: userdata u64 @0, error u16 @8, type u8 @10, 32 bytes in all.
-    // The subscription was read in full first: the two may overlap.
-    const event = new DataView(wasi.inst.exports.memory.buffer, output, 32);
-    for (let offset = 0; offset < 32; offset += 4) event.setUint32(offset, 0);
-    event.setBigUint64(0, userdata, true);
-    event.setUint8(10, EVENTTYPE_CLOCK);
-    new DataView(wasi.inst.exports.memory.buffer).setUint32(events, 1, true);
-    return 0;
-  };
-}
-
-/**
  * Execute a pinned WASI command in a fresh memory filesystem. `stdin` and
  * `files` are copied into the filesystem unless `copy` is false, which callers
  * pass only for buffers they already own privately.
@@ -314,12 +256,10 @@ export async function runCommand(
     if (countdown) countdown.value = 0;
   };
 
-  correctShimAbi(wasi, argv);
-  wasi.wasiImport.poll_oneoff = clockPoll(
-    wasi,
-    control,
-    () => halt({ kind: "cancel" }),
-  );
+  // poll_oneoff sleeps through the job's control, never past its deadline,
+  // and answers EINTR once the job is cancelled; the check following the
+  // call then traps.
+  correctShimAbi(wasi, argv, control, () => halt({ kind: "cancel" }));
   boundWasiIO(wasi, limits);
 
   // proc_exit returns to the guest, which traps on the injected unreachable;

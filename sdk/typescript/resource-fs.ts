@@ -290,10 +290,10 @@ export function boundWasiIO(wasi: WASI, limits: ResourceLimits): void {
     count: number,
     ...rest: unknown[]
   ) => {
-    // runCommand's clock poll, like the shim, serves exactly one clock
-    // subscription (48 bytes in, 32 bytes out). Treat the count as the
-    // unsigned value the guest passed, so a negative i32 cannot slip past
-    // these checks to a raw read.
+    // The clock poll (shim-abi.ts), like the shim, serves exactly one clock
+    // subscription (48 bytes in, 32 bytes out) and checks the same again.
+    // Treat the count as the unsigned value the guest passed, so a negative
+    // i32 cannot slip past these checks to a raw read.
     const subscriptions = count >>> 0;
     if (subscriptions === 0) return ERRNO_INVAL;
     if (subscriptions !== 1) return ERRNO_NOTSUP;

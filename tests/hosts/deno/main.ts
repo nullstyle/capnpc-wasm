@@ -134,8 +134,21 @@ async function main(): Promise<number> {
     root ? [...fds, new PreopenDirectory("/", root.contents)] : fds,
     { debug: false },
   );
-  // path_readlink for trees without symlinks, and UTF-8 argument sizes.
-  correctShimAbi(wasi, args);
+  // path_readlink for trees without symlinks, UTF-8 argument sizes, and a
+  // poll_oneoff that sleeps without spinning; nothing cancels a host run.
+  correctShimAbi(wasi, args, {
+    sleep(milliseconds: number) {
+      if (milliseconds > 0) {
+        Atomics.wait(
+          new Int32Array(new SharedArrayBuffer(4)),
+          0,
+          0,
+          milliseconds,
+        );
+      }
+    },
+    cancelled: () => false,
+  });
   let code: number;
   try {
     const { instance } = await WebAssembly.instantiate(
