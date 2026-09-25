@@ -1,9 +1,71 @@
-// Tracing for the recovery soak (test.ts): a module worker script that loads
-// the SDK's real worker.js (a blob URL substituted for __REAL_WORKER_URL__)
-// and reports what the worker does to the page: that it started, each message
-// it receives, each Wasm compile and instantiate, and each reply. The page
-// records the events per Worker, so a recovery that stalls shows where its
-// worker stopped. Tracing only observes; every call goes through unchanged.
+// Evidence for a stalled worker, in the recovery soak (test.ts) and the
+// termination acceptance (termination.ts). The trace template is a module
+// worker script that loads the SDK's real worker.js (a blob URL substituted
+// for __REAL_WORKER_URL__) and reports what the worker does to the page: that
+// it started, each message it receives, each Wasm compile and instantiate,
+// and each reply. The page records the events per Worker, so a stall shows
+// where its worker stopped. Tracing only observes; every call goes through
+// unchanged. The health script asks whether the engine itself still starts a
+// worker and compiles Wasm, in a worker and on the page.
+
+/** What capnpEngineHealth reports: each check's answer and time. */
+export interface EngineHealth {
+  plainWorker: string;
+  workerCompile: string;
+  pageCompile: string;
+  /** All three answered. */
+  healthy: boolean;
+}
+
+/**
+ * Installed as a page init script: defines capnpEngineHealth(), which starts
+ * a plain worker, compiles a module with one empty function in a worker and
+ * on the page, and gives each 5 seconds to answer.
+ */
+export const engineHealthScript = `(() => {
+  const within = (ms, promise) =>
+    Promise.race([
+      promise,
+      new Promise((resolve) =>
+        setTimeout(() => resolve("no answer in " + ms + " ms"), ms)
+      ),
+    ]).catch((error) => "error: " + error);
+  const blobWorker = (source) =>
+    new Worker(URL.createObjectURL(new Blob([source], { type: "text/javascript" })));
+  const timed = async (run) => {
+    const started = performance.now();
+    const answer = await run();
+    return [answer, answer + " after " + Math.round(performance.now() - started) + " ms"];
+  };
+  const tiny = "0061736d01000000010401600000030201000a040102000b";
+  globalThis.capnpEngineHealth = async () => {
+    const bytes = Uint8Array.from(tiny.match(/../g), (byte) => parseInt(byte, 16));
+    let worker = blobWorker("postMessage('up')");
+    const [up, plainWorker] = await timed(() =>
+      within(5000, new Promise((resolve) => (worker.onmessage = () => resolve("up"))))
+    );
+    worker.terminate();
+    worker = blobWorker(
+      "WebAssembly.compile(new Uint8Array(" + JSON.stringify(Array.from(bytes)) +
+        ')).then(() => postMessage("compiled"), (e) => postMessage("error " + e))',
+    );
+    const [inWorker, workerCompile] = await timed(() =>
+      within(5000, new Promise((resolve) => {
+        worker.onmessage = (event) => resolve(String(event.data));
+      }))
+    );
+    worker.terminate();
+    const [onPage, pageCompile] = await timed(() =>
+      within(5000, WebAssembly.compile(bytes).then(() => "compiled"))
+    );
+    return {
+      plainWorker,
+      workerCompile,
+      pageCompile,
+      healthy: up === "up" && inWorker === "compiled" && onPage === "compiled",
+    };
+  };
+})();`;
 
 /** One traced worker, as the page records it. */
 export interface TracedWorker {

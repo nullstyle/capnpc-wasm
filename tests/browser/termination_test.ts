@@ -1,16 +1,20 @@
 // The termination verdicts without a browser: a fake page evaluator returns
 // the samples a real engine would, so each check in termination.ts is
 // exercised on every host, and measureTermination's own page function runs
-// here against a fake SDK. Also the recovery soak's stall budget and warnings
-// (soak-stalls.ts). Runs in test:browser-bootstrap.
+// here against a fake SDK. Also the start stalls and how they are read and
+// retried, and the stall budget and warnings (soak-stalls.ts). Runs in
+// test:browser-bootstrap.
 import {
   checkIsolatedTermination,
   checkPlainTermination,
   measureTermination,
+  stallSuspect,
+  type StartStall,
   type TerminationGuest,
   type TerminationMode,
   type TerminationSample,
 } from "./termination.ts";
+import type { EngineHealth } from "./worker-trace.ts";
 import {
   type SoakStall,
   stallBudget,
@@ -51,6 +55,7 @@ function engineThat(
     const sample: TerminationSample = {
       guest,
       mode,
+      stall: null,
       hasCounter: true,
       countBeforeCancel: 10,
       advanceBeforeCancel: 5,
@@ -197,54 +202,91 @@ Deno.test("Without isolation: the timeout keeps its worker for the next job", as
   assert(terminated.includes("expected 1 and 0"), terminated);
 });
 
+const healthy: EngineHealth = {
+  plainWorker: "up after 1 ms",
+  workerCompile: "compiled after 1 ms",
+  pageCompile: "compiled after 1 ms",
+  healthy: true,
+};
+
 /**
  * Run measureTermination's page function here, against a fake SDK whose
- * guest counts every 10 ms in shared memory until `stopAfterMs` after its job
- * is rejected.
+ * guest counts every 10 ms in shared memory, as the probe does (the count and
+ * the millisecond of its latest call), until `stopAfterMs` after its job is
+ * rejected. `neverRuns` keeps the guest from counting at all, and `initFails`
+ * rejects the factory as an init timeout would.
  */
 async function measureFake(
   stopAfterMs: number,
   mode: TerminationMode,
+  fake: {
+    neverRuns?: boolean;
+    initFails?: boolean;
+    bounds?: { timeoutMs?: number; startMs?: number };
+  } = {},
 ): Promise<TerminationSample> {
-  const counter = new Int32Array(new SharedArrayBuffer(4));
-  let stopAt = Infinity;
+  const counter = new Int32Array(new SharedArrayBuffer(8));
+  let stopAt = fake.neverRuns ? -Infinity : Infinity;
   const ticker = setInterval(() => {
-    if (performance.now() < stopAt) Atomics.add(counter, 0, 1);
+    if (performance.now() < stopAt) {
+      Atomics.add(counter, 0, 1);
+      Atomics.store(counter, 1, Math.round(performance.now()));
+    }
   }, 10);
+  const events: string[] = [];
   const audit = {
     created: 0,
     terminated: 0,
     probes: [] as (Int32Array | null)[],
+    traces: [] as string[][],
   };
+  // The jobs a dispose() rejects, as the SDK's does.
+  const pending = new Set<(error: Error) => void>();
   const scope = globalThis as unknown as Record<string, unknown>;
   scope.capnpWorkerAudit = audit;
+  scope.capnpEngineHealth = () => Promise.resolve(healthy);
   scope.capnpTermination = {
     sdk: {
       createWorkerCompiler() {
         audit.created++;
+        audit.traces.push(events);
+        events.push("page:post:init:1", "0:started", "1:message:init:1");
+        if (fake.initFails) {
+          return Promise.reject(
+            new DOMException("compilation timed out", "TimeoutError"),
+          );
+        }
+        events.push("2:reply:1");
         audit.probes.push(counter);
         return Promise.resolve({
           compile(
             _job: unknown,
             options: { signal?: AbortSignal; timeoutMs?: number } = {},
           ) {
+            events.push("page:post:compile:2", "3:message:compile:2");
             return new Promise((_resolve, reject) => {
-              const stop = (name: string) => {
+              const stop = (error: Error) => {
                 clearTimeout(timer);
+                pending.delete(stop);
                 stopAt = Math.min(stopAt, performance.now() + stopAfterMs);
-                reject(new DOMException("the job stopped", name));
+                reject(error);
               };
+              pending.add(stop);
               const timer = setTimeout(
-                () => stop("TimeoutError"),
+                () => stop(new DOMException("the job stopped", "TimeoutError")),
                 options.timeoutMs ?? 30_000,
               );
               options.signal?.addEventListener(
                 "abort",
-                () => stop("AbortError"),
+                () => stop(new DOMException("the job stopped", "AbortError")),
               );
             });
           },
-          dispose() {},
+          dispose() {
+            for (const stop of [...pending]) {
+              stop(new Error("worker compiler was disposed"));
+            }
+          },
         });
       },
     },
@@ -256,20 +298,29 @@ async function measureFake(
     argument: A,
   ): Promise<T> => Promise.resolve(fn(argument));
   try {
-    return await measureTermination(local, "pure", mode, "fake guest");
+    return await measureTermination(
+      local,
+      "pure",
+      mode,
+      "fake guest",
+      fake.bounds,
+    );
   } finally {
     clearInterval(ticker);
     delete scope.capnpWorkerAudit;
+    delete scope.capnpEngineHealth;
     delete scope.capnpTermination;
   }
 }
 
 Deno.test("measureTermination sees a stop just inside the bound, and one that never comes", async () => {
   // Quiet for a second only at 2.2 s: a window of the bound alone would miss it.
-  const late = await measureFake(1_200, "timeout");
+  const late = await measureFake(1_200, "timeout", {
+    bounds: { timeoutMs: 300 },
+  });
   assert(
-    late.stoppedAfterMs !== null && late.stoppedAfterMs >= 1_100 &&
-      late.stoppedAfterMs <= 1_400,
+    late.stall === null && late.stoppedAfterMs !== null &&
+      late.stoppedAfterMs >= 1_100 && late.stoppedAfterMs <= 1_400,
     `a stop at 1.2 s read as ${late.stoppedAfterMs}`,
   );
   assert(
@@ -281,6 +332,209 @@ Deno.test("measureTermination sees a stop just inside the bound, and one that ne
   assert(
     running.stoppedAfterMs === null && running.rejection.name === "AbortError",
     `a guest that never stops read as ${running.stoppedAfterMs}`,
+  );
+});
+
+Deno.test("measureTermination reports a worker or guest that does not start as a start stall", async () => {
+  const init = await measureFake(0, "abort", { initFails: true });
+  assert(
+    init.stall?.stage === "init" &&
+      init.stall.reason ===
+        "the probe worker did not initialize within 10000 ms" &&
+      init.stall.error === "TimeoutError: compilation timed out" &&
+      init.stall.events.includes("1:message:init:1") &&
+      init.stall.health.healthy,
+    `an init timeout read as ${JSON.stringify(init)}`,
+  );
+  const idle = await measureFake(0, "abort", {
+    neverRuns: true,
+    bounds: { startMs: 300 },
+  });
+  assert(
+    idle.stall?.stage === "start" && idle.stall.count === 0 &&
+      idle.stall.reason ===
+        "the guest did not run for a 50 ms window within 300 ms of its job",
+    `a guest that never ran read as ${JSON.stringify(idle)}`,
+  );
+  const late = await measureFake(0, "timeout", {
+    neverRuns: true,
+    bounds: { timeoutMs: 300 },
+  });
+  assert(
+    late.stall?.stage === "start" &&
+      late.stall.reason ===
+        "the guest did not run for a 50 ms window before its 300 ms deadline" &&
+      late.stall.error === "TimeoutError: the job stopped",
+    `a guest that never ran before its deadline read as ${
+      JSON.stringify(late)
+    }`,
+  );
+});
+
+function startStall(
+  stage: "init" | "start",
+  events: string[],
+  count: number | null = null,
+  health: EngineHealth = healthy,
+): StartStall {
+  return {
+    stage,
+    reason: `the probe worker did not ${stage}`,
+    afterMs: 10_000,
+    error: null,
+    events,
+    count,
+    health,
+  };
+}
+
+Deno.test("A start stall points at the SDK only where the engine did its part", () => {
+  const initialized = [
+    "page:post:init:1",
+    "0:started",
+    "1:message:init:1",
+    "1:compile1:start:73",
+    "2:compile1:end",
+  ];
+  const instantiated = [
+    ...initialized,
+    "3:reply:1",
+    "page:post:compile:2",
+    "4:message:compile:2",
+    "5:instantiate1:start",
+    "6:instantiate1:end",
+  ];
+  const cases: [string, StartStall, "sdk" | "engine"][] = [
+    ["the page never posted init", startStall("init", ["0:started"]), "sdk"],
+    [
+      "an engine that no longer compiles Wasm",
+      startStall("init", initialized, null, { ...healthy, healthy: false }),
+      "engine",
+    ],
+    [
+      "a worker that never started",
+      startStall("init", ["page:post:init:1"]),
+      "engine",
+    ],
+    [
+      "an init message never delivered",
+      startStall("init", ["page:post:init:1", "0:started"]),
+      "engine",
+    ],
+    [
+      "a compile that never finished",
+      startStall("init", initialized.slice(0, 4)),
+      "engine",
+    ],
+    [
+      "a worker that did its part and never answered",
+      startStall("init", initialized),
+      "sdk",
+    ],
+    [
+      "a job never delivered",
+      startStall("start", instantiated.slice(0, 7), 0),
+      "engine",
+    ],
+    [
+      "an instantiation that never finished",
+      startStall("start", instantiated.slice(0, 9), 0),
+      "engine",
+    ],
+    [
+      "a guest that ran, only late",
+      startStall("start", instantiated, 7),
+      "engine",
+    ],
+    [
+      "a guest that never ran on a healthy engine",
+      startStall("start", instantiated, 0),
+      "sdk",
+    ],
+  ];
+  for (const [label, stall, expected] of cases) {
+    const suspect = stallSuspect(stall);
+    assert(suspect === expected, `${label}: read as ${suspect}`);
+  }
+});
+
+Deno.test("A start stall that points at the engine is retried once, then tolerated", async () => {
+  const engineStall = startStall("init", ["page:post:init:1"]);
+  const stallingPureAbort = (stall: StartStall, times = 1) => {
+    let left = times;
+    return engineThat(
+      () => 50,
+      (sample) =>
+        sample.guest === "pure" && sample.mode === "abort" && left-- > 0
+          ? { stall }
+          : {},
+    );
+  };
+  const tolerated: string[] = [];
+  const result = await checkIsolatedTermination(
+    "webkit",
+    stallingPureAbort(engineStall),
+    "linux",
+    (label, stall) => {
+      tolerated.push(`${label}: ${stall.stage}`);
+      return Promise.resolve();
+    },
+  );
+  assert(
+    result.verdict.startsWith("PASS webkit") &&
+      tolerated.join() === "webkit isolated termination pure abort: init",
+    `tolerated ${tolerated.join()}: ${result.verdict}`,
+  );
+  const unbudgeted = await rejection(() =>
+    checkIsolatedTermination("webkit", stallingPureAbort(engineStall), "linux")
+  );
+  assert(
+    unbudgeted.includes("the probe worker did not init"),
+    `without a budget: ${unbudgeted}`,
+  );
+  const twice = await rejection(() =>
+    checkIsolatedTermination(
+      "webkit",
+      stallingPureAbort(engineStall, 2),
+      "linux",
+      () => Promise.resolve(),
+    )
+  );
+  assert(twice.includes("stalled twice"), `twice: ${twice}`);
+  const sdkStall = startStall("init", [
+    "page:post:init:1",
+    "0:started",
+    "1:message:init:1",
+  ]);
+  const sdk = await rejection(() =>
+    checkIsolatedTermination(
+      "webkit",
+      stallingPureAbort(sdkStall),
+      "linux",
+      () => Promise.resolve(),
+    )
+  );
+  assert(sdk.includes("which points at the SDK"), `SDK suspect: ${sdk}`);
+  let left = 1;
+  const plainTolerated: string[] = [];
+  const plain = await checkPlainTermination(
+    "chromium",
+    engineThat(
+      () => null,
+      () =>
+        left-- > 0
+          ? { hasCounter: false, stall: engineStall }
+          : { hasCounter: false },
+    ),
+    (label) => {
+      plainTolerated.push(label);
+      return Promise.resolve();
+    },
+  );
+  assert(
+    plain.verdict.startsWith("PASS chromium") &&
+      plainTolerated.join() === "chromium plain termination timeout",
+    `plain: tolerated ${plainTolerated.join()}: ${plain.verdict}`,
   );
 });
 
@@ -348,5 +602,20 @@ Deno.test("soak stalls count against the CI job and warn in one line", () => {
     warning ===
       "::warning title=Soak recovery stall (webkit)::cycle 5 (abort): 50%25 of a trace%0Asecond line",
     warning,
+  );
+  const start = stallWarning({
+    job: "local",
+    engine: "webkit",
+    os: "linux",
+    kind: "termination",
+    mode: "webkit isolated termination pure abort",
+    at: new Date(0).toISOString(),
+    summary: "the probe worker did not initialize within 10000 ms",
+    detail: null,
+  });
+  assert(
+    start ===
+      "::warning title=Worker start stall (webkit)::webkit isolated termination pure abort: the probe worker did not initialize within 10000 ms",
+    start,
   );
 });

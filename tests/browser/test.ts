@@ -16,13 +16,20 @@ import type {
   WorkerCompiler,
 } from "./sdk.ts";
 import { envMilliseconds, stepClock } from "./deadline.ts";
-import { type TracedWorker, traceWorkerTemplate } from "./worker-trace.ts";
+import {
+  type EngineHealth,
+  engineHealthScript,
+  type TracedWorker,
+  traceWorkerTemplate,
+} from "./worker-trace.ts";
 import {
   recordStall,
   type SoakStall,
   stallBudget,
   stallJob,
   stallLedgerPath,
+  stallPlace,
+  stallTitle,
 } from "./soak-stalls.ts";
 import { describeObservation } from "../conformance/outcome.ts";
 import {
@@ -37,9 +44,11 @@ import {
 import {
   checkIsolatedTermination,
   checkPlainTermination,
+  describeStall,
   isolationHeaders,
   setupTermination,
   type TerminationResult,
+  type TolerateStall,
   workerAuditScript,
 } from "./termination.ts";
 
@@ -634,6 +643,11 @@ try {
     browser.newContext({ serviceWorkers: "block" }),
     `${engine} new context`,
   );
+  // The engine health checks (worker-trace.ts) that a soak stall runs.
+  await clock.step(
+    context.addInitScript(engineHealthScript),
+    `${engine} install the engine health checks`,
+  );
   const page = await clock.step(context.newPage(), `${engine} new page`);
   page.on("pageerror", (error) => errors.push(error.message));
   page.setDefaultTimeout(60_000);
@@ -708,6 +722,10 @@ try {
     await clock.step(
       auditedContext.addInitScript(workerAuditScript),
       `${engine} install the ${name} worker audit`,
+    );
+    await clock.step(
+      auditedContext.addInitScript(engineHealthScript),
+      `${engine} install the ${name} engine health checks`,
     );
     const auditedPage = await clock.step(
       auditedContext.newPage(),
@@ -1296,10 +1314,26 @@ try {
     { spinGuest: data.spinGuest, template: traceWorkerTemplate },
     `${engine} create the recovery soak client`,
   );
-  // Tolerated stalls: recorded in this engine's receipt and in the job's
-  // ledger, which holds the stall budget (soak-stalls.ts).
+  // Tolerated stalls, of the soak and of the termination acceptance below:
+  // recorded in this engine's receipt and in the job's ledger, which holds the
+  // stall budget (soak-stalls.ts).
   const soakStalls: SoakStall[] = [];
   const soakStallBudget = stallBudget();
+  /** Record a stall that points at the engine and whose retry passed. */
+  const tolerate = async (stall: SoakStall): Promise<void> => {
+    soakStalls.push(stall);
+    const total = await recordStall(stall);
+    const what = `${stallTitle(stall).toLowerCase()} in ${stallPlace(stall)}`;
+    console.log(
+      `OBSERVED ${engine} ${what}, attributed to the engine and recovered on retry: ${
+        JSON.stringify(stall.detail)
+      }`,
+    );
+    assert(
+      total <= soakStallBudget,
+      `${engine}: stall ${total} of this job, a ${what}, exceeds its budget of ${soakStallBudget} (CAPNP_SOAK_STALL_BUDGET; the ledger ${stallLedgerPath} is cleared by mise run clean:test): ${stall.summary}`,
+    );
+  };
   for (let iteration = 0; iteration < 20; iteration++) {
     const mode = iteration % 2 === 0 ? "abort" : "timeout";
     const result = await evaluate(
@@ -1374,65 +1408,14 @@ try {
               new RegExp(`^\\d+:reply:${lastJob}(?::error)?$`).test(event)
             );
           // Does the engine itself still start workers and compile Wasm?
-          const within = (ms: number, promise: Promise<string>) =>
-            Promise.race([
-              promise,
-              new Promise<string>((resolve) =>
-                setTimeout(() => resolve(`no answer in ${ms} ms`), ms)
-              ),
-            ]).catch((error) => `error: ${error}`);
-          const blobWorker = (source: string) =>
-            new Worker(
-              URL.createObjectURL(
-                new Blob([source], { type: "text/javascript" }),
-              ),
-            );
-          // A module with one empty function.
-          const tiny = Uint8Array.from(
-            "0061736d01000000010401600000030201000a040102000b".match(/../g)!,
-            (byte) => parseInt(byte, 16),
-          );
-          let started = performance.now();
-          const plain = blobWorker("postMessage('up')");
-          const plainAnswer = await within(
-            5000,
-            new Promise((resolve) => (plain.onmessage = () => resolve("up"))),
-          );
-          const plainWorker = `${plainAnswer} after ${
-            Math.round(performance.now() - started)
-          } ms`;
-          plain.terminate();
-          started = performance.now();
-          const compiling = blobWorker(
-            `WebAssembly.compile(new Uint8Array(${
-              JSON.stringify(Array.from(tiny))
-            })).then(() => postMessage("compiled"), (e) => postMessage("error " + e))`,
-          );
-          const workerAnswer = await within(
-            5000,
-            new Promise((resolve) => {
-              compiling.onmessage = (event) => resolve(String(event.data));
-            }),
-          );
-          const workerCompile = `${workerAnswer} after ${
-            Math.round(performance.now() - started)
-          } ms`;
-          compiling.terminate();
-          started = performance.now();
-          const pageAnswer = await within(
-            5000,
-            WebAssembly.compile(tiny).then(() => "compiled"),
-          );
-          const pageCompile = `${pageAnswer} after ${
-            Math.round(performance.now() - started)
-          } ms`;
-          const healthy = plainAnswer === "up" &&
-            workerAnswer === "compiled" && pageAnswer === "compiled";
+          const health = await (globalThis as unknown as {
+            capnpEngineHealth(): Promise<EngineHealth>;
+          }).capnpEngineHealth();
           // The retry replaces the stalled worker; its trace is the second.
           const before = trace.workers.length;
-          started = performance.now();
+          const started = performance.now();
           const retried = await recover();
-          const suspect = unanswered && healthy ? "sdk" : "engine";
+          const suspect = unanswered && health.healthy ? "sdk" : "engine";
           stall = {
             error: recovery.error,
             afterMs: recovery.afterMs,
@@ -1442,7 +1425,7 @@ try {
               ? { events: events.slice(-16), terminated: stalled.terminated }
               : null,
             workersStarted,
-            health: { plainWorker, workerCompile, pageCompile },
+            health,
             retry: {
               ok: retried.ok,
               ms: Math.round(performance.now() - started),
@@ -1520,7 +1503,7 @@ try {
         retry: { ms: number };
       };
       const lastEvent = detail.worker?.events.at(-1);
-      const stall: SoakStall = {
+      await tolerate({
         job: stallJob(),
         engine,
         os: Deno.build.os,
@@ -1532,20 +1515,7 @@ try {
             lastEvent ?? "none (it never started)"
           }; fresh worker ${detail.health.plainWorker}, Wasm in a worker ${detail.health.workerCompile}, Wasm on the page ${detail.health.pageCompile}; the retry recovered in ${detail.retry.ms} ms`,
         detail,
-      };
-      soakStalls.push(stall);
-      const total = await recordStall(stall);
-      console.log(
-        `OBSERVED ${engine} soak recovery stall in cycle ${
-          iteration + 1
-        } (${mode}), attributed to the engine and recovered on retry: ${
-          JSON.stringify(detail)
-        }`,
-      );
-      assert(
-        total <= soakStallBudget,
-        `${engine}: soak recovery stall ${total} of this job exceeds its budget of ${soakStallBudget} (CAPNP_SOAK_STALL_BUDGET; the ledger ${stallLedgerPath} is cleared by mise run clean:test): ${stall.summary}`,
-      );
+      });
     }
     console.log(
       `PASS ${engine} worker: ${mode} rejects the job and permits reuse (${
@@ -1601,11 +1571,33 @@ try {
 
   // Termination acceptance, last: a guest that outlived its cancellation would
   // keep a core busy until the browser closed.
+  // A probe worker that did not start, where its evidence points at the
+  // engine and a retry passed, counts against the same stall budget.
+  const tolerateStartStall: TolerateStall = (label, detail) =>
+    tolerate({
+      job: stallJob(),
+      engine,
+      os: Deno.build.os,
+      kind: "termination",
+      mode: label,
+      at: new Date().toISOString(),
+      summary: describeStall(detail),
+      detail,
+    });
   const termination: TerminationResult[] = [];
   for (const { name, page: auditedPage } of terminationPages) {
     const result = name === "isolated"
-      ? await checkIsolatedTermination(engine, evaluateOn(auditedPage))
-      : await checkPlainTermination(engine, evaluateOn(auditedPage));
+      ? await checkIsolatedTermination(
+        engine,
+        evaluateOn(auditedPage),
+        Deno.build.os,
+        tolerateStartStall,
+      )
+      : await checkPlainTermination(
+        engine,
+        evaluateOn(auditedPage),
+        tolerateStartStall,
+      );
     termination.push(result);
     console.log(`OBSERVED ${result.observed}`);
     console.log(result.verdict);

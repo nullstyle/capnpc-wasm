@@ -1,11 +1,13 @@
-// The recovery soak's stall ledger (test.ts). A soak recovery that stalls is
-// tolerated only when its evidence points at the engine, and only within a
-// budget per CI job. Every driver process of a job (each engine, the suite run
-// and every soak round) appends its tolerated stalls to one JSON-lines file
-// under build/test and counts the job's entries there, so the budget spans
-// the whole job. CI jobs start from a clean checkout; locally the ledger
-// persists until `mise run clean:test`. run.ts prints the stalls recorded
-// during its run, with a GitHub warning annotation on CI.
+// The stall ledger of the recovery soak (test.ts) and the termination
+// acceptance (termination.ts). A soak recovery that stalls, or a termination
+// probe worker that does not start, is tolerated only when its evidence points
+// at the engine and a retry passes, and only within one budget per CI job.
+// Every driver process of a job (each engine, the suite run and every soak
+// round) appends its tolerated stalls to one JSON-lines file under build/test
+// and counts the job's entries there, so the budget spans the whole job. CI
+// jobs start from a clean checkout; locally the ledger persists until
+// `mise run clean:test`. run.ts prints the stalls recorded during its run,
+// with a GitHub warning annotation on CI.
 
 /** A tolerated stall, as the ledger and the receipt record it. */
 export interface SoakStall {
@@ -13,7 +15,11 @@ export interface SoakStall {
   job: string;
   engine: string;
   os: string;
-  cycle: number;
+  /** "termination": a probe worker's start stall; absent: a soak recovery. */
+  kind?: "termination";
+  /** The soak cycle; absent for a termination stall. */
+  cycle?: number;
+  /** The soak's cancellation, or the termination sample's label. */
   mode: string;
   /** ISO time of the record. */
   at: string;
@@ -82,11 +88,25 @@ export async function recordStall(
     .length;
 }
 
+/** What kind of stall this was, as a title. */
+export function stallTitle(stall: SoakStall): string {
+  return stall.kind === "termination"
+    ? "Worker start stall"
+    : "Soak recovery stall";
+}
+
+/** Where the stall happened: the soak cycle, or the termination sample. */
+export function stallPlace(stall: SoakStall): string {
+  return stall.kind === "termination"
+    ? stall.mode
+    : `cycle ${stall.cycle} (${stall.mode})`;
+}
+
 /** A GitHub Actions warning annotation for one stall. */
 export function stallWarning(stall: SoakStall): string {
   const escape = (text: string) =>
     text.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-  return `::warning title=Soak recovery stall (${stall.engine})::${
-    escape(`cycle ${stall.cycle} (${stall.mode}): ${stall.summary}`)
+  return `::warning title=${stallTitle(stall)} (${stall.engine})::${
+    escape(`${stallPlace(stall)}: ${stall.summary}`)
   }`;
 }

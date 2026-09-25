@@ -9,6 +9,8 @@ import {
   readStalls,
   type SoakStall,
   stallJob,
+  stallPlace,
+  stallTitle,
   stallWarning,
 } from "./soak-stalls.ts";
 
@@ -134,7 +136,9 @@ function lastStep(receiptPath: string): string {
 }
 
 function stallLine(stall: SoakStall): string {
-  return `tolerated soak recovery stall in cycle ${stall.cycle} (${stall.mode}), attributed to the engine: ${stall.summary}`;
+  return `tolerated ${stallTitle(stall).toLowerCase()} in ${
+    stallPlace(stall)
+  }, attributed to the engine: ${stall.summary}`;
 }
 
 interface Outcome {
@@ -258,7 +262,7 @@ async function runEngine(engine: Engine, receipts: string): Promise<Outcome> {
 }
 
 await Deno.mkdir("build/test", { recursive: true });
-// Soak stalls that the drivers record from now on (soak-stalls.ts).
+// Stalls that the drivers record from now on (soak-stalls.ts).
 const runStarted = new Date().toISOString();
 const receipts = await Deno.makeTempDir({
   dir: "build/test",
