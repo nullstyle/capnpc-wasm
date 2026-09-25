@@ -37,6 +37,7 @@ export const ENV_PASSTHROUGH: readonly string[] = [
   "DENO_DIR",
   "GOPATH",
   "GOCACHE",
+  "GOMODCACHE",
   "GOTOOLCHAIN",
   "GOFLAGS",
   "GOPROXY",
