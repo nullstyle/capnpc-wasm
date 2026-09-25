@@ -287,6 +287,12 @@ skip, and the self-contained tests (filesystem, limits, errors, and options
 against embedded guests) still run. `CAPNPC_WASM_TEST_MODULES` points the tests
 at another directory of command modules.
 
+Windows is supported for this SDK only. The nightly workflow runs the suite on
+windows-latest with `CAPNPC_WASM_TEST_MODULES` set to modules built on Linux in
+the same run and skips the three tests that execute the native oracle:
+`TestSchemaFeatures`, `TestCompilerPathFixtureMatchesNative`, and the native
+parity subtest of `TestCompiler`.
+
 Tests run the actual built modules, compare canonical requests and generated
 source with native upstream tools (including the compiler-path fixture with both
 import root orders), run concurrent and repeated jobs, and cover Unicode paths,

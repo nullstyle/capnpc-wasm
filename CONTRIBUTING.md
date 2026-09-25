@@ -33,6 +33,7 @@ changes. Examples from history:
 | Go SDK: `sdk/go/`                                                                                 | `mise run test:sdk-go` and `mise run test:sdk-go-race` (`mise run lint` runs the vet)           |
 | Schema Studio: `examples/browser/`, `scripts/build-studio.ts`, `scripts/serve-example.ts`         | `mise run test:studio-unit`, then `mise run test:studio`                                        |
 | Packaging: `scripts/release.ts`, `bin/capnp-wasm`, `docs/releases.md`, `sdk/typescript/README.md` | `mise run test:package`, `mise run test:launcher`, `mise run test:compiler-host-package`        |
+| Release evidence: `docs/release-evidence/`, `scripts/check-evidence.ts`, and `audit-nightly.ts`   | `mise run test:evidence` and `mise run check:evidence` (`lint` runs it)                         |
 | Development runners: `tests/hosts/`                                                               | `mise run test`                                                                                 |
 | Markdown                                                                                          | `mise run check:links` and `mise exec -- deno fmt --check <files>`; `mise run lint` covers both |
 | Anything, before a pull request                                                                   | `mise run check`, then `git diff --exit-code`                                                   |
@@ -156,7 +157,9 @@ Per reference:
   codegen, wire, feature corpus, SDK, and browser suites all consume Zig
   output), and `mise run test:browser`; (e) leave
   `generators/zig/historical-reference` unchanged; it pins the wire suite's
-  oracle.
+  oracle; (f) run `mise run audit:nightly` and commit the regenerated
+  `docs/release-evidence/nightly-confidence.json`: the bump restarts the nightly
+  streak, and `check:evidence` fails until the ledger names the new gitlink.
 - `wazero`: `sdk/go/go.mod` must require the pseudo-version of the new gitlink
   (`mise exec -- go -C sdk/go get github.com/tetratelabs/wazero@<commit>` then
   `mise exec -- go -C sdk/go mod tidy`); `tests/hosts/wazero` replaces the

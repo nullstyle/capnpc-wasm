@@ -17,8 +17,8 @@ Initial hosted acceptance passed on September 9, 2026: native `0fb8df4`, Wasm
 Nightly passed every job. The
 [run inventory](../release-evidence/initial-hosted-checks.json) records exact
 revisions and every successful job. The
-[confidence ledger](../release-evidence/nightly-confidence.json) records one of
-seven required consecutive scheduled daily Nightly successes.
+[confidence ledger](../release-evidence/capnp-zig-nightly-confidence.json)
+records one of seven required consecutive scheduled daily Nightly successes.
 
 The first qualifying
 [scheduled run, September 9](https://github.com/nullstyle/capnp-zig/actions/runs/34334866428),

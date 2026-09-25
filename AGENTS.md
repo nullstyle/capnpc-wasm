@@ -98,6 +98,12 @@ a local cold build is comparable. For quick iteration, run one suite task, or
 - Release scripts, `bin/capnp-wasm`, or packaged docs: `mise run test:package`
   and `mise run test:launcher`; `mise run test:compiler-host-package` for the
   compiler-host flavor.
+- Release evidence (`docs/release-evidence/`, `scripts/check-evidence.ts`,
+  `scripts/audit-nightly.ts`): `mise run check:evidence`, part of `lint`,
+  validates every receipt against its schema under
+  `docs/release-evidence/schemas/`, and `mise run test:evidence` tests both
+  scripts; a new receipt type needs a schema, and a committed receipt is never
+  rewritten except to add its schema version.
 - Markdown only: `mise run check:links` and
   `mise exec -- deno fmt --check <files>`; `mise run lint` runs both with every
   other static check.
@@ -116,6 +122,8 @@ The scheduled checks `audit:osv`, `audit:govulncheck`, `audit:advisories`, and
 `check:lock-urls`, the soak and floor tasks `test:browser-soak`,
 `test:deno-worker-soak`, and `test:sdk-go-floor`, and the drift signal
 `test:sdk-go-wazero-latest` need the network and run only when named.
+`audit:nightly` also needs the network (read-only `gh`): it rewrites
+`docs/release-evidence/nightly-confidence.json`, and `-- --check` only compares.
 
 | Change                                     | Fastest check                                                                                  |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
@@ -165,6 +173,9 @@ finish with `mise run ci` before a rebase or hand-off.
   mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \
     scripts/check-zig-sync.ts --update-fixtures
   ```
+- After a `ref/capnp-zig` bump, run `mise run audit:nightly` and commit the
+  regenerated ledger: the bump restarts the nightly streak, and `check:evidence`
+  fails until the ledger names the new gitlink.
 - `generators/zig/historical-reference` pins the audited revision `08a3e3d` that
   the wire tests use as an oracle; `refs:sync` fetches it. It stays fixed across
   bumps.

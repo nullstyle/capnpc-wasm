@@ -80,8 +80,8 @@ directory, and the project redirects build output and working caches below this
 checkout. Initial installation and reference fetching need network access.
 
 Prerequisites, on macOS and Linux, arm64 and x64 (CI tests Linux x64 and macOS
-arm64 on every push and the other two nightly; Windows supports only the Go SDK,
-not development):
+arm64 on every push; the nightly legs for the other two are held and have never
+run; Windows supports only the Go SDK, not development):
 
 - Run `mise trust` once in every new clone or worktree; mise refuses untrusted
   configuration, and a non-interactive session stops there.
@@ -210,21 +210,21 @@ describes the published archives and testing a full SDK candidate with
 
 Evidence as of 2026-09-24. "Tested" means a CI check runs on every push to
 `main`. "Tested nightly" means only the scheduled nightly workflow runs it; that
-workflow is held until it reaches `main`, so those rows have no run yet (see
-[release readiness](docs/release-readiness.md)).
+workflow is held until it reaches `main`, so those rows have no scheduled run
+yet (see [release readiness](docs/release-readiness.md)).
 
 | Host or runtime                                                                      | Status                                                                                                                                                  | Evidence                                                         |
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | Linux x64 (ubuntu-24.04 with `g++-14` and `pkg-config`)                              | Tested on every push: build, tests, packaging                                                                                                           | CI job `check`                                                   |
 | macOS arm64 (macos-15 with Xcode Command Line Tools)                                 | Tested on every push: build, tests, packaging                                                                                                           | CI job `check`                                                   |
-| Linux arm64 (ubuntu-24.04-arm), macOS x64 (macos-15-intel)                           | Supported; tested nightly, not per push: cold bootstrap, `check`, packaging                                                                             | Nightly job `bootstrap` (no run yet)                             |
-| Windows: the Go SDK only (windows-latest)                                            | Supported for the Go SDK; tested nightly against Linux-built modules, native comparisons skipped. No build, launcher, or tooling support                | Nightly job `windows-go-sdk` (no run yet)                        |
+| Linux arm64 (ubuntu-24.04-arm), macOS x64 (macos-15-intel)                           | Supported; tested nightly, not per push: cold bootstrap, `check`, packaging                                                                             | Nightly job `bootstrap` (no scheduled run yet)                   |
+| Windows: the Go SDK only (windows-latest)                                            | Supported for the Go SDK; tested nightly against Linux-built modules, native comparisons skipped. No build, launcher, or tooling support                | Nightly job `windows-go-sdk` (no scheduled run yet)              |
 | Wasmtime 48.0.1                                                                      | Tested; the packaged launcher accepts this version, newer 48.0.x patch releases (warning), or one version named by `CAPNP_WASM_WASMTIME_ACCEPT_VERSION` | `test:package`, `test:launcher`, `tests/toolchain_test.ts`       |
 | wazero `v1.12.1-0.20260908083515-451613caac44`, compiler engine with experimental EH | Tested                                                                                                                                                  | `sdk/go` tests, `test:package`, `tests/toolchain_test.ts`        |
 | Deno 2.9.6, direct execution                                                         | Tested                                                                                                                                                  | `mise run test` (`test:sdk-ts`)                                  |
 | Deno 2.6.8, worker execution                                                         | Tested; the only Deno version `createWorkerCompiler` accepts                                                                                            | CI step "Verify supported Deno worker execution and termination" |
 | Chromium 153.0.8010.12 (r1243), Firefox 155.0 (r1543), WebKit 26.6 (r2359) on Linux  | Tested: offline SDK parity, cancellation, Schema Studio                                                                                                 | CI job `browsers`                                                |
-| Chromium, Firefox, WebKit on macOS (macos-15)                                        | Tested nightly, not per push: offline SDK parity, cancellation, Schema Studio, soak; a [local run](tests/browser/README.md) is recorded                 | Nightly job `browsers` (no run yet)                              |
+| Chromium, Firefox, WebKit on macOS (macos-15)                                        | Tested nightly, not per push: offline SDK parity, cancellation, Schema Studio, soak; a [local run](tests/browser/README.md) is recorded                 | Nightly job `browsers` (no scheduled run yet)                    |
 | Node.js and Bun, direct execution (`createCompiler`)                                 | Best effort: untested, with no support guarantee                                                                                                        | None                                                             |
 | Node.js and Bun, worker execution (`createWorkerCompiler`)                           | Rejected: the factory throws because termination is not verified to stop a running guest; use direct execution                                          | `test:sdk-ts` (simulated runtimes)                               |
 | Other browser versions                                                               | Untested; no support claimed                                                                                                                            | None                                                             |
