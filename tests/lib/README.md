@@ -24,8 +24,10 @@ grandchild that inherited the pipes (a `cargo test` or `zig test` binary) cannot
 hold the call open, and the output captured until then is returned with
 `timedOut` set. A step that compiles code (a consumer, probe, or oracle build)
 passes `buildTimeoutMs`, ten minutes, since cold compiler caches on a loaded
-runner outlast the default. `mustSucceed` returns stdout and fails with the exit
-status and stderr.
+runner outlast the default, and only builds: the program it built then runs as
+its own step under the default, so a hung program fails in 60 s and its own
+timeout stops it. `mustSucceed` returns stdout and fails with the exit status
+and stderr.
 
 Children receive only the variables in `ENV_PASSTHROUGH` plus the explicit `env`
 additions. The list must equal `[vars].suite_env` in `mise.toml`, which the

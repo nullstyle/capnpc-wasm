@@ -119,7 +119,8 @@ export interface RunOptions {
    * stdout and stderr are no longer awaited, so a grandchild that inherited
    * the pipes (a `cargo test` or `zig test` binary, say) cannot hold the call
    * open; the output captured until then is returned with `timedOut` set.
-   * Defaults to 60 s; a step that compiles code uses buildTimeoutMs.
+   * Defaults to 60 s; a step that compiles code uses buildTimeoutMs and runs
+   * what it built as a separate step under this default.
    */
   timeoutMs?: number;
   /** Grace between SIGTERM and SIGKILL after a timeout; defaults to 5 s. */
@@ -132,7 +133,10 @@ export interface RunOptions {
  * loaded runner outlast run()'s 60-second default (nightly 36141746707: the
  * first cold Zig consumer build on macos-15-intel was killed at 60 s while
  * the suites ran in parallel; ledger row 139), and a hung compiler still
- * fails ten minutes in.
+ * fails ten minutes in. Such a step only builds (`zig test --test-no-exec`,
+ * `cargo test --no-run`, `go test -run '^$'`); the program it built runs as
+ * its own step under the default, so a hung program fails in 60 s and the
+ * timeout stops that program, not the compiler that started it.
  */
 export const buildTimeoutMs = 10 * 60_000;
 

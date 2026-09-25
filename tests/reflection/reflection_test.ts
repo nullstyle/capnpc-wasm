@@ -64,6 +64,9 @@ suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic inter
         const executable = `${work}/registry-tests-${target}${
           target === "wasi" ? ".wasm" : ""
         }`;
+        // Build only, under buildTimeoutMs; the tests then run as their own
+        // step under run()'s default, so a hung test fails in 60 s and the
+        // timeout stops the test program itself, not zig.
         await mustSucceed([
           "zig",
           "test",
@@ -71,9 +74,8 @@ suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic inter
           "registry",
           "--cache-dir",
           zigCacheDir,
-          ...(target === "wasi"
-            ? ["-target", "wasm32-wasi", "--test-no-exec"]
-            : []),
+          ...(target === "wasi" ? ["-target", "wasm32-wasi"] : []),
+          "--test-no-exec",
           "--dep",
           "capnpc-zig",
           `-Mroot=${root}/tests/reflection/registry_test.zig`,
@@ -83,12 +85,10 @@ suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic inter
           label: `${target} registry tests build`,
           timeoutMs: buildTimeoutMs,
         });
-        if (target === "wasi") {
-          await mustSucceed(["wasmtime", "run", executable], {
-            cwd: work,
-            label: "wasi registry tests",
-          });
-        }
+        await mustSucceed(
+          target === "wasi" ? ["wasmtime", "run", executable] : [executable],
+          { cwd: work, label: `${target} registry tests` },
+        );
       },
     );
     for (
@@ -112,9 +112,8 @@ suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic inter
           "test",
           "--cache-dir",
           zigCacheDir,
-          ...(target === "wasi"
-            ? ["-target", "wasm32-wasi", "--test-no-exec"]
-            : []),
+          ...(target === "wasi" ? ["-target", "wasm32-wasi"] : []),
+          "--test-no-exec",
           "--dep",
           "capnpc-zig",
           ...(generatedDependency ? ["--dep", "generated"] : []),
@@ -124,13 +123,11 @@ suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic inter
             : []),
           `-Mcapnpc-zig=${runtime}`,
           `-femit-bin=${executable}`,
-        ], { label: `${target} ${name} build` });
-        if (target === "wasi") {
-          await mustSucceed(["wasmtime", "run", executable], {
-            cwd: work,
-            label: `wasi ${name}`,
-          });
-        }
+        ], { label: `${target} ${name} build`, timeoutMs: buildTimeoutMs });
+        await mustSucceed(
+          target === "wasi" ? ["wasmtime", "run", executable] : [executable],
+          { cwd: work, label: `${target} ${name}` },
+        );
       });
     }
     await t.step(
@@ -157,7 +154,7 @@ suite.test("Zig reflection: binary schema fidelity and native/WASI dynamic inter
           `-Mgenerated=${output}/root.zig`,
           `-Mcapnpc-zig=${runtime}`,
           `-femit-bin=${executable}`,
-        ], { label: `${target} consumer build` });
+        ], { label: `${target} consumer build`, timeoutMs: buildTimeoutMs });
         await mustSucceed(
           target === "native" ? [executable, "."] : [
             "wasmtime",

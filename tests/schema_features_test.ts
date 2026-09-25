@@ -167,11 +167,15 @@ for (const scenario of manifest.scenarios) {
               scenario.entrypoints[0].replace(/\.capnp$/, ".zig")
             }");\n`,
           );
+          // Build only, under buildTimeoutMs; the tests then run as their
+          // own step under run()'s default.
+          const executable = `${work}/zig-consumer`;
           await mustSucceed([
             "zig",
             "test",
             "--cache-dir",
             zigCacheDir,
+            "--test-no-exec",
             "--dep",
             "capnpc-zig",
             "--dep",
@@ -185,7 +189,9 @@ for (const scenario of manifest.scenarios) {
                 : `${output}/root.zig`
             }`,
             `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
-          ], { label: "Zig consumer", timeoutMs: buildTimeoutMs });
+            `-femit-bin=${executable}`,
+          ], { label: "Zig consumer build", timeoutMs: buildTimeoutMs });
+          await mustSucceed([executable], { label: "Zig consumer" });
         },
       );
     }

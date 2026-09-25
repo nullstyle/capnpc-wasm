@@ -62,14 +62,16 @@ suite.test("Zig concrete generic APIs: native/WASI generation and executable vie
             const executable = `${directory}/${fixture.name}-${target}${
               target === "wasi" ? ".wasm" : ""
             }`;
+            // Build only, under buildTimeoutMs; the tests then run as their
+            // own step under run()'s default, so a hung test fails in 60 s
+            // and the timeout stops the test program itself, not zig.
             await mustSucceed([
               "zig",
               "test",
               "--cache-dir",
               zigCacheDir,
-              ...(target === "wasi"
-                ? ["-target", "wasm32-wasi", "--test-no-exec"]
-                : []),
+              ...(target === "wasi" ? ["-target", "wasm32-wasi"] : []),
+              "--test-no-exec",
               "--dep",
               "capnpc-zig",
               `-Mroot=${directory}/${fixture.consumer}`,
@@ -79,11 +81,12 @@ suite.test("Zig concrete generic APIs: native/WASI generation and executable vie
               label: `${target} consumer build`,
               timeoutMs: buildTimeoutMs,
             });
-            if (target === "wasi") {
-              await mustSucceed(["wasmtime", "run", executable], {
-                label: "wasi consumer",
-              });
-            }
+            await mustSucceed(
+              target === "wasi"
+                ? ["wasmtime", "run", executable]
+                : [executable],
+              { label: `${target} consumer` },
+            );
           },
         );
       }

@@ -26,6 +26,7 @@ import {
 } from "./lib/oracle.ts";
 import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
 import {
+  buildTimeoutMs,
   decodeText,
   describeExit,
   expectSuccess,
@@ -464,7 +465,7 @@ for (const host of wasmHosts) {
               `${output}/person.capnp.c++`,
               `${output}/types/common.capnp.c++`,
             ]),
-            { label: "generated C++ compilation" },
+            { label: "generated C++ compilation", timeoutMs: buildTimeoutMs },
           );
         },
       );
@@ -527,14 +528,24 @@ for (const host of wasmHosts) {
           if (language === "rust") {
             // --frozen: the locked graph must already be in the local registry
             // cache (build:rust fetches it), so this step never uses the network.
-            await mustSucceed([
+            // Each roundtrip builds under buildTimeoutMs, then runs its
+            // tests as their own step under run()'s default; cargo and go
+            // find that build up to date.
+            const cargo = [
               "cargo",
               "test",
               "--frozen",
               "--manifest-path",
               `${root}/tests/consumers/rust/Cargo.toml`,
-            ], {
-              env: { CAPNPC_WASM_GENERATED_DIR: output },
+            ];
+            const env = { CAPNPC_WASM_GENERATED_DIR: output };
+            await mustSucceed([...cargo, "--no-run"], {
+              env,
+              label: "generated Rust roundtrip build",
+              timeoutMs: buildTimeoutMs,
+            });
+            await mustSucceed(cargo, {
+              env,
               label: "generated Rust roundtrip",
             });
           } else if (language === "go") {
@@ -551,20 +562,25 @@ for (const host of wasmHosts) {
               "edit",
               `-replace=capnproto.org/go/capnp/v3=${root}/ref/go-capnp`,
             ], { env: offline, label: "select pinned Go runtime" });
-            await mustSucceed([
-              "go",
-              "-C",
-              consumer,
-              "test",
-              "-mod=readonly",
-              "./...",
-            ], { env: offline, label: "generated Go roundtrip" });
+            const goTest = ["go", "-C", consumer, "test", "-mod=readonly"];
+            // -run '^$' builds every test binary and runs no test.
+            await mustSucceed([...goTest, "-run", "^$", "./..."], {
+              env: offline,
+              label: "generated Go roundtrip build",
+              timeoutMs: buildTimeoutMs,
+            });
+            await mustSucceed([...goTest, "./..."], {
+              env: offline,
+              label: "generated Go roundtrip",
+            });
           } else {
+            const executable = `${data.work}/${host.name}-zig-roundtrip`;
             await mustSucceed([
               "zig",
               "test",
               "--cache-dir",
               zigCacheDir,
+              "--test-no-exec",
               "--dep",
               "capnpc-zig",
               "--dep",
@@ -574,7 +590,14 @@ for (const host of wasmHosts) {
               "capnpc-zig",
               `-Mgenerated=${output}/person.zig`,
               `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
-            ], { label: "generated Zig roundtrip" });
+              `-femit-bin=${executable}`,
+            ], {
+              label: "generated Zig roundtrip build",
+              timeoutMs: buildTimeoutMs,
+            });
+            await mustSucceed([executable], {
+              label: "generated Zig roundtrip",
+            });
           }
         },
       );
