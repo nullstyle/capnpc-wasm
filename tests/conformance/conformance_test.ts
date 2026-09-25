@@ -241,6 +241,30 @@ suite.test("checkObservation holds the phase, the message pin, and each outcome'
   }
 });
 
+suite.test("validateExpected requires a message pin on bare validation rows", async () => {
+  const expected = await loadExpected(root);
+  const names = (await loadCases(root)).map((spec) => spec.name);
+  const unpinned: ExpectedFile = structuredClone(expected);
+  unpinned.cases["missing-import-root"] = { expect: "validation" };
+  const problems = validateExpected(unpinned, names);
+  assert(
+    problems.includes(
+      "missing-import-root: a bare validation row needs a message pin",
+    ),
+    JSON.stringify(problems),
+  );
+  const override: ExpectedFile = structuredClone(expected);
+  override.cases["path-4097"].surfaces = {
+    go: { expect: "validation", reason: "r", finding: "f" },
+  };
+  assert(
+    validateExpected(override, names).includes(
+      "path-4097/go: a bare validation row needs a message pin",
+    ),
+    "an override without a pin passed",
+  );
+});
+
 suite.test("validateExpected rejects fields no accepted outcome reads", async () => {
   const expected = await loadExpected(root);
   const names = (await loadCases(root)).map((spec) => spec.name);

@@ -305,6 +305,11 @@ export function validateExpected(
     for (const word of words) {
       if (!outcomeWord.test(word)) problems.push(`${name}: outcome ${word}`);
     }
+    // Any TypeError is `validation`, so a bare validation row must pin the
+    // message, or a harness bug would pass it.
+    if (words.includes("validation") && entry.message === undefined) {
+      problems.push(`${name}: a bare validation row needs a message pin`);
+    }
     const { surfaces: _surfaces, ...reference } = entry;
     for (const problem of unreadFields(reference)) {
       problems.push(`${name}: ${problem}`);
@@ -341,6 +346,13 @@ export function validateExpected(
           if (!outcomeWord.test(word)) {
             problems.push(`${name}/${surface}: outcome ${word}`);
           }
+        }
+        if (
+          overrides.includes("validation") && override.message === undefined
+        ) {
+          problems.push(
+            `${name}/${surface}: a bare validation row needs a message pin`,
+          );
         }
       }
       const effective = expectationFor(
