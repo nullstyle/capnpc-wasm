@@ -13,17 +13,10 @@ import {
   JobControl,
 } from "./interrupt.ts";
 import { defaultLimits, type ResourceLimits } from "./types.ts";
-import WASI from "../../ref/browser_wasi_shim/src/wasi.ts";
-import {
-  Directory,
-  File,
-  OpenDirectory,
-  OpenFile,
-  PreopenDirectory,
-} from "../../ref/browser_wasi_shim/src/fs_mem.ts";
 import {
   CLOCKID_MONOTONIC,
   CLOCKID_REALTIME,
+  Directory,
   ERRNO_BADF,
   ERRNO_INTR,
   ERRNO_INVAL,
@@ -31,10 +24,15 @@ import {
   ERRNO_NOTSUP,
   ERRNO_ROFS,
   EVENTTYPE_CLOCK,
+  File,
   OFLAGS_CREAT,
   OFLAGS_TRUNC,
+  OpenDirectory,
+  OpenFile,
+  PreopenDirectory,
   SUBCLOCKFLAGS_SUBSCRIPTION_CLOCK_ABSTIME,
-} from "../../ref/browser_wasi_shim/src/wasi_defs.ts";
+  WASI,
+} from "./shim.ts";
 
 export interface CommandResult {
   code: number;

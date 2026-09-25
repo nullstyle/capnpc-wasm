@@ -1,16 +1,14 @@
 import {
   Directory,
-  File,
-  OpenFile,
-} from "../../ref/browser_wasi_shim/src/fs_mem.ts";
-import type { Inode } from "../../ref/browser_wasi_shim/src/fd.ts";
-import type WASI from "../../ref/browser_wasi_shim/src/wasi.ts";
-import {
   ERRNO_BADF,
   ERRNO_INVAL,
   ERRNO_NFILE,
   ERRNO_NOTSUP,
-} from "../../ref/browser_wasi_shim/src/wasi_defs.ts";
+  File,
+  type Inode,
+  OpenFile,
+  type WASI,
+} from "./shim.ts";
 import type { ResourceLimits } from "./types.ts";
 
 /**

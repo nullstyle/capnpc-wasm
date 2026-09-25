@@ -235,6 +235,11 @@ every flavor it applies to has shipped it.
   `protocol`) and, for budget overruns, `limit` naming the exceeded
   `ResourceLimits` field; both cross the worker protocol unchanged. Messages and
   classes are unchanged.
+- TypeScript SDK: the pinned WASI shim is imported through one typed facade
+  (`shim.ts` with `shim.d.ts`), and
+  `deno check --config sdk/typescript/deno.strict.json` type-checks the SDK and
+  its tests in strict mode; `deno test` keeps the non-strict `deno.json`,
+  because it also type-checks the shim's upstream sources.
 
 ## capnp-wasm-compiler-host
 

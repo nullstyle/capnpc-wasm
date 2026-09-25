@@ -1075,7 +1075,7 @@ Deno.test("SDK rejects oversized file allocation, truncate, sparse writes, and i
         compiler.generate({ request: new Uint8Array(1), generators: ["cpp"] });
       if (size <= 4n) {
         assert(
-          (await run()).outputs.cpp.a.length === Number(size),
+          (await run()).outputs.cpp!.a.length === Number(size),
           `${operation} exact boundary failed`,
         );
       } else await rejects(run, "CompileError", "outputBytes");
@@ -1103,7 +1103,7 @@ Deno.test("SDK bounds resizable file growth before a later truncate", async () =
       compiler.generate({ request: new Uint8Array(1), generators: ["cpp"] });
     if (size <= 6n) {
       assert(
-        (await run()).outputs.cpp.a.length === 0,
+        (await run()).outputs.cpp!.a.length === 0,
         "permitted growth did not truncate",
       );
     } else {
