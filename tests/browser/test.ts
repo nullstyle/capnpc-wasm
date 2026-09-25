@@ -553,8 +553,11 @@ const errors: string[] = [];
 try {
   browser = await clock.step(browserType.launch(), `${engine} launch`);
   console.log(`Testing ${engine} ${browser.version()}`);
-  const context = await browser.newContext({ serviceWorkers: "block" });
-  const page = await context.newPage();
+  const context = await clock.step(
+    browser.newContext({ serviceWorkers: "block" }),
+    `${engine} new context`,
+  );
+  const page = await clock.step(context.newPage(), `${engine} new page`);
   page.on("pageerror", (error) => errors.push(error.message));
   page.setDefaultTimeout(60_000);
   const evaluate = evaluateOn(page);
@@ -620,11 +623,18 @@ try {
     page: Page;
   }[] = [];
   for (const name of ["isolated", "plain"] as const) {
-    const auditedContext = await browser.newContext({
-      serviceWorkers: "block",
-    });
-    await auditedContext.addInitScript(workerAuditScript);
-    const auditedPage = await auditedContext.newPage();
+    const auditedContext = await clock.step(
+      browser.newContext({ serviceWorkers: "block" }),
+      `${engine} new ${name} termination context`,
+    );
+    await clock.step(
+      auditedContext.addInitScript(workerAuditScript),
+      `${engine} install the ${name} worker audit`,
+    );
+    const auditedPage = await clock.step(
+      auditedContext.newPage(),
+      `${engine} new ${name} termination page`,
+    );
     auditedPage.on("pageerror", (error) => errors.push(error.message));
     auditedPage.setDefaultTimeout(60_000);
     await clock.step(
@@ -650,25 +660,39 @@ try {
 
   let networkRequests = 0;
   for (
-    const each of [context, ...terminationPages.map((entry) => entry.context)]
+    const [name, each] of [
+      ["main", context] as const,
+      ...terminationPages.map((entry) => [entry.name, entry.context] as const),
+    ]
   ) {
     each.on("request", (request) => {
       if (!request.url().startsWith("blob:")) networkRequests++;
     });
-    await each.route(
-      "**/*",
-      (route) =>
-        route.request().url().startsWith("blob:")
-          ? route.continue()
-          : route.abort(),
+    await clock.step(
+      each.route(
+        "**/*",
+        (route) =>
+          route.request().url().startsWith("blob:")
+            ? route.continue()
+            : route.abort(),
+      ),
+      `${engine} block the ${name} context's network`,
     );
-    await each.routeWebSocket("**/*", (socket) => {
-      networkRequests++;
-      socket.close();
-    });
+    await clock.step(
+      each.routeWebSocket("**/*", (socket) => {
+        networkRequests++;
+        socket.close();
+      }),
+      `${engine} block the ${name} context's WebSockets`,
+    );
     // WebKit's offline emulation also blocks its local Blob worker reloads.
     // Routing still blocks all network access; Blob URLs read preloaded memory.
-    if (engine !== "webkit") await each.setOffline(true);
+    if (engine !== "webkit") {
+      await clock.step(
+        each.setOffline(true),
+        `${engine} take the ${name} context offline`,
+      );
+    }
   }
   await server.shutdown();
   await Deno.permissions.revoke({ name: "run" });
