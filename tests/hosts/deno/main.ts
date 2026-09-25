@@ -1,31 +1,20 @@
-import WASI from "../../../ref/browser_wasi_shim/src/wasi.ts";
-import { Inode } from "../../../ref/browser_wasi_shim/src/fd.ts";
+// The pinned shim through the SDK's typed facade, and the SDK's corrections
+// to its ABI: the parity rows run the same adapter code the SDK ships.
 import {
   Directory,
   File,
-  OpenDirectory,
+  type Inode,
   OpenFile,
   PreopenDirectory,
-} from "../../../ref/browser_wasi_shim/src/fs_mem.ts";
-import {
-  ERRNO_BADF,
-  ERRNO_INVAL,
-  ERRNO_NOTDIR,
-} from "../../../ref/browser_wasi_shim/src/wasi_defs.ts";
+  WASI,
+} from "../../../sdk/typescript/shim.ts";
+import { checkName, correctShimAbi } from "../../../sdk/typescript/shim-abi.ts";
 
 /** A command-line error; exits 2 instead of the host-failure status. */
 class UsageError extends Error {}
 
 /** Exit status for traps, uncaught exceptions, and host failures. */
 const HOST_FAILURE_EXIT = 70;
-
-function checkName(name: string): void {
-  if (
-    !name || name === "." || name === ".." || /[\\/\0]/.test(name)
-  ) {
-    throw new Error(`invalid filesystem entry name: ${JSON.stringify(name)}`);
-  }
-}
 
 async function loadDirectory(path: string): Promise<Directory> {
   const info = await Deno.lstat(path);
@@ -145,37 +134,8 @@ async function main(): Promise<number> {
     root ? [...fds, new PreopenDirectory("/", root.contents)] : fds,
     { debug: false },
   );
-  // Staged trees contain no symlinks. Preserve path lookup errors and return
-  // INVAL for existing non-links, as required by Zig's output path checks.
-  wasi.wasiImport.path_readlink = (
-    fd: number,
-    path: number,
-    length: number,
-  ) => {
-    const descriptor = wasi.fds[fd];
-    if (!descriptor) return ERRNO_BADF;
-    if (!(descriptor instanceof OpenDirectory)) return ERRNO_NOTDIR;
-    const bytes = new Uint8Array(wasi.inst.exports.memory.buffer);
-    const name = new TextDecoder().decode(bytes.subarray(path, path + length));
-    const { ret } = descriptor.path_filestat_get(0, name);
-    return ret || ERRNO_INVAL;
-  };
-  // The pinned shim counts UTF-16 code units here, but args_get writes UTF-8.
-  // Keep this narrow ABI correction in the adapter, outside the reference.
-  wasi.wasiImport.args_sizes_get = (
-    argc: number,
-    bufferSize: number,
-  ): number => {
-    const memory = new DataView(wasi.inst.exports.memory.buffer);
-    const encoder = new TextEncoder();
-    memory.setUint32(argc, args.length, true);
-    memory.setUint32(
-      bufferSize,
-      args.reduce((size, arg) => size + encoder.encode(arg).length + 1, 0),
-      true,
-    );
-    return 0;
-  };
+  // path_readlink for trees without symlinks, and UTF-8 argument sizes.
+  correctShimAbi(wasi, args);
   let code: number;
   try {
     const { instance } = await WebAssembly.instantiate(
