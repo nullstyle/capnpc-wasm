@@ -10,9 +10,10 @@ tags are named. It applies to every archive flavor and to the Go module.
 
 One naming rule covers every published artifact:
 
-- `capnp-wasm-<part>` names an artifact that ships the compiler without the
-  SDKs: `capnp-wasm-tools` (the compiler and the Wasmtime launcher) and
-  `capnp-wasm-compiler-host` (the compiler and the TypeScript host). A new
+- `capnp-wasm-<part>` names a compiler-only artifact: one that ships the schema
+  compiler without the language generator modules and the Go SDK.
+  `capnp-wasm-tools` adds the Wasmtime launcher, and `capnp-wasm-compiler-host`
+  adds the TypeScript host (the TypeScript SDK and its guide). A new
   compiler-only artifact takes a new `<part>`.
 - `capnpc-wasm` names the full SDK: the package `@nullstyle/capnpc-wasm`, its
   archive, and the Go module's tag. The Go module ships in the full SDK archive
@@ -25,15 +26,16 @@ One naming rule covers every published artifact:
 | `capnp-wasm-compiler-host` | `@nullstyle/capnp-wasm-compiler-host` | `capnp-wasm-compiler-host-<version>.tgz` | `capnp-wasm-compiler-host-v<version>` | None                |
 
 The repository is `nullstyle/capnpc-wasm`, and the Go module path is
-`github.com/nullstyle/capnpc-wasm/sdk/go` (package `capnpcwasm`). Registry
-packages (npm, JSR) come later and keep these names.
+`github.com/nullstyle/capnpc-wasm/sdk/go` (package `capnpcwasm`). No registry
+package (npm, JSR) is published; one would keep these names.
 
 Each flavor has its own version, `versions["<flavor>"]` in `release.json`, and
 its own release cadence: releasing one flavor never changes the version of
 another. A version names one set of bytes. It is never reused, and
-`scripts/release.ts` refuses a flavor version whose tag exists at another
-commit. The Go module tag `sdk/go/v<version>` takes the `capnpc-wasm` version
-and points at the same commit as `capnpc-wasm-v<version>`.
+`scripts/release.ts` refuses a flavor version whose tag exists at another commit
+in the local repository (fetch tags first). The Go module tag
+`sdk/go/v<version>` takes the `capnpc-wasm` version and points at the same
+commit as `capnpc-wasm-v<version>`.
 
 The full SDK and the compiler host ship the same TypeScript SDK. The rules below
 apply to each flavor's version separately: when the TypeScript API changes, each
@@ -75,10 +77,10 @@ Go:
   `LanguageZig`; `Stage` with `StageValidate`, `StageModules`, and
   `StageCompiler`.
 - `Limits` and `DefaultLimits`; `Option` with `WithLimits`,
-  `WithMaxConcurrentJobs`, `WithEngine` (`Engine`: `EngineAuto`,
-  `EngineCompiler`, `EngineInterpreter`), and `WithCompilationCache`. Which
-  engine `EngineAuto` selects for a module is not specified, and the cache is
-  wazero's own type at the pinned wazero version.
+  `WithMaxConcurrentJobs`, `WithEngine`, and `WithCompilationCache`; `Engine`
+  with `EngineAuto`, `EngineCompiler`, `EngineInterpreter`, and its `String`
+  method. Which engine `EngineAuto` selects for a module is not specified, and
+  the cache is wazero's own type at the pinned wazero version.
 
 Both SDKs: the behavior that the [SDK contract](sdk-contract.md) specifies:
 request fields, path rules, the validation order and the messages it lists,
@@ -91,15 +93,17 @@ Archives: the package layout (`wasm/`, `include/`, `typescript/`, `sdk/go/`,
 exit statuses in the
 [launcher contract](releases.md#repository-toolchain-launcher).
 
-These changes are compatible, and a patch release may make them: a new optional
-field in a request or options type, a new field in a result or error, a new
-export, option, stage, or `Language` value, and a new package entry point. Code
-that implements the SDK interfaces itself, exhausts `Language` or `Stage` in a
-switch (the SDK contract asks callers to treat unknown values as data), or
-builds Go structs from unkeyed literals can break on such a change. `mod.d.ts`
-declares `supportedDenoWorkerVersion` and some fields of `defaultLimits` with
-literal types (`"2.6.8"`, `memoryPages: 4096`); type your own values as `string`
-and `ResourceLimits`, because a compatible release may change them.
+These changes are compatible: a new optional field in a request or options type,
+a new field in a result or error, a new export, option, stage, or `Language`
+value, and a new package entry point. While the major version is 0 a patch
+release may make them; from `1.0.0` on they need a minor release, as Semantic
+Versioning requires. Code that implements the SDK interfaces itself, exhausts
+`Language` or `Stage` in a switch (the SDK contract asks callers to treat
+unknown values as data), or builds Go structs from unkeyed literals can break on
+such a change. `mod.d.ts` declares `supportedDenoWorkerVersion` and some fields
+of `defaultLimits` with literal types (`"2.6.8"`, `memoryPages: 4096`); type
+your own values as `string` and `ResourceLimits`, because a compatible release
+may change them.
 
 ## Experimental tier
 
@@ -152,7 +156,8 @@ major version is 0:
   so a flavor's interface is not fixed before its `0.1.0`.
 - An experimental interface may change in any release.
 
-From `1.0.0` on, a break needs a major release.
+From `1.0.0` on, a break needs a major release and a compatible addition a minor
+release; a patch release carries fixes only.
 
 ## Deprecation
 
