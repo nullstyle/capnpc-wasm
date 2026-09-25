@@ -226,10 +226,12 @@ so the next job starts immediately with no restart and no recompilation.
 Without cross-origin isolation an abort or `dispose()` therefore terminates the
 worker, and the engine decides when its running guest stops. The guest calls
 into JavaScript at every interruption check, and WebKit stops a terminated
-worker's guest there: within 50 ms on macOS and Linux. Firefox stops it at once.
-Chromium stops it about 2 s after `terminate()`, and Deno 2.7.6 and later do not
-stop it at all, so there the guest may run until its own `timeoutMs` deadline
-and then trap. Serve pages with `Cross-Origin-Opener-Policy: same-origin` and
+worker's guest there, within 50 ms on Linux and 52 ms on macOS (see the
+[termination evidence](../../docs/deno-worker-termination.md#browsers)). Firefox
+stops it at once. Chromium stops it about 2 s after `terminate()`, and Deno
+2.7.6 and later do not stop it at all, so there the guest may run until its own
+`timeoutMs` deadline and then trap. Serve pages with
+`Cross-Origin-Opener-Policy: same-origin` and
 `Cross-Origin-Embedder-Policy: require-corp` so that aborts stop guests at once,
 and keep `timeoutMs` short where they cannot.
 
@@ -371,7 +373,9 @@ execution time as well as resources.
 
 Repeated active-worker cancellation stalled in the older tested WebKit revisions
 2248 and 2311. The current WebKit 26.6 / revision 2359 passed the same stress
-case. The
+case, but has since stalled once in the browser suite's
+[recovery soak](../../tests/browser/README.md#recovery-soak), on Linux, with the
+cause unknown. The
 [browser evidence](../../tests/browser/README.md#engine-regression-evidence)
 records this engine comparison; upgrading the test engine does not repair older
 installed browsers. Validate the browser versions your application supports.

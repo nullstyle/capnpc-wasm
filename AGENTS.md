@@ -49,11 +49,11 @@ release status; update it instead of restating status here.
   byte-oriented workspaces, fresh guest instances, read-only inputs, and
   transactional outputs. Cancellation terminates guest execution; a rejected
   promise alone is insufficient.
-- The TypeScript SDK validates and instruments every guest
-  (`sdk/typescript/rewriter.ts`), so a stop is a trap and `Worker.terminate()`
-  is a fallback. The rewriter fails closed: input it cannot rewrite exactly is a
-  `TypeError`. `test:browser` validates the instrumented `dist/wasm` modules
-  with the pinned wasm-tools, so run it after rewriter changes.
+- Keep the TypeScript SDK's guest rewriter (`sdk/typescript/rewriter.ts`)
+  failing closed: every guest is validated and instrumented, a stop is a trap,
+  `Worker.terminate()` is only a fallback, and input the rewriter cannot rewrite
+  exactly is a `TypeError`. After rewriter changes run `test:browser`, which
+  validates the instrumented `dist/wasm` modules with the pinned wasm-tools.
 - The two SDKs implement one contract,
   [docs/sdk-contract.md](docs/sdk-contract.md): keep request fields, limits
   (pinned by `tests/fixtures/contract/limits.json`), stage names, and error

@@ -113,38 +113,9 @@ differences fail the engine's result. Raw and canonical requests remain beside
 the generated fixtures for inspection.
 
 Malformed and truncated Zig requests must exit unsuccessfully with preserved
-diagnostics and no exposed output files. Twenty alternating worker abort and
-timeout operations must reject their jobs and let the same client then compile
-identical output. Each cancels a compile for a zig generator that spins forever
-(`spin-yield.wat`), so the job can never finish first; each recovery compiles
-the workspace with the real compiler and the C++, Rust, and Go generators, whose
-files are checked against the native oracle. On this page, which is not
-cross-origin isolated, each abort replaces the worker and each timeout keeps it.
-Native output and temporary browser profiles stay under `build/test/browser-*`;
-the output remains available for inspection.
-
-Every soak worker is traced (`worker-trace.ts`): it reports its start, each
-message, each Wasm compile and instantiate, and each reply. A recovery gets 20
-seconds, over six times the slowest one measured in CI. One that does not finish
-in time prints an `OBSERVED <engine> soak recovery stall` line with its worker's
-last events and whether a fresh worker and Wasm compilation still respond, and
-is retried once on the same client, which replaces the stalled worker as it
-would for an application. One such stall per run is tolerated; a second one, or
-a retry that fails too, fails the run.
-
-One recovery stall has been seen. In the nightly run
-[36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524),
-WebKit on Linux did not finish the recovery after the fifth cycle's abort within
-its 30 seconds, in the suite's second run, with three engines in parallel on a
-4-CPU runner; the first run in the same job passed all twenty cycles. A
-diagnostic run
-([36117453491](https://github.com/nullstyle/capnpc-wasm/actions/runs/36117453491))
-repeated 120 soak cycles per engine on Linux with every worker traced and found
-no stall: recoveries took up to 3.1 s in WebKit and up to 1.4 s in Chromium and
-Firefox, fresh workers started and compiled Wasm, and a terminated worker's
-guest stopped within 50 ms in WebKit, at once in Firefox, and at its own
-2-second deadline in Chromium. The cause of the stall is unknown; the next one
-reports its own trace.
+diagnostics and no exposed output files. Native output and temporary browser
+profiles stay under `build/test/browser-*`; the output remains available for
+inspection.
 
 Direct and worker clients also reject aggregate workspace and output overages
 without returning partial output, then successfully execute another permitted
@@ -164,6 +135,51 @@ allocation proportional to the request. The driver assembles every
 refuses to run if the bytes differ from the copies embedded in
 `sdk/typescript/testdata/hostile_guests.ts`, which the permission-restricted SDK
 tests use.
+
+## Recovery soak
+
+Twenty alternating worker abort and timeout operations must reject their jobs
+and let the same client then compile identical output. Each cancels a compile
+for a zig generator that spins forever (`spin-yield.wat`), so the job can never
+finish first; each recovery compiles the workspace with the real compiler and
+the C++, Rust, and Go generators, whose files are checked against the native
+oracle. On this page, which is not cross-origin isolated, each abort replaces
+the worker and each timeout keeps it.
+
+Every soak worker is traced (`worker-trace.ts`): it reports its start, each
+message, each Wasm compile and instantiate, and each reply. A recovery gets 20
+seconds, over six times the slowest one measured in CI. One that does not finish
+in time is retried once on the same client, which replaces the stalled worker as
+it would for an application, and judged by its evidence:
+
+- If the stalled worker had received the job and never answered it, while a
+  fresh worker still starts and Wasm still compiles in a worker and on the page,
+  the SDK is the suspect: the run fails with both workers' traces.
+- Otherwise the engine is the suspect, and the stall is tolerated within a
+  budget per CI job. `CAPNP_SOAK_STALL_BUDGET` (1 by default, 0 for none) bounds
+  the stalls that every driver of the job records in
+  `build/test/soak-stalls.jsonl`: all engines, the suite run, and each soak
+  round. CI jobs start from a clean checkout; locally the ledger lasts until
+  `mise run clean:test`.
+
+A tolerated stall prints an `OBSERVED <engine> soak recovery stall` line with
+both traces and the health checks, goes into the engine's receipt and the run
+summary, and on GitHub Actions becomes a warning annotation. A retry that fails
+too, or a stall beyond the budget, fails the run.
+
+One recovery stall has been seen. In the nightly run
+[36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524),
+WebKit on Linux did not finish the recovery after the fifth cycle's abort within
+its 30 seconds, in the suite's second run, with three engines in parallel on a
+4-CPU runner; the first run in the same job passed all twenty cycles. A
+diagnostic run
+([36117453491](https://github.com/nullstyle/capnpc-wasm/actions/runs/36117453491))
+repeated 120 soak cycles per engine on Linux with every worker traced and found
+no stall: recoveries took up to 3.1 s in WebKit and up to 1.4 s in Chromium and
+Firefox, fresh workers started and compiled Wasm, and a terminated worker's
+guest stopped within 50 ms in WebKit, at once in Firefox, and at its own
+2-second deadline in Chromium. The cause of the stall is unknown; the next one
+reports its own trace.
 
 ## Termination acceptance
 
@@ -210,11 +226,17 @@ ones in CI run
 over a timeout, an abort, and a dispose each; the 50 ms sampling quantizes them.
 The nightly run
 [36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524)
-measured 0 to 185 ms on macOS (185 ms for Firefox's abort). Without isolation
-the timeout rejected after 300 to 302 ms in all three engines on Linux, and the
-follow-up job ran on the same worker. Before the SDK interrupted guests itself,
-WebKit kept the pure-Wasm guest running after every cancellation (GAP2-V1) and
-Chromium stopped a guest only about 2 s after `terminate()`; the
+measured 0 to 185 ms on macOS (185 ms for Firefox's abort), and the nightly run
+[36120138448](https://github.com/nullstyle/capnpc-wasm/actions/runs/36120138448)
+0 to 186 ms. Without isolation, in CI run
+[36120132737](https://github.com/nullstyle/capnpc-wasm/actions/runs/36120132737),
+the first with the page waiting out the client's grace, the timeout rejected
+after 300 to 302 ms in all three engines on Linux, and the follow-up job then
+ran on the same worker (Chromium 301 and 300 ms, Firefox 300 and 301 ms, WebKit
+302 and 301 ms); the earlier runs' plain-page lines predate that wait. Before
+the SDK interrupted guests itself, WebKit kept the pure-Wasm guest running after
+every cancellation (GAP2-V1) and Chromium stopped a guest only about 2 s after
+`terminate()`; the
 [termination evidence](../../docs/deno-worker-termination.md#browsers) keeps
 those engine measurements. Each run prints
 `OBSERVED <engine> termination on <os>: ...` with every sample's stop time, so
@@ -272,6 +294,9 @@ and all four generators:
 | 1.58.2 / 2248                | Stalled at cycle 9 without instrumentation |
 | 1.61.1 / 2311                | Stalled at cycle 17                        |
 | 1.63.0 / 2359                | Passed 100 consecutive cycles              |
+
+Revision 2359 has since stalled once in the [recovery soak](#recovery-soak), in
+WebKit on Linux, with the cause unknown.
 
 Replacing the whole SDK client and retaining the full Wasm instance did not
 remove the old-engine stall. Twenty replacements of idle workers passed. The

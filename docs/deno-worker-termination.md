@@ -142,9 +142,13 @@ locally, 0 to 53 ms), in Chromium, Firefox 155, and WebKit on Linux (CI run
 [36112686931](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112686931),
 0 to 50 ms), and on macOS in the nightly run
 [36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524)
-(0 to 185 ms, the 185 ms being Firefox's abort). Without isolation the page
-cannot see the guest; in all three engines on Linux the timeout rejected after
-300 to 302 ms, and the next job ran on the same worker.
+(0 to 185 ms, the 185 ms being Firefox's abort) and
+[36120138448](https://github.com/nullstyle/capnpc-wasm/actions/runs/36120138448)
+(0 to 186 ms). Without isolation the page cannot see the guest; in CI run
+[36120132737](https://github.com/nullstyle/capnpc-wasm/actions/runs/36120132737),
+where the page first waits out the client's grace, the timeout rejected after
+300 to 302 ms in all three engines on Linux, and the next job ran on the same
+worker.
 
 The engines' own `terminate()` differs, as measured before in-guest
 interruption: on Linux CI (run 36103736516) Chromium stopped a terminated
@@ -156,10 +160,10 @@ worker, and an instrumented guest calls into JavaScript at every poll, so WebKit
 now stops it at its next poll. The diagnostic run
 [36117453491](https://github.com/nullstyle/capnpc-wasm/actions/runs/36117453491)
 measured, after aborting a guest 110 ms into a job with a 2-second deadline:
-WebKit on Linux stopped it within 0 to 50 ms (0 to 52 ms locally on macOS),
-Firefox at once, and Chromium about 1.9 s after the abort, at the guest's own
-deadline. A guest that `terminate()` does not stop runs only until its own
-`timeoutMs` and then traps.
+WebKit on Linux stopped it within 0 to 50 ms (0 to 52 ms on macOS, measured
+locally), Firefox at once, and Chromium about 1.9 s after the abort, at the
+guest's own deadline. A guest that `terminate()` does not stop runs only until
+its own `timeoutMs` and then traps.
 
 ## Alternatives considered
 
