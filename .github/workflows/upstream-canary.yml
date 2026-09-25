@@ -52,35 +52,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-14 pkg-config
-      # Confine the token to the tool steps below, where the WASI SDK resolves
-      # through the GitHub releases API; see ci.yml.
-      - id: mise
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        with:
-          version: 2026.9.1
-          install: false
-      # Stopgap for the Zig community mirror that serves no .minisig (see
-      # ci.yml): install: false above, this retry, and the cache save below go
-      # once mise.lock points at the project's own Zig mirror.
-      - name: Install the locked tools (up to three attempts)
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --locked; then exit 0; fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::mise install --locked failed on attempt $attempt of 3; retrying in 15 s"
-              sleep 15
-            fi
-          done
-          echo "::error::mise install --locked failed three times"
-          exit 1
-      # install: false skips the action's own cache save; see ci.yml.
-      - name: Save the mise tool cache after a miss
-        if: steps.mise.outputs.cache-hit != 'true'
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+      # Confine the token to this step, where the WASI SDK resolves through the
+      # GitHub releases API; see ci.yml.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:

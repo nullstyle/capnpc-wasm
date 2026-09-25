@@ -48,46 +48,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-14 pkg-config
-      # Confine the token to the tool steps below, where the WASI SDK resolves
-      # through the GitHub releases API. mise-action exports MISE_GITHUB_TOKEN
-      # to every later step unless the variable is already set, so each of them
-      # sets it as step env. Later steps run repository code without it: every
-      # tool is installed by then.
-      - id: mise
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        with:
-          version: 2026.9.1
-          install: false
-      # Stopgap until mise.lock points at the project's own Zig mirror: mise
-      # takes the pinned Zig tarball from a randomly ordered community mirror
-      # and its .minisig from the same mirror with no fallback, and zig.bcr.ist
-      # serves the tarball but not the signature, so an install fails at random
-      # (nightly 36120138448, CI 36098649887). The action above therefore only
-      # sets up mise and restores its tool cache (install: false), and this
-      # step installs the locked tools, up to three times. Once the lock names
-      # the project's mirror, remove the retry and install: false from every
-      # job that installs tools, and the cache save where the cache is on.
-      - name: Install the locked tools (up to three attempts)
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --locked; then exit 0; fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::mise install --locked failed on attempt $attempt of 3; retrying in 15 s"
-              sleep 15
-            fi
-          done
-          echo "::error::mise install --locked failed three times"
-          exit 1
-      # With install: false the action restores its tool cache but never saves
-      # it. After a miss, a second run with the same inputs, and so the same
-      # cache key, finds every tool installed and saves the cache.
-      - name: Save the mise tool cache after a miss
-        if: steps.mise.outputs.cache-hit != 'true'
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+      # Confine the token to this step, where the WASI SDK resolves through the
+      # GitHub releases API. mise-action exports MISE_GITHUB_TOKEN to every later
+      # step unless the variable is already set, so it is set here as step env.
+      # Later steps run repository code without it: every tool is installed by
+      # then.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
@@ -252,38 +218,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-14 pkg-config
-      # Confine the token to the tool steps below, where the WASI SDK resolves
-      # through the GitHub releases API. mise-action exports MISE_GITHUB_TOKEN
-      # to every later step unless the variable is already set, so each of them
-      # sets it as step env. Later steps run repository code without it: every
-      # tool is installed by then.
-      - id: mise
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        with:
-          version: 2026.9.1
-          install: false
-      # Stopgap for the Zig community mirror that serves no .minisig (see the
-      # check job): install: false above, this retry, and the cache save below
-      # go once mise.lock points at the project's own Zig mirror.
-      - name: Install the locked tools (up to three attempts)
-        env:
-          MISE_GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          for attempt in 1 2 3; do
-            if mise install --locked; then exit 0; fi
-            if [ "$attempt" -lt 3 ]; then
-              echo "::warning::mise install --locked failed on attempt $attempt of 3; retrying in 15 s"
-              sleep 15
-            fi
-          done
-          echo "::error::mise install --locked failed three times"
-          exit 1
-      # install: false skips the action's own cache save; see the check job.
-      - name: Save the mise tool cache after a miss
-        if: steps.mise.outputs.cache-hit != 'true'
-        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
+      # Confine the token to this step, where the WASI SDK resolves through the
+      # GitHub releases API. mise-action exports MISE_GITHUB_TOKEN to every later
+      # step unless the variable is already set, so it is set here as step env.
+      # Later steps run repository code without it: every tool is installed by
+      # then.
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
