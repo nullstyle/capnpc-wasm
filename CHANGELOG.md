@@ -256,6 +256,15 @@ every flavor it applies to has shipped it.
   `deno check --config sdk/typescript/deno.strict.json` type-checks the SDK and
   its tests in strict mode; `deno test` keeps the non-strict `deno.json`,
   because it also type-checks the shim's upstream sources.
+- Toolchain: the Deno 2.6.8 worker lane is removed. The `deno-worker` tool and
+  its `mise.lock` entries, `deno-worker:install`, and `test:deno-worker` are
+  gone, and `ci` no longer runs the lane; the SDK worker tests and the
+  compiler-host package gate run on the pinned Deno only, where
+  `test:deno-worker-soak` is now `test:sdk-ts-soak`. `test:termination-canary`
+  tracks the pinned and the newest Deno, `audit:advisories` no longer queries or
+  accepts advisories for 2.6.8, the full SDK and compiler-host package READMEs
+  no longer say worker execution requires that release, and `lint` also runs the
+  strict SDK type check.
 
 ## capnp-wasm-compiler-host
 
