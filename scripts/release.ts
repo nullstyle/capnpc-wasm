@@ -850,7 +850,6 @@ export function spdxDocument(input: SbomInput): string {
     });
   }
   const toolRelationship: Record<string, string> = {
-    "deno-worker": "TEST_TOOL_OF",
     shellcheck: "DEV_TOOL_OF",
   };
   for (const tool of input.tools) {
@@ -1060,15 +1059,6 @@ export async function prepareRelease(
     if (!wasmtimeVersion) {
       throw new Error("missing exact Wasmtime pin in mise.toml");
     }
-    const denoWorkerVersion =
-      /^export const supportedDenoWorkerVersion = "([0-9][0-9.]*)";$/m.exec(
-        await Deno.readTextFile("sdk/typescript/environment.ts"),
-      )?.[1];
-    if (!denoWorkerVersion) {
-      throw new Error(
-        "missing supportedDenoWorkerVersion in sdk/typescript/environment.ts",
-      );
-    }
 
     // Built assets.
     if (flavor.typescript) await copyTree("dist/typescript", "typescript");
@@ -1146,7 +1136,6 @@ export async function prepareRelease(
         repository: repositoryUrl,
         tree,
         wasmtime: wasmtimeVersion,
-        denoWorker: denoWorkerVersion,
       }),
     );
     if (flavor.typescript) {

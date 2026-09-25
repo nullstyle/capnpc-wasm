@@ -2,17 +2,16 @@
 // in the Deno lockfiles, which osv-scanner does not read. Needs the network;
 // the supply-chain workflow runs it weekly (`mise run audit:advisories`).
 //
-// Queried: the deno and wasmtime pins of mise.toml and the Deno worker runtime
-// of sdk/typescript/environment.ts as crates.io packages (their advisories
-// are published against those crates), the go pin as the Go standard library,
-// the requirements of sdk/go/go.mod as Go modules, and every npm package in
-// tests/browser/deno.lock and examples/browser/deno.lock. The Go and Rust
-// manifests are otherwise covered by `mise run audit:osv` and
+// Queried: the deno and wasmtime pins of mise.toml as crates.io packages (their
+// advisories are published against those crates), the go pin as the Go
+// standard library, the requirements of sdk/go/go.mod as Go modules, and every
+// npm package in tests/browser/deno.lock and examples/browser/deno.lock. The Go
+// and Rust manifests are otherwise covered by `mise run audit:osv` and
 // `mise run audit:govulncheck`.
 //
 // An accepted advisory names the exact pinned version it was accepted for and
 // the reason; it is reported but does not fail the run. Every other advisory
-// fails the run.
+// fails the run. None is accepted today.
 
 type Package = { ecosystem: string; name: string };
 type Query = { package: Package; version: string; source: string };
@@ -23,26 +22,7 @@ const accepted: {
   version: string;
   ids: string[];
   reason: string;
-}[] = [
-  {
-    package: { ecosystem: "crates.io", name: "deno" },
-    version: "2.6.8",
-    ids: [
-      "GHSA-4c8g-jvcx-v4hv",
-      "GHSA-7xh3-mhg9-jcw8",
-      "GHSA-83pc-3rw9-qpwj",
-      "GHSA-8xpq-cjcf-3wh9",
-      "GHSA-968w-xfqw-vp9q",
-      "GHSA-9xg4-qhm4-g43w",
-      "GHSA-chqv-56wv-7564",
-      "GHSA-cpgj-f7g3-2pp2",
-      "GHSA-v8fw-85r8-5m23",
-      "GHSA-x2qc-cmh9-f4hf",
-    ],
-    reason:
-      "the worker lane pins Deno 2.6.8 knowingly: later releases do not stop a terminated worker (docs/deno-worker-termination.md); the pin is decision D1's",
-  },
-];
+}[] = [];
 
 function pin(toml: string, tool: string): string {
   const match = toml.match(new RegExp(`^${tool} = "([^"]+)"$`, "m"));
@@ -52,23 +32,11 @@ function pin(toml: string, tool: string): string {
 
 async function collectQueries(): Promise<Query[]> {
   const toml = await Deno.readTextFile("mise.toml");
-  const worker = (await Deno.readTextFile("sdk/typescript/environment.ts"))
-    .match(/^export const supportedDenoWorkerVersion = "([^"]+)";$/m);
-  if (!worker) {
-    throw new Error(
-      "supportedDenoWorkerVersion not found in sdk/typescript/environment.ts",
-    );
-  }
   const queries: Query[] = [
     {
       package: { ecosystem: "crates.io", name: "deno" },
       version: pin(toml, "deno"),
       source: "mise.toml deno",
-    },
-    {
-      package: { ecosystem: "crates.io", name: "deno" },
-      version: worker[1],
-      source: "sdk/typescript/environment.ts supportedDenoWorkerVersion",
     },
     {
       package: { ecosystem: "crates.io", name: "wasmtime" },

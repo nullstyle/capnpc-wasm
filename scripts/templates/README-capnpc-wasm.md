@@ -37,12 +37,13 @@ deno run --allow-read /path/to/capnpc-wasm/scripts/verify-release.ts --sums SHA2
 
 ## TypeScript: compile and generate
 
-`createCompiler` runs the guests in the calling thread. `createWorkerCompiler`
-runs them off the main thread with a deadline and cancellation, in browsers and
-on Deno {{denoWorker}} exactly (other Deno versions are rejected before a
-worker starts). The caller supplies the module and schema bytes; the package
-performs no filesystem or network access of its own. Run this program from the
-`package/` directory with `deno run --allow-read=. example.ts`:
+`createCompiler` runs the guests in the calling thread, and
+`createWorkerCompiler` runs them off the main thread; in both, a deadline or an
+abort stops the running guest. Worker execution is admitted in browsers, on
+Deno, and on Bun; Node.js has no Web `Worker` and is rejected before a worker
+starts. The caller supplies the module and schema bytes; the package performs no
+filesystem or network access of its own. Run this program from the `package/`
+directory with `deno run --allow-read=. example.ts`:
 
 ```ts example
 // @deno-types="./typescript/mod.d.ts"
