@@ -43,26 +43,61 @@ guest's own validation.
   and `stderrBytes`; defaults are in the
   [SDK guide](../sdk/typescript/README.md#resource-limits). Exceeding a budget
   traps the guest, and no partial result is returned.
-- No time bound. A guest that loops runs until it exits or the application stops
-  the thread.
+- Time: every guest is rewritten with interruption checks before it is compiled,
+  so `timeoutMs` (default 30 s) stops a guest that loops, recurses, sleeps in
+  `poll_oneoff`, or repeats costly imports or bulk copies: it traps at its
+  deadline, and no guest exception handler runs after the stop
+  (`sdk/typescript/interrupt_test.ts`, in `mise run test` on every push, Linux
+  x64 and macOS arm64, Deno 2.9.6; the same tests run on Deno 2.6.8 in the
+  worker lane). The blocked thread cannot observe an abort while a guest runs,
+  so an abort takes effect before the next guest stage.
+- Interruption limits: the rewrite costs about 10 to 16 percent of job time and
+  75 ms of factory start-up (measured locally on macOS arm64). A module it
+  cannot rewrite exactly (GC types, recursion groups, table initializers, shared
+  or 64-bit memory imports, unknown instructions) is rejected with a
+  `TypeError`, never run unchecked
+  (`SDK instrumentation fails closed on
+  constructs it cannot parse exactly`).
+  A single import call or bulk operation runs to completion before the next
+  check (`random_get` over 256 MiB of memory takes about 0.2 s), and a stop
+  recorded while a module's start function runs takes effect at its next poll.
 
 ### TypeScript SDK, worker path (`createWorkerCompiler`)
 
 - The same sandbox inside a dedicated worker. `timeoutMs` (default 30 s) and an
-  `AbortSignal` terminate the worker and reject the job; the next job starts a
-  fresh worker with private copies of the modules. Every failed job also
-  replaces the worker (`TS-01`).
-- Deno: accepted only on 2.6.8, which stops the isolate two seconds after
-  `terminate()` ([evidence](deno-worker-termination.md)); later Deno versions
-  keep executing the guest, so the SDK refuses them before creating a worker
-  (`SEC-03`, `TS-13`).
-- Browsers: Chromium, Firefox, and WebKit pass the offline parity suite and
-  twenty alternating abort and timeout cycles with recovery. That suite checks
-  rejection and recovery; it does not measure whether the replaced worker's CPU
-  stops. The audit reports that `terminate()` does not stop a running Wasm
-  computation in WebKit (`GAP2-V1`) or Bun (`GAP2-02`), and that Chromium keeps
-  it running for about two seconds (`GAP2-V3`). A guest sleeping in
-  `poll_oneoff` busy-waits in the shim (`GAP2-05`).
+  `AbortSignal` reject the job at once and stop the guest inside the worker: the
+  worker enforces the deadline itself, and an abort or `dispose()` reaches the
+  guest through a shared cell wherever a `SharedArrayBuffer` can cross to the
+  worker (Deno, Bun, and cross-origin isolated pages). The worker survives a
+  timeout or an abort and serves the next job, and ordinary failures (invalid
+  input, schema errors, traps, budget overruns) keep it as well
+  (`sdk/typescript/worker_test.ts`:
+  `SDK worker cancellation stops the guest and
+  keeps its worker`,
+  `SDK worker aborts stop bulk operations and costly imports
+  inside the guest`,
+  `SDK worker keeps its worker after ordinary job errors`; on every push on Deno
+  2.9.6, and on Deno 2.6.8 in the worker lane).
+- Runtimes: browsers, every Deno release, and Bun; Node.js has no Web `Worker`
+  and is rejected. Deno 2.9.6 and 2.6.8 are tested on every push; Bun 1.3.14 was
+  verified locally only, not in CI. `terminate()` is only a fallback: for a
+  cancelled job that does not report within one second, an abort without shared
+  memory, and a failed or disposed worker. It does not stop a running Wasm guest
+  in Deno 2.7.6 and later, WebKit, or Bun, and Chromium stops one about two
+  seconds later ([evidence](deno-worker-termination.md), `GAP2-V1`, `GAP2-02`,
+  `GAP2-V3`). Without cross-origin isolation an aborted guest therefore keeps
+  its core until its own `timeoutMs` and then traps
+  (`SDK worker without SharedArrayBuffer still stops guests at their deadline`).
+- Browsers: Chromium, Firefox, and WebKit pass the offline parity suite, twenty
+  alternating abort and timeout cycles with recovery, and a termination
+  acceptance that counts a spinning guest's progress in shared memory: after a
+  timeout, an abort, and a dispose, both a pure-Wasm and a WASI-calling guest
+  stop within two seconds, and the worker survives the timeout and the abort
+  (`tests/browser/termination.ts` in `test:browser`, on every push in the Linux
+  `browsers` job; on macOS measured locally at 0 to 53 ms, and nightly once the
+  held workflow runs). A guest sleeping in `poll_oneoff` blocks in
+  `Atomics.wait` instead of spinning wherever the thread may block (`GAP2-05`);
+  its stop at the deadline is tested, its CPU use was measured locally.
 
 ### Go SDK
 
@@ -179,14 +214,15 @@ independent check.
 
 ## Known gaps
 
-| Area                                    | Gap                                                                                    | Audit ids                               |
-| --------------------------------------- | -------------------------------------------------------------------------------------- | --------------------------------------- |
-| TypeScript memory bounds                | Read-side WASI imports and open descriptors can exceed `memoryPages`                   | `SEC-01`, `TS-03`, `TS-V1`              |
-| Execution deadlines                     | Only Deno 2.6.8 stops a terminated worker; WebKit and Bun never do; no direct bound    | `SEC-03`, `TS-13`, `GAP2-V1`, `GAP2-02` |
-| Worker restart                          | Every failed job replaces the worker                                                   | `TS-01`, `GAP2-V2`                      |
-| Go deadlines and shutdown               | Sleeping guests ignore deadlines; `Close` and `New` ignore contexts                    | `GO-01`, `GO-02`, `GO-V2`               |
-| Launcher output and inputs              | Resolved: staged output and a read-only workspace copy; `/` refused                    | `GAP1-01`, `GAP1-02` (fixed)            |
-| Launcher ceilings and confinement tests | Resolved: 256 MiB, 8 MiB stack, 300 s bounds; escape regression tests; symlink warning | `SEC-02`, `SEC-07`, `GAP1-V2` (fixed)   |
-| Launcher invocation                     | Resolved: `CDPATH`-safe, symlink-resolving, executable with `package.json` `bin`       | `SEC-06`, `GAP1-V1` (fixed)             |
-| Release trust                           | Unsigned, hand-built assets; CI token and download hardening                           | `SEC-04`, `SEC-08`                      |
-| Names and diagnostics                   | Control characters pass through; host filesystems differ                               | `SEC-05`, `GAP3-07`                     |
+| Area                                    | Gap                                                                                                                                                         | Audit ids                                       |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| TypeScript memory bounds                | Read-side WASI imports and open descriptors can exceed `memoryPages`                                                                                        | `SEC-01`, `TS-03`, `TS-V1`                      |
+| Execution deadlines                     | Resolved on Deno 2.9.6 and 2.6.8, both paths, and in Chromium, Firefox, and WebKit on the Linux CI job: in-guest interruption stops the guest               | `SEC-03`, `TS-13`, `GAP2-V1`, `GAP2-02` (fixed) |
+| Cancellation residuals                  | Without cross-origin isolation an aborted guest runs to its `timeoutMs`; Bun is verified locally only; one import call or bulk operation runs to completion | `GAP2-V1`, `GAP2-02`, `GAP2-V3`                 |
+| Worker restart                          | Resolved: ordinary failures, timeouts, and aborts with shared memory keep the worker; `terminate()` is a fallback                                           | `TS-01`, `GAP2-V2` (fixed)                      |
+| Go deadlines and shutdown               | Sleeping guests ignore deadlines; `Close` and `New` ignore contexts                                                                                         | `GO-01`, `GO-02`, `GO-V2`                       |
+| Launcher output and inputs              | Resolved: staged output and a read-only workspace copy; `/` refused                                                                                         | `GAP1-01`, `GAP1-02` (fixed)                    |
+| Launcher ceilings and confinement tests | Resolved: 256 MiB, 8 MiB stack, 300 s bounds; escape regression tests; symlink warning                                                                      | `SEC-02`, `SEC-07`, `GAP1-V2` (fixed)           |
+| Launcher invocation                     | Resolved: `CDPATH`-safe, symlink-resolving, executable with `package.json` `bin`                                                                            | `SEC-06`, `GAP1-V1` (fixed)                     |
+| Release trust                           | Unsigned, hand-built assets; CI token and download hardening                                                                                                | `SEC-04`, `SEC-08`                              |
+| Names and diagnostics                   | Control characters pass through; host filesystems differ                                                                                                    | `SEC-05`, `GAP3-07`                             |
