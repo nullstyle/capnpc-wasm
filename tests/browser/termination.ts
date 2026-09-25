@@ -136,13 +136,14 @@ export interface TerminationResult {
 }
 
 /**
- * Why WebKit may keep the pure guest running: decision D1 (in-guest
- * interruption, or terminate() with documented gaps) is unanswered, and
- * GAP2-V1 records that WebKit never stops a Wasm loop on terminate(). The
- * test fails loudly when WebKit does stop it.
+ * Why WebKit may keep the pure guest running: WebKit never stops a Wasm loop
+ * on Worker.terminate() (GAP2-V1). Decision D1 = A has T08's in-guest
+ * interruption stop it; until that lands the pure guest is an expected
+ * failure. The expectation is strict: the test fails as soon as WebKit stops
+ * the guest, which is the signal to remove this expectation with T08.
  */
 export const webkitExpectedFailure =
-  "D1 pending; GAP2-V1: WebKit never stops a Wasm loop on Worker.terminate(), so the termination bound is not asserted for the pure-Wasm guest there";
+  "D1 = A: stopped by T08's in-guest interruption (GAP2-V1); remove this expectation when T08 lands";
 
 type Evaluate = <T, A>(
   fn: (argument: A) => Promise<T> | T,
@@ -380,7 +381,7 @@ export async function checkIsolatedTermination(
       stopped.length === 0,
       `${engine}: the pure-Wasm guest stopped after ${
         stopped.map((sample) => sample.mode).join(", ")
-      } (${summary}); the expected failure (${webkitExpectedFailure}) no longer holds: assert the bound for WebKit`,
+      } (${summary}), so the expected failure no longer holds (${webkitExpectedFailure}): drop the WebKit branch in checkIsolatedTermination and assert the bound for WebKit as for the other engines`,
     );
     return {
       engine,
