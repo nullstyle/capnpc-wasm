@@ -3,15 +3,13 @@
 // reproducibility and asset integrity, extracted into a fresh directory under
 // build/test, and exercised by an external Deno consumer with a fresh cache,
 // the packaged README example, and a link check over the packaged documents.
+// Every step runs on the Deno that runs this script, the pinned one under mise.
 import { packageFiles, sha256, verifyRelease } from "./verify-release.ts";
 import { archiveStem, flavorNamed, readMetadata } from "./release.ts";
 import { compilerPathFixture } from "../tests/package/compiler-path-fixture.ts";
 
-// Optional executable override verifies a supported older Deno without changing
-// the producer's own toolchain pin. The default is the current test executable.
-const deno = Deno.args[0] ?? Deno.execPath();
-if (Deno.args.length > 1) {
-  throw new Error("usage: test-compiler-host-package.ts [deno]");
+if (Deno.args.length > 0) {
+  throw new Error("usage: test-compiler-host-package.ts (takes no arguments)");
 }
 const repository = Deno.cwd();
 const flavor = flavorNamed("capnp-wasm-compiler-host");
@@ -213,7 +211,7 @@ try {
   await Deno.writeTextFile(`${extracted}/readme-example.ts`, example);
   const exampleOutput = await command(
     [
-      deno,
+      Deno.execPath(),
       "run",
       "--check",
       "--no-config",
@@ -266,7 +264,7 @@ try {
   );
   const output = await command(
     [
-      deno,
+      Deno.execPath(),
       "run",
       "--check",
       "--cached-only",
