@@ -33,6 +33,14 @@ export const pollInterval = 65536;
 /** Job deadline used when a caller passes no `timeoutMs`. */
 export const defaultTimeoutMs = 30_000;
 
+/**
+ * How long a cancelled worker job may take to report back before the client
+ * terminates and replaces its worker. A cancelled guest stops at its next
+ * check, which it reaches about every 0.2 ms of execution, so the report
+ * normally arrives within milliseconds.
+ */
+export const settleGraceMs = 1000;
+
 export function timeoutError(): DOMException {
   return new DOMException("compilation timed out", "TimeoutError");
 }

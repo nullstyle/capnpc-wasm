@@ -25,6 +25,7 @@
 // terminate(). Without isolation there is no shared memory: the rejection, the
 // terminate() calls, and the follow-up job can be observed, not the guest.
 import type { Engine } from "./engines.ts";
+import { settleGraceMs } from "../../sdk/typescript/interrupt.ts";
 
 /**
  * Milliseconds a guest may keep running after its job was cancelled. The
@@ -43,10 +44,10 @@ export const quietMs = 1_000;
 
 /**
  * How long the worker client waits for a cancelled job to report before it
- * terminates the worker (`settleGraceMs` in sdk/typescript/worker-client.ts),
- * plus a margin. The page waits this long before a follow-up job.
+ * terminates the worker, plus a margin. The page waits this long before a
+ * follow-up job.
  */
-export const clientGraceMs = 1_000 + 200;
+export const clientGraceMs = settleGraceMs + 200;
 
 /** The SDK deadline for the timeout case, and for the follow-up job. */
 export const timeoutMs = 300;

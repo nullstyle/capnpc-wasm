@@ -9,6 +9,7 @@ import {
   checkTimeout,
   defaultTimeoutMs,
   jobOptions,
+  settleGraceMs,
   timeoutError,
 } from "./interrupt.ts";
 import { inspectModules } from "./wasm.ts";
@@ -107,14 +108,6 @@ function transferable(files: Record<string, Uint8Array>[]): Transferable[] {
   }
   return [...buffers];
 }
-
-/**
- * How long a cancelled job may take to report back before its worker is
- * terminated and replaced. A cancelled guest stops at its next check, which it
- * reaches about every 0.2 ms of execution, so the report normally arrives
- * within milliseconds.
- */
-const settleGraceMs = 1000;
 
 /**
  * Whether a SharedArrayBuffer can reach a worker: in Deno and Bun always, in
