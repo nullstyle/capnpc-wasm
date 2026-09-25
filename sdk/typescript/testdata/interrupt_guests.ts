@@ -364,3 +364,17 @@ export const legacyExceptionsModule = wasm(
     "066c656761637900000a1c011a00067f067f067f41030800180007001a09000b07001941" +
     "090b0b",
 );
+
+export interface InterruptGuest {
+  bytes: Uint8Array<ArrayBuffer>;
+  /** Assembled with `wasm-tools parse` only, keeping its name section. */
+  keepNames?: true;
+}
+
+/** Every guest above, keyed by the name of its WebAssembly text source. */
+export const interruptGuests: Readonly<Record<string, InterruptGuest>> = {
+  "catch-retry": { bytes: catchRetryGuest },
+  "named-trap": { bytes: namedTrapGuest, keepNames: true },
+  "rewriter-coverage": { bytes: rewriterCoverageModule },
+  "legacy-exceptions": { bytes: legacyExceptionsModule },
+};
