@@ -379,8 +379,8 @@ deno run --allow-read --allow-write=build/test --allow-run tests/hosts/deno/work
 '''
 
 [tasks."test:browser-bootstrap"]
-description = "Verify the Playwright bootstrap permission boundary and the browser step deadlines without launching browsers"
-run = "deno test --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-env --allow-sys tests/browser/playwright_test.ts tests/browser/deadline_test.ts"
+description = "Verify the Playwright bootstrap permission boundary, the browser step deadlines, and the termination verdicts without launching browsers"
+run = "deno test --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-env --allow-sys tests/browser/playwright_test.ts tests/browser/deadline_test.ts tests/browser/termination_test.ts"
 
 [tasks."example:deno"]
 description = "Generate Rust through the bundled SDK with no execution permissions (type-checks the example)"

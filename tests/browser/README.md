@@ -166,12 +166,19 @@ a core busy until the browser closes.
 | WebKit 26.6                      | never (expected failure)    | 103-358 ms                     |
 | Firefox 155.0                    | not run locally; CI asserts | not run locally; CI asserts    |
 
-WebKit stops a terminated worker only when the guest next enters JavaScript, so
-a guest that computes without WASI calls runs on at 100% CPU (GAP2-V1). The
-driver records that case as an expected failure and fails loudly as soon as
-WebKit stops the guest: decision D1 = A has T08's in-guest interruption stop it,
-and the expectation is removed when T08 lands. Until then, treat a rejected
-cancellation in WebKit as a request, not as proof that the guest stopped.
+On macOS, WebKit stops a terminated worker only when the guest next enters
+JavaScript, so a guest that computes without WASI calls runs on at 100% CPU
+(GAP2-V1). There the driver records that case as an expected failure and fails
+loudly as soon as WebKit stops the guest: decision D1 = A has T08's in-guest
+interruption stop it, and the expectation is removed when T08 lands. WebKit on
+Linux, where CI runs it, is unmeasured: the driver accepts either behavior of
+the pure-Wasm guest there and prints which one it saw
+(`OBSERVED webkit on
+linux: ...`). In every engine and on every host, the guest
+that calls WASI must stop within the bound. `termination_test.ts`, part of
+`test:browser-bootstrap`, checks these verdicts without a browser. Until T08
+lands, treat a rejected cancellation in WebKit as a request, not as proof that
+the guest stopped.
 
 ## Conformance corpus
 
