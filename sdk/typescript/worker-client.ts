@@ -223,47 +223,64 @@ export async function createWorkerCompiler(
     const { worker } = current;
     const id = nextId();
     return new Promise((resolve, reject) => {
+      // "running" until the caller's promise settles; "stopping" while a
+      // cancelled job unwinds in the worker; "closed" once nothing is pending.
+      // Every callback checks it: timers, abort events and replies can arrive
+      // after the exchange ended (Deno 2.6.8 even runs a timer cleared by an
+      // event handled in the same turn), and must then do nothing.
+      let state: "running" | "stopping" | "closed" = "running";
+      let grace: ReturnType<typeof setTimeout> | undefined;
+      let unwound: (() => void) | undefined;
       // Stop listening to the caller.
       const release = () => {
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
         if (cancel === interruptCaller) cancel = undefined;
       };
-      // Stop listening to the worker as well.
-      const detach = () => {
+      // Stop listening to the worker too, and end a cancelled job's wait.
+      const close = () => {
+        state = "closed";
         release();
+        clearTimeout(grace);
         worker.removeEventListener("message", receive);
         worker.removeEventListener("error", fail);
         worker.removeEventListener("messageerror", fail);
+        if (current.settle === settleThis) {
+          current.settling = current.settle = undefined;
+        }
+        unwound?.();
+      };
+      const settleThis = () => {
+        if (state === "stopping") close();
       };
       // The worker failed, or nothing else can stop it: terminate and reject.
       const terminate = (reason: unknown) => {
-        detach();
+        if (state === "closed") return;
+        const running = state === "running";
+        close();
         stop(current);
-        reject(reason);
+        if (running) reject(reason);
       };
       const interrupt = (reason: unknown, timedOut: boolean) => {
+        if (state !== "running") return;
         // Start-up runs no guest, and without a cell only the job's own
         // deadline reaches a guest that blocks its worker.
         if (message.kind === "init" || (!current.cell && !timedOut)) {
           terminate(reason);
           return;
         }
+        state = "stopping";
         release();
         reject(reason);
         if (current.cell) {
           Atomics.store(current.cell, 0, id);
           Atomics.notify(current.cell, 0);
         }
-        let settled!: () => void;
-        current.settling = new Promise<void>((resolve) => settled = resolve);
-        const grace = setTimeout(() => stop(current), settleGraceMs);
-        current.settle = () => {
-          clearTimeout(grace);
-          detach();
-          current.settling = current.settle = undefined;
-          settled();
-        };
+        current.settling = new Promise<void>((resolve) => unwound = resolve);
+        current.settle = settleThis;
+        grace = setTimeout(() => {
+          if (state === "stopping") terminate(undefined);
+        }, settleGraceMs);
       };
       const interruptCaller = (reason: unknown) => interrupt(reason, false);
       const abort = () => interrupt(signal!.reason, false);
@@ -284,15 +301,16 @@ export async function createWorkerCompiler(
         if (typeof reply !== "object" || reply === null || reply.id !== id) {
           return;
         }
-        if (current.settle) {
+        if (state === "stopping") {
           // The cancelled job stopped; its worker is free for the next job.
           if (current.cell) Atomics.store(current.cell, 0, 0);
-          current.settle();
+          close();
           return;
         }
-        detach();
+        if (state !== "running") return;
+        close();
         // A structured error answers the job; the worker stays ready. Nothing
-        // after detach() may throw, or the job would never settle.
+        // after close() may throw, or the job would never settle.
         if (reply.error === undefined) resolve(reply.result);
         else {
           let error: Error;

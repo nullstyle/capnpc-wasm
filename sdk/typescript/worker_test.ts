@@ -895,3 +895,68 @@ workerTest(
     }
   },
 );
+
+workerTest(
+  "SDK worker settles a job once when its reply and timer arrive together",
+  async () => {
+    // A stand-in worker that answers each job after 60 ms, past the job's
+    // 50 ms timeout. The test keeps this thread busy until both the reply and
+    // the timer are due, so they are handled in one turn, in either order.
+    // (Deno 2.6.8 handles the reply first and then still runs the timer the
+    // reply handler cleared.) The job settles once, either way, and the next
+    // job gets its own reply.
+    const source = `self.onmessage = ({ data }) => {
+      if (data.kind !== "init") {
+        const start = performance.now();
+        while (performance.now() - start < 60) {}
+      }
+      self.postMessage({
+        id: data.id,
+        result: { request: new Uint8Array(1), outputs: {}, diagnostics: [] },
+      });
+    };`;
+    const url = URL.createObjectURL(
+      new Blob([source], { type: "text/javascript" }),
+    );
+    const job: CompileRequest = { ...simpleRequest(), generators: [] };
+    try {
+      await countingWorkers(async (constructions) => {
+        const worker = await createWorkerCompiler(url, {
+          compiler: trapGuest,
+          generators: {},
+        });
+        try {
+          for (let round = 0; round < 3; round++) {
+            const racing = worker.compile(job, { timeoutMs: 50 }).then(
+              () => "reply",
+              (error: Error) => error.name,
+            );
+            // Let the client post the job and start its timer, then block.
+            await delay(1);
+            const start = performance.now();
+            while (performance.now() - start < 150) {
+              // Both the reply and the timer become due meanwhile.
+            }
+            const winner = await racing;
+            assert(
+              winner === "reply" || winner === "TimeoutError",
+              `round ${round}: ${winner}`,
+            );
+            const [result, took] = await timed(() =>
+              worker.compile(job, { timeoutMs: 2000 })
+            );
+            assert(
+              result.request.length === 1 && took < 1000,
+              `round ${round}: the next job took ${took} ms`,
+            );
+          }
+          assert(constructions() === 1, "the race replaced the worker");
+        } finally {
+          worker.dispose();
+        }
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+);
