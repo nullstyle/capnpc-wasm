@@ -76,6 +76,9 @@ CXX = "clang++"
 CARGO_TARGET_DIR = "{{config_root}}/build/cargo"
 DENO_DIR = "{{config_root}}/.cache/deno"
 GOPATH = "{{config_root}}/.cache/go"
+# Go's default under GOPATH, stated so no user setting moves the module cache
+# out of the project.
+GOMODCACHE = "{{config_root}}/.cache/go/pkg/mod"
 GOCACHE = "{{config_root}}/.cache/go-build"
 GOTOOLCHAIN = "local"
 ZIG_GLOBAL_CACHE_DIR = "{{config_root}}/.cache/zig"
@@ -139,7 +142,10 @@ run = "rm -rf build dist"
 [tasks."clean:all"]
 description = "Remove build/, dist/, and every project cache under .cache/ (Deno, Go, Zig, downloaded browsers)"
 # Go extracts modules read-only; go clean removes them where rm alone fails.
-run = ["go clean -modcache", "rm -rf build dist .cache"]
+run = [
+  "command -v go >/dev/null && go clean -modcache || true",
+  "rm -rf build dist .cache",
+]
 
 [tasks.lint]
 description = "Static checks without a build: shell, formatting, lint, type checks, vet, clippy"
