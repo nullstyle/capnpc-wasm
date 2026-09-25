@@ -87,21 +87,24 @@ bulk memory operations, every WASI import polls too, and a stop is a trap. A
 timeout stops the guest at its own deadline in every engine. An abort or
 `dispose()` reaches a running guest through a shared cell wherever a
 `SharedArrayBuffer` can cross to the worker (always in Deno and Bun, in browsers
-on cross-origin isolated pages). The worker survives a timeout or an abort and
-serves the next job. `terminate()` is only a fallback: when a cancelled job does
-not report within a second, for an abort without shared memory, and for a failed
-or disposed worker. The evidence in this document therefore records engine
-behavior, for the upstream report and the canary; the SDK's bounds do not depend
-on it.
+on cross-origin isolated pages). A timeout keeps the worker for the next job,
+and so does an abort that reaches the guest through the cell; `dispose()`, and
+an abort without shared memory, terminate it. `terminate()` is otherwise only a
+fallback: when a cancelled job does not report within a second, for an abort
+without shared memory, and for a failed or disposed worker. The evidence in this
+document therefore records engine behavior, for the upstream report and the
+canary; the SDK's bounds do not depend on it.
 
 ## Worker runtime policy
 
-`createWorkerCompiler` runs in browsers, on every Deno release, and on Bun
-(verified locally on Bun 1.3.14; CI does not run Bun). Node.js has no Web
-`Worker` and is rejected, as are unrecognized hosts.
-`supportedDenoWorkerVersion` remains exported but deprecated; nothing checks it,
-and the 2.1-second restart grace is gone. The SDK worker tests run on the pinned
-Deno in `mise run test`.
+`createWorkerCompiler` is admitted in browsers, on every Deno release, and on
+Bun (verified locally on Bun 1.3.14 in both modes; CI does not run Bun);
+releases without standardized Wasm exception handling still fail the factories'
+engine check. Node.js has no Web `Worker` and is rejected, as are unrecognized
+hosts. `supportedDenoWorkerVersion` remains exported but deprecated: the SDK no
+longer checks it, only this repository's termination canary reads it, and the
+2.1-second restart grace is gone. The SDK worker tests run on the pinned Deno in
+`mise run test`.
 
 Measured on macOS arm64 on 2026-09-24 (Deno 2.9.6 and 2.6.8, Bun 1.3.14): a
 guest that spins, sleeps in `poll_oneoff` for an hour, or tail-calls forever
@@ -132,12 +135,16 @@ arrives after its exchange has ended.
 The browser suite's
 [termination acceptance](../tests/browser/README.md#termination-acceptance)
 measures SDK cancellation with a shared counter after a timeout, an abort, and a
-dispose. With in-guest interruption, every guest stops within the counter's 50
-ms sampling in Chromium 153 and WebKit 26.6 on macOS arm64, WebKit's pure-Wasm
-loop included, and the worker survives a timeout or an abort. Without isolation,
-a timeout still stops the guest at its deadline and keeps the worker, which
-serves the next job at once. Firefox runs in the hosted Linux job; it cannot
-launch on the development host.
+dispose. With in-guest interruption every guest stopped within the counter's 50
+ms sampling, WebKit's pure-Wasm loop included, and the worker survived the
+timeout and the abort: in Chromium 153 and WebKit 26.6 on macOS arm64 (measured
+locally, 0 to 53 ms), in Chromium, Firefox 155, and WebKit on Linux (CI run
+[36112686931](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112686931),
+0 to 50 ms), and on macOS in the nightly run
+[36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524)
+(0 to 185 ms, the 185 ms being Firefox's abort). Without isolation the page
+cannot see the guest; in all three engines on Linux the timeout rejected after
+300 to 302 ms, and the next job ran on the same worker.
 
 The engines' own `terminate()` differs, as measured before in-guest
 interruption: on Linux CI (run 36103736516) Chromium stopped a terminated

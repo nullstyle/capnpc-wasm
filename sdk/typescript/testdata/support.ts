@@ -96,7 +96,7 @@ export async function rejectsWith<T extends Error>(
 }
 
 /**
- * A worker-client test. Worker execution runs on every Deno release: guests
+ * A worker-client test. Worker execution is admitted on every Deno release: guests
  * stop themselves, so no test depends on the host's Worker.terminate().
  */
 export function workerTest(name: string, fn: Deno.TestDefinition["fn"]) {

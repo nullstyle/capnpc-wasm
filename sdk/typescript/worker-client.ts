@@ -43,7 +43,8 @@ export interface WorkerCompilerOptions extends CompilerOptions {
 export interface WorkerCompiler {
   /**
    * One active job per client. Cancellation stops the job's guest inside the
-   * worker, which then serves the next job; see createWorkerCompiler.
+   * worker, which then serves the next job unless it had to be terminated;
+   * see createWorkerCompiler.
    */
   compile(
     request: CompileRequest,
@@ -146,13 +147,14 @@ interface Session {
  * stops its guest from inside: where a SharedArrayBuffer can reach the worker,
  * the client stores the job's id in a shared cell, and the guest traps at its
  * next interruption check; a timeout also trips the deadline the worker
- * enforces itself. The worker survives and serves the next job, which first
- * waits for the cancelled one to report. The worker is terminated and
- * replaced only as a fallback: when a cancelled job does not report within a
- * second, when an abort cannot reach the guest (no SharedArrayBuffer; the
- * guest still stops at its own deadline where terminate() does not stop it),
- * when start-up is cancelled, when the worker itself fails (`error` or
- * `messageerror` events, or `postMessage` throwing), and on dispose.
+ * enforces itself. Unless it is terminated, the worker then serves the next
+ * job, which first waits for the cancelled one to report. The worker is
+ * terminated and replaced only as a fallback: when a cancelled job does not
+ * report within a second, when an abort cannot reach the guest (no
+ * SharedArrayBuffer; the guest still stops at its own deadline where
+ * terminate() does not stop it), when start-up is cancelled, when the worker
+ * itself fails (`error` or `messageerror` events, or `postMessage` throwing),
+ * and on dispose.
  * Ordinary rejections (`TypeError` for bad input, `CompileError` for guest
  * failures, including traps and limits) keep the worker, because every job
  * runs fresh guest instances and filesystems.

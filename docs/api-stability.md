@@ -62,8 +62,8 @@ TypeScript:
   `FailureKind`, `CompileErrorOptions`, and `CompileError` (`instanceof`,
   `name`, `stage`, `diagnostics`, `exitCode`, `kind`, `limit`, and `cause`).
 - Constants and probes: `defaultLimits`, `supportsWasmExceptions()`, and
-  `isBoundedWorkerSupported()`. `supportedDenoWorkerVersion` is deprecated
-  (nothing checks it) and can be removed in `0.2.0`.
+  `isBoundedWorkerSupported()`. `supportedDenoWorkerVersion` is deprecated (the
+  SDK no longer checks it) and can be removed in `0.2.0`.
 - Package entry points: `.`, `./worker`, `./wasm/*`, `./include/*`, and
   `./manifest.json`. Load `./worker` from the same package version as `.`.
 

@@ -210,8 +210,8 @@ worker (always in Deno and Bun, in browsers only on cross-origin isolated
 pages), the client also stores the job's id in a shared cell, and the guest
 traps at its next interruption check, typically within a millisecond. A timeout
 needs no shared memory: the worker enforces the same deadline inside the guest.
-The worker survives cancellation and serves the next job, which first waits for
-the cancelled job to report.
+A timeout, or an abort that reaches the guest through the cell, keeps the
+worker, which serves the next job once the cancelled job has reported.
 
 Restart policy: the worker is terminated and replaced only as a fallback: when a
 cancelled job does not report within a second, when an abort cannot reach the
@@ -239,11 +239,11 @@ created, with an `Error` that points to `createCompiler`, whose jobs enforce the
 same in-guest deadline on the calling thread. `isBoundedWorkerSupported()`
 answers the same question as a predicate. `supportedDenoWorkerVersion` is
 deprecated: it names the one Deno release that worker execution required while
-cancellation relied on `terminate()`, and nothing checks it any more. The
+cancellation relied on `terminate()`, and the SDK no longer checks it. The
 [termination evidence](../../docs/deno-worker-termination.md) records how
 `terminate()` behaves on each engine. Direct compilation is tested on the pinned
-Deno 2.9.6. Direct execution on Node.js and Bun is best effort: expected to work
-but not tested.
+Deno 2.9.6. Direct execution on Node.js and Bun is best effort: Bun 1.3.14 was
+verified locally, not in CI, and Node.js is untested.
 
 Worker initialization accepts `{ signal, initTimeoutMs }` alongside `limits`:
 the default deadline is 30 seconds, and aborting terminates the starting worker
@@ -395,12 +395,13 @@ exit, a budget overrun, or a host error); and the worker client
 path without `SharedArrayBuffer`, the `terminate()` fallback, no restart after
 ordinary errors, identical error classes and messages in both modes, result
 shapes, script load and initialization failures, aborted initialization, and
-disposal of a running job). CI also runs the suite on Deno 2.6.8 with the
-external compiler-host package consumer (`mise run test:deno-worker`), a lane
-kept from when worker execution required that release; the exact lanes are
-listed in [CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes). The
-SDK and its tests also type-check in strict mode against a typed facade of the
-pinned shim (`shim.ts`, `shim.d.ts`):
+disposal of a running job). Per-push CI also runs `sdk_test.ts` and the external
+compiler-host package consumer on Deno 2.6.8, a lane kept from when worker
+execution required that release, and `mise run test:deno-worker` runs the whole
+suite there; the exact lanes are listed in
+[CONTRIBUTING.md](../../CONTRIBUTING.md#reproducing-the-ci-lanes). The SDK and
+its tests also type-check in strict mode against a typed facade of the pinned
+shim (`shim.ts`, `shim.d.ts`):
 `mise exec -- deno check --config sdk/typescript/deno.strict.json --unstable-sloppy-imports sdk/typescript/mod.ts sdk/typescript/worker.ts sdk/typescript/*_test.ts`.
 `deno test` itself runs with the non-strict `deno.json`, because it also
 type-checks the shim's upstream sources, which are not strict-clean.

@@ -219,32 +219,38 @@ every flavor it applies to has shipped it.
   subscription flags at the WASI offset (absolute clock timeouts), reads the
   whole subscription before writing an event that overlaps it, reports the event
   count, and returns `EINTR` when the job is cancelled.
-- TypeScript SDK, behavior change before the first tag: direct `compile` and
-  `generate` accept the worker's `{ signal, timeoutMs }` options (`JobOptions`
-  now lives in the shared types), and `timeoutMs` defaults to 30 seconds in both
-  modes; a direct guest past its deadline traps and the job rejects with a
-  `TimeoutError`, and invalid options reject with `TypeError` before the request
-  is validated.
+- TypeScript SDK, breaking: direct `compile` and `generate` now have a deadline.
+  They take the worker's `{ signal, timeoutMs }` options (`JobOptions` now lives
+  in the shared types), and `timeoutMs` defaults to 30 seconds in both modes, so
+  a direct job that runs longer, which the published compiler-host 0.1.0-rc.2
+  and rc.3 let run without limit, now rejects with a `TimeoutError` and its
+  guest traps; pass a larger `timeoutMs` (at most 2147483647) for longer jobs.
+  Invalid options reject with `TypeError` before the request is validated.
 - TypeScript SDK: worker cancellation stops the guest inside the worker instead
   of relying on `Worker.terminate()`, which does not stop a running Wasm guest
   in WebKit, Bun, or Deno 2.7.6 and later: a timeout, an abort, or `dispose()`
   rejects at once and traps the guest at its next check through a shared cell
   (where `SharedArrayBuffer` reaches the worker) or the deadline the worker
-  enforces itself, and the worker survives and serves the next job;
-  `terminate()` is a fallback, and without cross-origin isolation an aborted
-  guest is bounded by its `timeoutMs`.
-- TypeScript SDK: `createWorkerCompiler` runs on every Deno release and on Bun
-  (verified locally on 1.3.14, not in CI); Node.js (no Web `Worker`) and
-  unrecognized hosts are still rejected, and `isBoundedWorkerSupported()`
-  follows. `supportedDenoWorkerVersion` is deprecated and no longer checked, and
-  the 2.1 s Deno restart grace is gone. The worker tests run on the pinned Deno.
+  enforces itself. A timeout keeps the worker for the next job, and so does an
+  abort that reaches the guest through the cell; `dispose()`, and an abort
+  without shared memory, terminate the worker, and `terminate()` is otherwise
+  only a fallback. Without cross-origin isolation an aborted guest is bounded by
+  its `timeoutMs`.
+- TypeScript SDK: `createWorkerCompiler` is admitted on every Deno release and
+  on Bun (verified locally on 1.3.14, not in CI), where releases without
+  standardized Wasm exception handling still fail the engine check; Node.js (no
+  Web `Worker`) and unrecognized hosts are still rejected, and
+  `isBoundedWorkerSupported()` follows. `supportedDenoWorkerVersion` is
+  deprecated, and the SDK no longer checks it; the 2.1 s Deno restart grace is
+  gone. The worker tests run on the pinned Deno.
 - TypeScript SDK: `CompileError` gains `kind` (`exit`, `trap`, `limit`, or
   `protocol`) and, for budget overruns, `limit` naming the exceeded
-  `ResourceLimits` field; both cross the worker protocol unchanged. Classes are
-  unchanged, and so are messages except one: a generated output path over
-  `pathBytes` is now a limit like the other running budgets, so its cause reads
-  `pathBytes resource limit exceeded` instead of `path exceeds pathBytes limit`,
-  as the Go SDK already reported it.
+  `ResourceLimits` field, typed by the new exports `FailureKind` and
+  `CompileErrorOptions`; both fields cross the worker protocol unchanged.
+  Classes are unchanged, and so are messages except one: a generated output path
+  over `pathBytes` is now a limit like the other running budgets, so its cause
+  reads `pathBytes resource limit exceeded` instead of
+  `path exceeds pathBytes limit`, as the Go SDK already reported it.
 - TypeScript SDK: the pinned WASI shim is imported through one typed facade
   (`shim.ts` with `shim.d.ts`), and
   `deno check --config sdk/typescript/deno.strict.json` type-checks the SDK and

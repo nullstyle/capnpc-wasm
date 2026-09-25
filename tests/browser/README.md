@@ -175,17 +175,25 @@ reported by then would have made the client terminate its worker, so no
 `terminate()` call and no second worker show that it stopped. The checks run
 after everything else.
 
-| Engine                         | Pure-Wasm guest stops after    | Host-calling guest stops after |
-| ------------------------------ | ------------------------------ | ------------------------------ |
-| Chromium 153.0.8010.12 (macOS) | 0-53 ms                        | 0 ms                           |
-| WebKit 26.6 (macOS)            | 0-51 ms                        | 0 ms                           |
-| Firefox 155.0 (Linux CI)       | asserted; first CI run pending | asserted; first CI run pending |
+| Engine                            | Pure-Wasm guest stops after | Host-calling guest stops after |
+| --------------------------------- | --------------------------- | ------------------------------ |
+| Chromium 153.0.8010.12 (macOS)    | 0-53 ms                     | 0 ms                           |
+| Chromium 153.0.8010.12 (Linux CI) | 0-50 ms                     | 0-50 ms                        |
+| Firefox 155.0 (Linux CI)          | 0-50 ms                     | 0 ms                           |
+| WebKit 26.6 (macOS)               | 0-51 ms                     | 0 ms                           |
+| WebKit 26.6 (Linux CI)            | 0-50 ms                     | 0 ms                           |
 
-The macOS figures were measured on arm64 on 2026-09-24, over a timeout, an
-abort, and a dispose each; the 50 ms sampling quantizes them. Before the SDK
-interrupted guests itself, WebKit kept the pure-Wasm guest running after every
-cancellation (GAP2-V1) and Chromium stopped a guest only about 2 s after
-`terminate()`; the
+The macOS figures were measured locally on arm64 on 2026-09-24 and the Linux
+ones in CI run
+[36112686931](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112686931),
+over a timeout, an abort, and a dispose each; the 50 ms sampling quantizes them.
+The nightly run
+[36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524)
+measured 0 to 185 ms on macOS (185 ms for Firefox's abort). Without isolation
+the timeout rejected after 300 to 302 ms in all three engines on Linux, and the
+follow-up job ran on the same worker. Before the SDK interrupted guests itself,
+WebKit kept the pure-Wasm guest running after every cancellation (GAP2-V1) and
+Chromium stopped a guest only about 2 s after `terminate()`; the
 [termination evidence](../../docs/deno-worker-termination.md#browsers) keeps
 those engine measurements. Each run prints
 `OBSERVED <engine> termination on <os>: ...` with every sample's stop time, so

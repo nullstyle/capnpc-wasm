@@ -31,7 +31,7 @@ const compiler = await createCompiler(modules, {
   limits: { memoryPages: defaultLimits.memoryPages },
 });
 const result = await compiler.compile(request);
-// Worker execution runs on every Deno release; guests stop themselves.
+// Worker execution is admitted on every Deno release; guests stop themselves.
 const worker = await createWorkerCompiler(
   new URL("typescript/worker.js", root),
   modules,

@@ -372,12 +372,13 @@ does not add a TypeScript generator or an `encode`/`decode` command API. All
 asset loading belongs to the consumer. After loading bytes and a worker script
 into a blob URL, jobs and worker restarts can run without filesystem, network,
 or process permission. Keep the blob URL alive until the worker is disposed.
-Worker execution runs on every Deno release: every guest is instrumented with
-interruption checks, so a job's `timeoutMs`, its abort signal, and `dispose()`
-stop the guest itself, and the worker survives cancellation. Direct compilation
-enforces the same deadline. The published rc.2 and rc.3 archives predate this:
-their worker execution accepts only Deno 2.6.8, and their direct compilation has
-no hard deadline.
+Worker execution is admitted on every Deno release that has standardized Wasm
+exception handling: every guest is instrumented with interruption checks, so a
+job's `timeoutMs`, its abort signal, and `dispose()` stop the guest itself. In
+Deno a timeout or an abort keeps the worker for the next job; `dispose()`
+terminates it. Direct compilation enforces the same deadline. The published rc.2
+and rc.3 archives predate this: their worker execution accepts only Deno 2.6.8,
+and their direct compilation has no hard deadline.
 
 The rc.3 compiler host adds optional canonical `sourcePrefix` and ordered
 `importPaths` within the supplied files snapshot. The package gate compares
@@ -392,8 +393,8 @@ notices, the packaged links and README example, modified/missing/extra-file
 rejection, and an external npm-layout Deno consumer with a fresh cache. It
 checks direct/worker request parity, imports and binary embeds, diagnostics,
 limits, and an active guest's timeout and abort, each followed by a job on the
-same worker, offline. To test another installed Deno without changing the
-producer pin:
+same worker (the consumer counts the workers it starts), offline. To test
+another installed Deno without changing the producer pin:
 
 ```sh
 mise exec -- deno run --allow-read --allow-write=build \

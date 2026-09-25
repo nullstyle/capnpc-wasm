@@ -9,8 +9,8 @@
  * which worker execution required before guests were instrumented with
  * interruption checks.
  * @deprecated Worker execution no longer depends on the Deno release: every
- * guest stops itself at its deadline or when its job is cancelled. Nothing
- * checks this value; it will be removed.
+ * guest stops itself at its deadline or when its job is cancelled. The SDK no
+ * longer checks this value; it will be removed.
  */
 export const supportedDenoWorkerVersion = "2.6.8";
 

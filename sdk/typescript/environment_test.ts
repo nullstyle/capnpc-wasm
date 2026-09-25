@@ -98,7 +98,7 @@ Deno.test("SDK admits worker execution in browsers, on every Deno release, and o
       `${JSON.stringify(globals)}: ${thrown}`,
     );
   }
-  // Deprecated, kept for existing importers; nothing checks it.
+  // Deprecated, kept for existing importers; the SDK no longer checks it.
   assert(supportedDenoWorkerVersion === "2.6.8", "deprecated export changed");
 });
 
