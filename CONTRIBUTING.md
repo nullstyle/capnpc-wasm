@@ -128,11 +128,12 @@ Per reference:
   copy); update the revision named in `patches/capnproto/README.md`. Native
   tools, the `normalize-request` oracle, the C++ consumers, and the standard
   include schemas copied into `dist/include/` all come from this checkout.
-- `capnproto-rust`: change `=0.27.0` in `generators/rust/Cargo.toml` and
-  `=0.27.2` in `tests/consumers/rust/Cargo.toml` to the new crate versions,
-  refresh both `Cargo.lock` files
-  (`mise exec -- cargo update --manifest-path <Cargo.toml>`), and rebuild with
-  `mise run build:rust`, which uses `--locked` and fails on a stale lockfile.
+- `capnproto-rust`: change the `capnp` (`=0.27.2`) and `capnpc` (`=0.27.0`)
+  versions in `generators/rust/Cargo.toml` and the `capnp` version (`=0.27.2`)
+  in `tests/consumers/rust/Cargo.toml` to the new crate versions, refresh both
+  `Cargo.lock` files (`mise exec -- cargo update --manifest-path <Cargo.toml>`),
+  and rebuild with `mise run build:rust`, which uses `--locked` and fails on a
+  stale lockfile.
 - `go-capnp`: `generators/go/go.mod` and `tests/consumers/go/go.mod` replace the
   module with the `ref/go-capnp` checkout, which `build:go` and `doctor` require
   to be clean at the staged gitlink, so their `require` lines name only the
