@@ -4,7 +4,7 @@
 // reasoned divergences, and the reference surface (the TypeScript SDK in
 // direct execution on the pinned Deno) conforms. The other surfaces run the
 // same corpus in their own suites: sdk/typescript/conformance_test.ts (worker
-// execution on the supported Deno), sdk/go/conformance_test.go,
+// execution on the pinned Deno), sdk/go/conformance_test.go,
 // tests/package/launcher.ts, and tests/browser/test.ts.
 import { assert } from "../lib/assert.ts";
 import { buildTest } from "../lib/paths.ts";

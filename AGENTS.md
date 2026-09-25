@@ -95,9 +95,9 @@ release status; update it instead of restating status here.
 conformance corpus (`test:conformance`), and `test:studio-unit`, one
 `test:<suite>` task each, building only what it reads. `test:browser`,
 `test:studio`, `test:package`, and `test:launcher` are separate and run only
-when named. The CI clean-checkout job (setup, `check`, and `test:package`) took
-9 minutes on ubuntu-24.04 and 10 minutes on macos-15
-([run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070));
+when named. The CI clean-checkout job took 9 minutes on ubuntu-24.04 and 10
+minutes on macos-15 in
+[run 34995349070](https://github.com/nullstyle/capnpc-wasm/actions/runs/34995349070);
 a local cold build is comparable. For quick iteration, run one suite task, or
 `mise run --skip-deps test:<suite>` to rerun it without rebuilding.
 
