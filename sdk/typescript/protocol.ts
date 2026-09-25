@@ -207,6 +207,29 @@ function restore(summary: unknown, depth: number): Error | undefined {
 }
 
 /**
+ * Post a worker's reply. If the engine refuses it (a result it cannot clone
+ * or transfer throws a DataCloneError), post the failure instead, so the
+ * client's job gets an answer rather than waiting out its deadline. If even
+ * that cannot be posted, the port is gone and the exception propagates.
+ */
+export function postReply(
+  scope: { postMessage(data: WorkerReply, transfer?: Transferable[]): void },
+  reply: WorkerReply,
+  transfer: () => Transferable[],
+): void {
+  try {
+    scope.postMessage(reply, transfer());
+  } catch (cause) {
+    scope.postMessage({
+      id: reply.id,
+      error: encodeError(
+        new Error("worker reply could not be posted", { cause }),
+      ),
+    });
+  }
+}
+
+/**
  * Rebuild the error class direct execution would have thrown. Total: any
  * reply shape yields an Error, so the client always settles its job.
  */

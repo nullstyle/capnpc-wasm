@@ -1,4 +1,9 @@
-import { decodeError, encodeError } from "./protocol.ts";
+import {
+  decodeError,
+  encodeError,
+  postReply,
+  type WorkerReply,
+} from "./protocol.ts";
 import { CompileError } from "./types.ts";
 import { assert } from "./testdata/support.ts";
 
@@ -146,5 +151,43 @@ Deno.test("SDK protocol round-trips error classes, fields and causes", () => {
   assert(
     plain instanceof Error && plain.message === "just text",
     "non-Error value",
+  );
+});
+
+Deno.test("worker replies the engine refuses are answered with the failure", () => {
+  const posted: { data: WorkerReply; transfer?: Transferable[] }[] = [];
+  let refuse = true;
+  const scope = {
+    postMessage(data: WorkerReply, transfer?: Transferable[]) {
+      if (refuse) {
+        refuse = false;
+        throw new DOMException("could not clone the reply", "DataCloneError");
+      }
+      posted.push({ data, transfer });
+    },
+  };
+  const buffer = new ArrayBuffer(4);
+  postReply(scope, {
+    id: 7,
+    result: { request: new Uint8Array(buffer) },
+  } as WorkerReply, () => [buffer]);
+  assert(posted.length === 1, `${posted.length} replies posted`);
+  const [{ data, transfer }] = posted;
+  assert(
+    data.id === 7 && data.error !== undefined && transfer === undefined,
+    `unexpected fallback reply: ${JSON.stringify(data)}`,
+  );
+  const error = decodeError(data.error!);
+  assert(
+    error.message === "worker reply could not be posted" &&
+      (error.cause as Error)?.name === "DataCloneError",
+    `fallback lost its cause: ${error.message}`,
+  );
+  // A reply the engine accepts is posted once, with its transfer list.
+  postReply(scope, { id: 8, result: {} } as WorkerReply, () => [buffer]);
+  assert(
+    (posted.length as number) === 2 && posted[1].data.id === 8 &&
+      posted[1].transfer?.[0] === buffer,
+    "an accepted reply was changed",
   );
 });

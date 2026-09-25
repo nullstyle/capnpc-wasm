@@ -2,6 +2,7 @@ import { createEngine, type Engine } from "./engine.ts";
 import { JobControl } from "./interrupt.ts";
 import {
   encodeError,
+  postReply,
   type WireCompileJob,
   type WorkerReply,
   type WorkerRequest,
@@ -94,5 +95,5 @@ scope.onmessage = async ({ data }) => {
     // every job runs in fresh guest instances.
     reply = { id: data.id, error: encodeError(cause) };
   }
-  scope.postMessage(reply, transferable(reply.result));
+  postReply(scope, reply, () => transferable(reply.result));
 };
