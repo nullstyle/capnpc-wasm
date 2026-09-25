@@ -33,6 +33,11 @@
     "manifestSha256": { "$ref": "#/$defs/sha256" },
     "sbomSha256": { "$ref": "#/$defs/sha256" },
     "toolsArchiveSha256": { "$ref": "#/$defs/sha256" },
+    "toolsVersion": {
+      "description": "Version of the tools archive (capnp-wasm-tools) that toolsArchiveSha256 records; each flavor has its own version.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$"
+    },
     "checks": {
       "type": "array",
       "minItems": 1,
@@ -40,6 +45,11 @@
     },
     "generated": {
       "description": "Digest of the canonical request and of every generated file, keyed by name.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/sha256" }
+    },
+    "paths": {
+      "description": "Digest of the compiler-path fixture's request in each import root order, keyed by name; the Deno and Go package consumers must agree.",
       "type": "object",
       "additionalProperties": { "$ref": "#/$defs/sha256" }
     }

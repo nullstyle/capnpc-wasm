@@ -198,3 +198,56 @@ Deno.test("planted: a file the schemas directory does not expect", async () => {
     "schemas/notes.txt: not a receipt",
   );
 });
+
+// A receipt shaped like the one test:package writes today: schemaVersion 1
+// first, per-flavor versions (toolsVersion), and the compiler-path digests.
+async function currentPackageReceipt(copy: string, over = {}) {
+  const base = JSON.parse(
+    await Deno.readTextFile(`${copy}/94ba6b2-private-package.json`),
+  );
+  const digest = (fill: string) => fill.repeat(64);
+  const receipt = {
+    schemaVersion: 1,
+    version: "0.1.0-rc.4",
+    source: base.source,
+    archiveSha256: digest("a"),
+    manifestSha256: digest("b"),
+    sbomSha256: digest("c"),
+    toolsVersion: "0.1.0-rc.3",
+    toolsArchiveSha256: digest("d"),
+    checks: base.checks,
+    generated: base.generated,
+    paths: {
+      "paths/request": digest("e"),
+      "paths/request-reversed": digest("f"),
+    },
+    ...over,
+  };
+  await Deno.writeTextFile(
+    `${copy}/c0ffee1-private-package.json`,
+    JSON.stringify(receipt, null, 2) + "\n",
+  );
+}
+
+Deno.test("a package receipt as test:package writes it now passes", async () => {
+  const report = await planted((copy) => currentPackageReceipt(copy));
+  if (report.failures.length > 0) throw new Error(report.failures.join("\n"));
+  const line =
+    "PASS c0ffee1-private-package.json (private-package.schema.json, schemaVersion 1)";
+  if (!report.lines.includes(line)) {
+    throw new Error(`missing ${line}:\n${report.lines.join("\n")}`);
+  }
+});
+
+Deno.test("planted: a package receipt with a malformed toolsVersion and path digest", async () => {
+  expectFailures(
+    await planted((copy) =>
+      currentPackageReceipt(copy, {
+        toolsVersion: "rc3",
+        paths: { "paths/request": "not-a-digest" },
+      })
+    ),
+    'c0ffee1-private-package.json.toolsVersion: "rc3" does not match',
+    'c0ffee1-private-package.json.paths["paths/request"]: "not-a-digest" does not match',
+  );
+});
