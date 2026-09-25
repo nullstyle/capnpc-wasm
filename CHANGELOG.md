@@ -160,7 +160,7 @@ every flavor it applies to has shipped it.
   arm64, macOS x64 (`macos-15-intel`), browsers on macOS, and the Go SDK on
   Windows against Linux-built modules with the native-oracle comparisons
   skipped; Node.js and Bun direct execution is best effort, and
-  `createWorkerCompiler` rejects both.
+  `createWorkerCompiler` rejects Node.js.
 - Release versions: each archive flavor has its own version under `versions` in
   `release.json` (`capnpc-wasm` 0.1.0-rc.4, `capnp-wasm-tools` 0.1.0-rc.3,
   `capnp-wasm-compiler-host` 0.1.0-rc.4). `scripts/release.ts` rejects a missing
