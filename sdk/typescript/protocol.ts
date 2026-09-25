@@ -21,6 +21,12 @@ export interface InitMessage {
   id: number;
   modules: Modules;
   options: CompilerOptions;
+  /**
+   * A cell shared with the client, when SharedArrayBuffer can cross to the
+   * worker: the client cancels a running job by storing its id (as an Int32)
+   * in element 0 and notifying, and the job's guest traps at its next check.
+   */
+  interrupt?: SharedArrayBuffer;
 }
 
 /**
@@ -45,20 +51,24 @@ export interface WireGenerateJob {
 export interface CompileMessage {
   kind: "compile";
   id: number;
+  /** Milliseconds left of the job's deadline; the worker enforces it too. */
+  timeoutMs: number;
   request: WireCompileJob;
 }
 
 export interface GenerateMessage {
   kind: "generate";
   id: number;
+  timeoutMs: number;
   request: WireGenerateJob;
 }
 
 export type WorkerRequest = InitMessage | CompileMessage | GenerateMessage;
 
-/** A request before the client assigns its exchange id. */
+/** A request before the client assigns its exchange id and remaining time. */
 export type WorkerMessage = WorkerRequest extends infer Request
-  ? Request extends WorkerRequest ? Omit<Request, "id"> : never
+  ? Request extends WorkerRequest ? Omit<Request, "id" | "timeoutMs">
+  : never
   : never;
 
 /** A bounded, structured-cloneable view of an error's cause chain. */
@@ -79,6 +89,13 @@ export type WireError =
   }
   | { kind: "type"; message: string; cause?: ErrorSummary }
   | { kind: "range"; message: string; cause?: ErrorSummary }
+  /** The job stopped at its deadline or through the shared cell. */
+  | {
+    kind: "cancel";
+    name: "TimeoutError" | "AbortError";
+    message: string;
+    cause?: ErrorSummary;
+  }
   | { kind: "error"; name: string; message: string; cause?: ErrorSummary };
 
 export type WorkerReply =
@@ -113,6 +130,10 @@ export function encodeError(cause: unknown): WireError {
       cause: summarize(cause.cause, causeDepth),
     };
   }
+  if (
+    cause instanceof DOMException &&
+    (cause.name === "TimeoutError" || cause.name === "AbortError")
+  ) return { kind: "cancel", name: cause.name, message: cause.message };
   if (cause instanceof TypeError) {
     return {
       kind: "type",
@@ -195,6 +216,11 @@ export function decodeError(error: WireError): Error {
         return new TypeError(message, options);
       case "range":
         return new RangeError(message, options);
+      case "cancel":
+        return new DOMException(
+          message,
+          error.name === "AbortError" ? "AbortError" : "TimeoutError",
+        );
       default:
         return named(
           new Error(message, options),

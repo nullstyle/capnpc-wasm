@@ -94,10 +94,22 @@ Deno.test("SDK protocol round-trips error classes, fields and causes", () => {
     range instanceof RangeError && range.message === "too big",
     "RangeError",
   );
-  const named = decodeError(encodeError(new DOMException("t", "TimeoutError")));
+  // A job the worker stopped at its deadline or through the shared cell
+  // arrives as the DOMException the direct path throws.
+  for (const name of ["TimeoutError", "AbortError"]) {
+    const cancelled = decodeError(encodeError(new DOMException("t", name)));
+    assert(
+      cancelled instanceof DOMException && cancelled.name === name &&
+        cancelled.message === "t",
+      `${name} round trip: ${cancelled}`,
+    );
+  }
+  const named = decodeError(
+    encodeError(new DOMException("n", "NotSupportedError")),
+  );
   assert(
-    named instanceof Error && named.name === "TimeoutError" &&
-      named.message === "t",
+    named instanceof Error && !(named instanceof DOMException) &&
+      named.name === "NotSupportedError" && named.message === "n",
     "named error round trip",
   );
   const plain = decodeError(encodeError("just text"));

@@ -12,10 +12,16 @@ import {
   createCompiler,
   createWorkerCompiler,
   type Files,
+  type GenerationRequest,
   type Modules,
   type WorkerCompiler,
+  type WorkerCompilerOptions,
 } from "./mod.ts";
 import { hostileGuests } from "./testdata/hostile_guests.ts";
+import {
+  catchRetryGuest,
+  catchRetryMode,
+} from "./testdata/interrupt_guests.ts";
 import { resolveWorkerURL } from "./worker-client.ts";
 import {
   assert,
@@ -108,8 +114,8 @@ workerTest(
               Object.getPrototypeOf(thrown) === expectedClass.prototype,
             `${label}: expected ${expectedClass.name}, received ${thrown}`,
           );
-          // No restart: the same worker answers at once, well inside the
-          // 2.1 s Deno termination grace, and short deadlines still succeed.
+          // No restart: the same worker answers at once, and short deadlines
+          // still succeed.
           const [result, elapsed] = await timed(() =>
             worker.compile(request, { timeoutMs: 1500 })
           );
@@ -120,7 +126,7 @@ workerTest(
           );
           assert(elapsed < 1500, `${label}: next job took ${elapsed} ms`);
         }
-        // Timeouts still terminate and replace the worker.
+        // A timeout stops the guest inside the worker, which stays.
         await rejects(
           () =>
             worker.compile({ ...request, generators: ["cpp"] }, {
@@ -129,7 +135,7 @@ workerTest(
           "TimeoutError",
         );
         equalOutputs(await worker.compile(request), expected);
-        assert(constructions() === 2, "timeout did not replace the worker");
+        assert(constructions() === 1, "a timeout replaced the worker");
       } finally {
         worker.dispose();
       }
@@ -538,7 +544,7 @@ workerTest(
 );
 
 workerTest(
-  "SDK worker dispose interrupts the restart wait and supports using",
+  "SDK worker dispose rejects a running job at once and supports using",
   async () => {
     const worker = await createWorkerCompiler(workerURL, {
       compiler: loopGuest,
@@ -546,15 +552,15 @@ workerTest(
     });
     const job: CompileRequest = { ...simpleRequest(), generators: [] };
     await rejects(() => worker.compile(job, { timeoutMs: 20 }), "TimeoutError");
-    // The next job waits out the 2.1 s Deno termination grace; disposing must
-    // release it immediately instead of after the wait.
-    const waiting = worker.compile(job);
+    // The next job runs the looping guest until its 30 s default deadline;
+    // disposing rejects it at once and stops the guest.
+    const running = worker.compile(job);
     await new Promise((resolve) => setTimeout(resolve, 50));
     const [, elapsed] = await timed(async () => {
       worker.dispose();
-      await rejects(() => waiting, "Error", "disposed");
+      await rejects(() => running, "Error", "disposed");
     });
-    assert(elapsed < 500, `dispose during restart wait took ${elapsed} ms`);
+    assert(elapsed < 500, `dispose of a running job took ${elapsed} ms`);
     await rejects(() => worker.compile(job), "Error", "disposed");
 
     const disposable = await createWorkerCompiler(workerURL, {
@@ -680,3 +686,212 @@ Deno.test("SDK resolves relative worker URLs against the document base", () => {
     `relative URL without a base: ${thrown}`,
   );
 });
+
+// A stopped guest reports within milliseconds on an idle host; the bound
+// leaves 5x headroom over a 100 ms target for loaded CI (see interrupt_test).
+const timeoutMs = 200;
+const lateMs = 500;
+
+function generation(mode: number): GenerationRequest {
+  return { request: Uint8Array.of(mode), generators: ["cpp"] };
+}
+
+async function catchRetryWorker(
+  options?: WorkerCompilerOptions,
+): Promise<WorkerCompiler> {
+  return await createWorkerCompiler(workerURL, {
+    compiler: trapGuest,
+    generators: { cpp: catchRetryGuest },
+  }, options);
+}
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+workerTest(
+  "SDK worker cancellation stops the guest and keeps its worker",
+  async () => {
+    await countingWorkers(async (constructions) => {
+      const worker = await catchRetryWorker();
+      try {
+        for (
+          const mode of [
+            catchRetryMode.spin,
+            catchRetryMode.sleep,
+            catchRetryMode.tailCalls,
+          ]
+        ) {
+          const [, took] = await timed(() =>
+            rejects(
+              () => worker.generate(generation(mode), { timeoutMs }),
+              "TimeoutError",
+            )
+          );
+          // The client's timer may fire a fraction of a millisecond early.
+          assert(
+            took > timeoutMs - 10 && took < timeoutMs + lateMs,
+            `mode ${mode}: timeout took ${took} ms`,
+          );
+          const controller = new AbortController();
+          const running = worker.generate(generation(mode), {
+            signal: controller.signal,
+          });
+          await delay(100);
+          const [, aborted] = await timed(async () => {
+            controller.abort();
+            await rejects(() => running, "AbortError");
+          });
+          assert(aborted < lateMs, `mode ${mode}: abort took ${aborted} ms`);
+          // One worker thread: the next job runs only once the cancelled
+          // guest has stopped, not merely once its promise rejected.
+          const [, next] = await timed(() =>
+            rejects(
+              () => worker.generate(generation(catchRetryMode.exit)),
+              "CompileError",
+              "exited with status 3",
+            )
+          );
+          assert(next < lateMs, `mode ${mode}: next job waited ${next} ms`);
+        }
+        assert(
+          constructions() === 1,
+          `cancellation replaced the worker (${constructions()} workers)`,
+        );
+      } finally {
+        worker.dispose();
+      }
+    });
+  },
+);
+
+workerTest(
+  "SDK worker host stops trap without running guest handlers",
+  async () => {
+    const worker = await catchRetryWorker();
+    const limited = await catchRetryWorker({ limits: { stdoutBytes: 0 } });
+    try {
+      const exit = await rejectsWith(
+        () => worker.generate(generation(catchRetryMode.exit)),
+        CompileError,
+        "cpp exited with status 3",
+      );
+      assert(
+        exit.exitCode === 3 && exit.diagnostics.length === 0,
+        `exit ran a handler: ${JSON.stringify(exit.diagnostics)}`,
+      );
+      const thrown = await rejectsWith(
+        () => worker.generate(generation(catchRetryMode.hostThrow)),
+        CompileError,
+        "cpp trapped: WASI command failed: sockets not supported",
+      );
+      assert(thrown.diagnostics.length === 0, "host failure ran a handler");
+      const limit = await rejectsWith(
+        () => limited.generate(generation(catchRetryMode.stdout)),
+        CompileError,
+        "cpp trapped: WASI command failed: stdoutBytes resource limit exceeded",
+      );
+      assert(limit.diagnostics.length === 0, "budget stop ran a handler");
+    } finally {
+      worker.dispose();
+      limited.dispose();
+    }
+  },
+);
+
+workerTest(
+  "SDK worker without SharedArrayBuffer still stops guests at their deadline",
+  async () => {
+    // As on a page without cross-origin isolation: no shared cell reaches
+    // the worker, so only the job's own deadline can stop a running guest.
+    const original = globalThis.SharedArrayBuffer;
+    await countingWorkers(async (constructions) => {
+      let pending: Promise<WorkerCompiler>;
+      try {
+        (globalThis as { SharedArrayBuffer?: unknown }).SharedArrayBuffer =
+          undefined;
+        pending = catchRetryWorker();
+      } finally {
+        globalThis.SharedArrayBuffer = original;
+      }
+      const worker = await pending;
+      try {
+        const [, took] = await timed(() =>
+          rejects(
+            () =>
+              worker.generate(generation(catchRetryMode.spin), { timeoutMs }),
+            "TimeoutError",
+          )
+        );
+        assert(took < timeoutMs + lateMs, `timeout took ${took} ms`);
+        await rejects(
+          () => worker.generate(generation(catchRetryMode.exit)),
+          "CompileError",
+        );
+        assert(constructions() === 1, "a timeout replaced the worker");
+        // An abort cannot reach the guest: the worker is terminated and
+        // replaced at once, and the guest stops at its own deadline even
+        // where terminate() does not stop it.
+        const controller = new AbortController();
+        const running = worker.generate(generation(catchRetryMode.spin), {
+          signal: controller.signal,
+          timeoutMs: 1000,
+        });
+        await delay(50);
+        controller.abort();
+        await rejects(() => running, "AbortError");
+        await rejects(
+          () => worker.generate(generation(catchRetryMode.exit)),
+          "CompileError",
+        );
+        assert(constructions() === 2, "an abort did not replace the worker");
+        // Let the orphaned guest reach its deadline before the test ends.
+        await delay(1000);
+      } finally {
+        worker.dispose();
+      }
+    });
+  },
+);
+
+workerTest(
+  "SDK worker replaces a worker whose cancelled job never reports",
+  async () => {
+    // A stand-in worker that starts, then never answers a job.
+    const source = `self.onmessage = ({ data }) => {
+      if (data.kind === "init") self.postMessage({ id: data.id });
+    };`;
+    const url = URL.createObjectURL(
+      new Blob([source], { type: "text/javascript" }),
+    );
+    const job: CompileRequest = { ...simpleRequest(), generators: [] };
+    try {
+      await countingWorkers(async (constructions) => {
+        const worker = await createWorkerCompiler(url, {
+          compiler: trapGuest,
+          generators: {},
+        });
+        try {
+          await rejects(
+            () => worker.compile(job, { timeoutMs: 50 }),
+            "TimeoutError",
+          );
+          // The next job waits out the one-second grace for a report, then
+          // starts a replacement worker, where it times out as well.
+          const [, took] = await timed(() =>
+            rejects(
+              () => worker.compile(job, { timeoutMs: 1500 }),
+              "TimeoutError",
+            )
+          );
+          assert(
+            constructions() === 2 && took >= 1000,
+            `${constructions()} workers after ${took} ms`,
+          );
+        } finally {
+          worker.dispose();
+        }
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  },
+);

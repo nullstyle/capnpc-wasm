@@ -188,39 +188,48 @@ guest stage starts and `timeoutMs` bounds the running one.
 
 `createWorkerCompiler(workerURL, modules, options?)` executes off the main
 thread. Its `compile(request, { signal, timeoutMs })` accepts an `AbortSignal`
-and defaults to a 30-second deadline, including restart time. `dispose()`
-rejects pending work and terminates the client permanently. One job may be
-active per worker client; use separate clients for parallel jobs.
+and defaults to a 30-second deadline, including any wait for a worker to start
+or recover. `dispose()` stops any running guest, rejects pending work, and
+terminates the client permanently. One job may be active per worker client; use
+separate clients for parallel jobs.
 
-Restart policy: the worker is terminated and replaced only when a job times out
-or is aborted, when the client is disposed, or when the worker itself fails (a
-script load error, an uncaught worker error, an undeliverable message). The next
-job then creates a fresh worker from private copies of the original modules.
-Ordinary rejections, `TypeError` for invalid input and `CompileError` for schema
-errors, traps and budget overruns, keep the worker: every job already runs fresh
-guest instances and filesystems, so the next job starts immediately with no
-restart and no recompilation.
+Cancellation stops the guest, not only the promise. A timeout, an abort, or
+`dispose()` rejects the job at once. Where a `SharedArrayBuffer` can reach the
+worker (always in Deno and Bun, in browsers only on cross-origin isolated
+pages), the client also stores the job's id in a shared cell, and the guest
+traps at its next interruption check, typically within a millisecond. A timeout
+needs no shared memory: the worker enforces the same deadline inside the guest.
+The worker survives cancellation and serves the next job, which first waits for
+the cancelled job to report.
 
-Runtime policy: worker execution is admitted only where `terminate()` is
-verified to stop a running Wasm guest, which today means browsers and exactly
-**Deno 2.6.8** (exported as `supportedDenoWorkerVersion`). Other Deno versions,
-Bun, Node.js, and unrecognized hosts are rejected before any worker is created,
-with an `Error` that points to `createCompiler` for direct execution without a
-hard deadline; `isBoundedWorkerSupported()` answers the same question as a
-predicate. Deno 2.6.8 deliberately allows a two-second engine termination grace
-after `terminate()`; rejection does not mean guest CPU stopped immediately. The
-client waits 2.1 seconds before restarting a terminated Deno worker, and
-includes that wait in the next job's deadline; disposing the client during that
-wait rejects the waiting job at once. The
+Restart policy: the worker is terminated and replaced only as a fallback: when a
+cancelled job does not report within a second, when an abort cannot reach the
+guest (no `SharedArrayBuffer`), when start-up is cancelled, when the worker
+itself fails (a script load error, an uncaught worker error, an undeliverable
+message), and on `dispose()`. The next job then creates a fresh worker from
+private copies of the original modules. Ordinary rejections, `TypeError` for
+invalid input and `CompileError` for schema errors, traps and budget overruns,
+keep the worker: every job already runs fresh guest instances and filesystems,
+so the next job starts immediately with no restart and no recompilation.
+
+Without cross-origin isolation an abort therefore terminates the worker, and
+nothing can stop its running guest early. Where `terminate()` does not stop a
+running Wasm guest (WebKit never does, Chromium does after about 2 s, and Deno
+2.7.6 and later do not stop a spinning worker), the guest runs until its own
+`timeoutMs` deadline and then traps. Serve pages with
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp` so that aborts stop guests at once,
+and keep `timeoutMs` short where they cannot.
+
+Runtime policy: worker execution is admitted only in browsers and on exactly
+**Deno 2.6.8** (exported as `supportedDenoWorkerVersion`), where `terminate()`
+was verified to stop a running Wasm guest. Other Deno versions, Bun, Node.js,
+and unrecognized hosts are rejected before any worker is created, with an
+`Error` that points to `createCompiler`; `isBoundedWorkerSupported()` answers
+the same question as a predicate. The
 [runtime evidence](../../docs/deno-worker-termination.md) records a real shared
 counter that stops within the grace on 2.6.8 and continues on newer tested
-engines. Direct compilation remains tested on the producer's pinned Deno 2.9.6.
-
-Browser workers use no restart delay, but termination is not immediate there
-either. WebKit never stops a running Wasm guest on `terminate()`. Chromium stops
-it after about 2 s. Firefox is untested. A later change addresses this; until
-then, treat a rejected cancellation as a request, not as proof that the guest
-stopped.
+engines.
 
 Worker initialization accepts `{ signal, initTimeoutMs }` alongside `limits`:
 the default deadline is 30 seconds, and aborting terminates the starting worker

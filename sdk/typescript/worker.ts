@@ -1,4 +1,5 @@
 import { createEngine, type Engine } from "./engine.ts";
+import { JobControl } from "./interrupt.ts";
 import {
   encodeError,
   type WireCompileJob,
@@ -7,6 +8,8 @@ import {
 } from "./protocol.ts";
 
 let engine: Engine | undefined;
+// The client's cancellation cell; see InitMessage.interrupt.
+let cell: Int32Array | undefined;
 const scope = self as unknown as {
   onmessage: (event: MessageEvent<WorkerRequest>) => void;
   postMessage: (data: WorkerReply, transfer?: Transferable[]) => void;
@@ -26,6 +29,19 @@ function stage(job: WireCompileJob): Record<string, Uint8Array> {
     files[`include/${path}`] = bytes;
   }
   return files;
+}
+
+/**
+ * The job's own deadline, measured from receipt, and its cancellation token:
+ * the exchange id as the Int32 the client stores (never 0; see
+ * worker-client.ts). A guest past either stops at its next check.
+ */
+function control(id: number, timeoutMs: number): JobControl {
+  return new JobControl({
+    deadline: performance.now() + timeoutMs,
+    cell,
+    token: id | 0,
+  });
 }
 
 /** Result buffers are fresh private copies, so they can move without copying. */
@@ -54,6 +70,7 @@ scope.onmessage = async ({ data }) => {
     let result: unknown;
     if (data.kind === "init") {
       engine = await createEngine(data.modules, data.options);
+      cell = data.interrupt ? new Int32Array(data.interrupt) : undefined;
     } else if (data.kind === "compile" && engine) {
       const job = data.request;
       result = await engine.compileStaged({
@@ -62,17 +79,19 @@ scope.onmessage = async ({ data }) => {
         importPaths: job.importPaths,
         sourcePrefix: job.sourcePrefix,
         generators: job.generators,
-      });
+      }, control(data.id, data.timeoutMs));
     } else if (data.kind === "generate" && engine) {
       result = await engine.generateStaged(
         data.request.request,
         data.request.generators,
+        control(data.id, data.timeoutMs),
       );
     } else throw new Error("worker is not initialized or message is invalid");
     reply = { id: data.id, result };
   } catch (cause) {
-    // Ordinary job failures are structured replies; the worker stays usable
-    // because every job already runs in fresh guest instances.
+    // Ordinary job failures, and jobs stopped at their deadline or through
+    // the cell, are structured replies; the worker stays usable because
+    // every job runs in fresh guest instances.
     reply = { id: data.id, error: encodeError(cause) };
   }
   scope.postMessage(reply, transferable(reply.result));
