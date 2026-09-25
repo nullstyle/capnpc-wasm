@@ -6,7 +6,8 @@
 # test:deno-worker), and scripts/verify-release.ts from the checkout.
 #
 # A tag push (capnp-wasm-tools-v*, capnp-wasm-compiler-host-v*, or
-# capnpc-wasm-v*, matching the version in release.json) produces a DRAFT
+# capnpc-wasm-v*, naming that flavor's own version under "versions" in
+# release.json) produces a DRAFT
 # prerelease with the archive, its manifest, the SPDX SBOM, and SHA256SUMS,
 # plus Sigstore build-provenance and SBOM attestations. A maintainer verifies
 # the draft, records the digests in docs/releases.md, and publishes it. A
@@ -84,17 +85,10 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           FLAVOR_INPUT: ${{ inputs.flavor }}
         run: |
-          version="$(jq -r .version release.json)"
           if [ "$EVENT_NAME" = push ]; then
-            tag="$REF_NAME"
-            flavor="${tag%-v*}"
-            if [ "$tag" != "${flavor}-v${version}" ]; then
-              echo "tag $tag does not name the release.json version $version (expected ${flavor}-v${version})" >&2
-              exit 1
-            fi
+            flavor="${REF_NAME%-v*}"
           else
             flavor="$FLAVOR_INPUT"
-            tag="${flavor}-v${version}"
           fi
           case "$flavor" in
             capnp-wasm-tools) flag=--tools-only ;;
@@ -102,6 +96,17 @@ jobs:
             capnpc-wasm) flag= ;;
             *) echo "unknown flavor: $flavor" >&2; exit 1 ;;
           esac
+          # Each flavor has its own version in release.json; release.ts
+          # validates the rest of the file.
+          if ! version="$(jq -er --arg f "$flavor" '.versions[$f] | strings' release.json)"; then
+            echo "release.json has no version for $flavor under .versions" >&2
+            exit 1
+          fi
+          tag="${flavor}-v${version}"
+          if [ "$EVENT_NAME" = push ] && [ "$REF_NAME" != "$tag" ]; then
+            echo "tag $REF_NAME does not name the release.json version of $flavor, $version (expected $tag)" >&2
+            exit 1
+          fi
           {
             echo "flavor=$flavor"
             echo "version=$version"
