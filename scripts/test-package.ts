@@ -4,18 +4,31 @@
 // exercised by external Deno and Go consumers, the launcher checks, the
 // packaged README examples, and a link check over the packaged documents.
 import { sha256, verifyRelease } from "./verify-release.ts";
-import { archiveStem, flavorNamed, readMetadata } from "./release.ts";
+import {
+  archiveStem,
+  flavorNamed,
+  flavors,
+  goModuleTag,
+  packageName,
+  parseReleaseFile,
+  readMetadata,
+  refusal,
+  type RefusalInput,
+  releaseTag,
+} from "./release.ts";
 import { checkLauncher } from "../tests/package/launcher.ts";
 
 const repository = Deno.cwd();
-const metadata = await readMetadata();
 const out = "build/test/package";
 const full = flavorNamed("capnpc-wasm");
 const tools = flavorNamed("capnp-wasm-tools");
-const stem = archiveStem(full, metadata.version);
+// Each flavor has its own version in release.json.
+const { version } = await readMetadata(full);
+const { version: toolsVersion } = await readMetadata(tools);
+const stem = archiveStem(full, version);
 const directory = `${repository}/${out}/${stem}`;
 const archive = `${directory}/${stem}.tgz`;
-const toolsStem = archiveStem(tools, metadata.version);
+const toolsStem = archiveStem(tools, toolsVersion);
 const toolsDirectory = `${repository}/${out}/${toolsStem}`;
 const toolsArchive = `${toolsDirectory}/${toolsStem}.tgz`;
 
@@ -229,6 +242,157 @@ async function checkNotices(extracted: string, absent: string[]) {
   }
 }
 
+/**
+ * release.json's validation and the refusal rules, in process: every flavor
+ * needs exactly one release-candidate version, and each flavor's build
+ * answers only for its own tags, the full SDK's also for the Go module tag.
+ * The tag commits are synthetic; no tag is created.
+ */
+function checkReleaseRules() {
+  const valid = {
+    name: packageName(full),
+    versions: Object.fromEntries(
+      flavors.map((flavor) => [flavor.name, "1.2.3-rc.4"]),
+    ),
+    private: true,
+    license: "Apache-2.0",
+  };
+  parseReleaseFile(JSON.stringify(valid));
+  const rejects = (variant: unknown, expected: string) => {
+    try {
+      parseReleaseFile(JSON.stringify(variant));
+    } catch (error) {
+      if (String(error).includes(expected)) return;
+      throw new Error(
+        `release.json variant failed for another reason: ${error}`,
+      );
+    }
+    throw new Error(
+      `release.json variant accepted: ${JSON.stringify(variant)}`,
+    );
+  };
+  const { [tools.name]: _, ...missing } = valid.versions;
+  rejects({ ...valid, versions: missing }, `no entry for ${tools.name}`);
+  rejects(
+    {
+      ...valid,
+      versions: { ...valid.versions, "capnp-wasm-extra": "1.0.0-rc.1" },
+    },
+    'unknown flavor "capnp-wasm-extra"',
+  );
+  rejects(
+    { ...valid, versions: { ...valid.versions, [tools.name]: "1.2.3" } },
+    "is not a private release candidate",
+  );
+  rejects({ ...valid, version: "1.2.3-rc.4" }, 'unexpected key "version"');
+  rejects({ ...valid, private: false }, "private must be true");
+
+  const head = "a".repeat(40);
+  const other = "b".repeat(40);
+  const v = "1.2.3-rc.4";
+  const expect = (
+    label: string,
+    input:
+      & Omit<RefusalInput, "commit" | "dirty" | "version">
+      & Partial<RefusalInput>,
+    expected: string | undefined,
+  ) => {
+    const actual = refusal({
+      commit: head,
+      dirty: false,
+      version: v,
+      ...input,
+    });
+    if (
+      expected === undefined
+        ? actual !== undefined
+        : actual === undefined || !actual.includes(expected)
+    ) {
+      throw new Error(`refusal rule "${label}": ${actual ?? "accepted"}`);
+    }
+  };
+  const candidate = {
+    publish: false,
+    allowDirty: false,
+    allowExistingTag: false,
+  };
+  const publish = { ...candidate, publish: true };
+  const compilerHost = flavorNamed("capnp-wasm-compiler-host");
+  expect(
+    "dirty tree",
+    { ...candidate, flavor: tools, tags: {}, dirty: true },
+    "--allow-dirty",
+  );
+  expect(
+    "own tag at another commit",
+    { ...candidate, flavor: tools, tags: { [releaseTag(tools, v)]: other } },
+    `${releaseTag(tools, v)} already exists at bbbbbbb`,
+  );
+  expect(
+    "another flavor's tag at the same version",
+    {
+      ...candidate,
+      flavor: compilerHost,
+      tags: { [releaseTag(tools, v)]: other },
+    },
+    undefined,
+  );
+  expect(
+    "Go module tag at another commit, full SDK",
+    { ...candidate, flavor: full, tags: { [goModuleTag(v)]: other } },
+    `${goModuleTag(v)} already exists at bbbbbbb`,
+  );
+  expect(
+    "Go module tag at another commit, tools",
+    { ...candidate, flavor: tools, tags: { [goModuleTag(v)]: other } },
+    undefined,
+  );
+  expect(
+    "throwaway candidate",
+    {
+      ...candidate,
+      allowExistingTag: true,
+      flavor: full,
+      tags: { [releaseTag(full, v)]: other, [goModuleTag(v)]: other },
+    },
+    undefined,
+  );
+  expect(
+    "publish with the tag at HEAD",
+    { ...publish, flavor: full, tags: { [releaseTag(full, v)]: head } },
+    undefined,
+  );
+  expect(
+    "publish with both tags at HEAD",
+    {
+      ...publish,
+      flavor: full,
+      tags: { [releaseTag(full, v)]: head, [goModuleTag(v)]: head },
+    },
+    undefined,
+  );
+  expect(
+    "publish with the Go module tag elsewhere",
+    {
+      ...publish,
+      flavor: full,
+      tags: { [releaseTag(full, v)]: head, [goModuleTag(v)]: other },
+    },
+    `tag ${goModuleTag(v)} points at bbbbbbb`,
+  );
+  expect(
+    "publish without the tag",
+    { ...publish, flavor: compilerHost, tags: {} },
+    `is not tagged ${releaseTag(compilerHost, v)}`,
+  );
+  expect(
+    "publish with a candidate flag",
+    { ...publish, allowExistingTag: true, flavor: tools, tags: {} },
+    "not accepted with --publish",
+  );
+}
+checkReleaseRules();
+
 // Candidates: the full SDK twice (with a stale file in between) and the tools
 // archive twice, comparing bytes.
 await prepare();
@@ -323,7 +487,7 @@ if (probe.success) {
 } else if (
   !(original.source.dirty
     ? probeStderr.includes("refusing to publish from a working tree")
-    : probeStderr.includes(`is not tagged capnpc-wasm-v${metadata.version}`))
+    : probeStderr.includes(`is not tagged ${releaseTag(full, version)}`))
 ) {
   throw new Error(`publish mode failed for another reason:\n${probeStderr}`);
 } else if (probeOutput) {
@@ -425,7 +589,7 @@ try {
   await checkLinks(extracted);
   const readme = await Deno.readTextFile(`${extracted}/README.md`);
   if (
-    !readme.includes(`# @nullstyle/capnpc-wasm ${metadata.version}`) ||
+    !readme.includes(`# ${packageName(full)} ${version}`) ||
     !readme.includes(original.source.commit) || readme.includes("{{")
   ) throw new Error("packaged README is not the rendered template");
   const guide = await Deno.readTextFile(`${extracted}/docs/typescript.md`);
@@ -499,7 +663,7 @@ try {
   const toolsReadme = await Deno.readTextFile(`${toolsInstalled}/README.md`);
   if (
     !toolsReadme.includes(
-      `# @nullstyle/capnp-wasm-tools ${metadata.version}`,
+      `# ${packageName(tools)} ${toolsVersion}`,
     ) || toolsReadme.includes("{{")
   ) throw new Error("packaged tools README is not the rendered template");
   const toolsExampleChecks = await runReadmeExamples(toolsInstalled, {
@@ -599,13 +763,15 @@ try {
     "build/test/package-receipt.json",
     JSON.stringify(
       {
-        version: metadata.version,
+        version,
         source: original.source,
         archiveSha256: originalHash,
         manifestSha256: full1.manifestHash,
         sbomSha256: full1.sbomHash,
+        toolsVersion,
         toolsArchiveSha256: toolsHash,
         checks: [
+          "release.json names one release-candidate version per flavor; each flavor's build refuses only its own tags (the full SDK's also the Go module tag) at another commit",
           "candidates prepared under build/test, not dist/releases",
           "Apache-2.0 package and Go module licenses, THIRD_PARTY_NOTICES.md, per-flavor license texts",
           "manifest integrity, manifest asset, and SBOM listed in SHA256SUMS; sha256sum -c on the download directory",
@@ -637,7 +803,9 @@ try {
     ) + "\n",
   );
   console.log(
-    `Package checks passed: ${metadata.version}, ${
+    `Package checks passed: ${packageName(full)} ${version} and ${
+      packageName(tools)
+    } ${toolsVersion}, ${
       Object.keys(deno).length - 1
     } generated files; receipt build/test/package-receipt.json`,
   );

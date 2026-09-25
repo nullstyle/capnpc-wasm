@@ -78,14 +78,15 @@ done
 package_root=$(unset CDPATH; cd -P -- "${self%/*}/.." && pwd -P) ||
   fail 70 "cannot locate the package root above: $self"
 
+# The version of the package that ships this launcher, from its package.json.
+# A source checkout has none; release.json there holds one version per flavor.
 package_version() {
-  local file
-  for file in "$package_root/package.json" "$package_root/release.json"; do
-    [[ -r "$file" ]] || continue
-    sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$file" | head -n 1
-    return
-  done
-  printf 'unknown\n'
+  local version=''
+  if [[ -r "$package_root/package.json" ]]; then
+    version=$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$package_root/package.json" | head -n 1)
+  fi
+  printf '%s\n' "${version:-unknown}"
 }
 
 # ---------------------------------------------------------------------------

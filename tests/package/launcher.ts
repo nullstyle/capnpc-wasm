@@ -1540,11 +1540,10 @@ export async function checkLauncher(
 if (import.meta.main) {
   // `mise run test:launcher` prepares this candidate first; pass another
   // package directory to check it instead.
-  const metadata = await readMetadata();
+  const full = flavorNamed("capnpc-wasm");
+  const { version } = await readMetadata(full);
   await checkLauncher(
     Deno.args[0] ??
-      `build/test/launcher/${
-        archiveStem(flavorNamed("capnpc-wasm"), metadata.version)
-      }/package`,
+      `build/test/launcher/${archiveStem(full, version)}/package`,
   );
 }

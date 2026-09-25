@@ -14,10 +14,10 @@ if (Deno.args.length > 1) {
   throw new Error("usage: test-compiler-host-package.ts [deno]");
 }
 const repository = Deno.cwd();
-const metadata = await readMetadata();
 const flavor = flavorNamed("capnp-wasm-compiler-host");
+const { version } = await readMetadata(flavor);
 const out = "build/test/compiler-host";
-const stem = archiveStem(flavor, metadata.version);
+const stem = archiveStem(flavor, version);
 const directory = `${repository}/${out}/${stem}`;
 const archive = `${directory}/${stem}.tgz`;
 async function command(

@@ -7,14 +7,19 @@
 // Usage: release.ts [--tools-only | --compiler-host] [--out DIR]
 //                   [--allow-dirty] [--allow-existing-tag] [--publish]
 //
+// Each flavor has its own version, `versions["<flavor>"]` in release.json,
+// and its own release tag, `<flavor>-v<version>`; the full SDK's version also
+// names the Go module tag, `sdk/go/v<version>`.
+//
 // Candidate mode (the default, used by the release:* tasks) writes
 // DIR/<stem>/ (DIR defaults to dist/releases) and replaces an earlier
 // candidate there. It refuses a working tree with uncommitted or untracked
-// changes unless --allow-dirty is given, and a version whose release tag
-// already exists at another commit unless --allow-existing-tag is given;
-// neither flag is accepted with --publish. Publish mode, which only the
-// release workflow uses, additionally requires HEAD to carry the release tag,
-// an empty destination, and a CHANGELOG.md entry for the version.
+// changes unless --allow-dirty is given, and a flavor version whose release
+// tag, or Go module tag, already exists at another commit unless
+// --allow-existing-tag is given; neither flag is accepted with --publish.
+// Publish mode, which only the release workflow uses, additionally requires
+// HEAD to carry the release tag (and the Go module tag, if it exists), an
+// empty destination, and a CHANGELOG.md entry for the version.
 
 import {
   packageFiles,
@@ -86,31 +91,125 @@ export function flavorNamed(name: string): Flavor {
   return flavor;
 }
 
-export interface ReleaseMetadata {
-  name: string;
-  version: string;
-  private: true;
-  license: "Apache-2.0";
-}
-
-/** Reads release.json; the version scheme is the private rc scheme for now. */
-export async function readMetadata(
-  path = "release.json",
-): Promise<ReleaseMetadata> {
-  const metadata = JSON.parse(await Deno.readTextFile(path));
-  if (
-    !/^\d+\.\d+\.\d+-rc\.\d+$/.test(metadata.version) ||
-    metadata.private !== true || metadata.license !== "Apache-2.0"
-  ) throw new Error("invalid private release-candidate metadata");
-  return metadata;
-}
-
 export const packageName = (flavor: Flavor) => `@nullstyle/${flavor.name}`;
 export const archiveStem = (flavor: Flavor, version: string) =>
   `${flavor.name}-${version}`;
 /** The Git tag that publishes a flavor; the release workflow triggers on it. */
 export const releaseTag = (flavor: Flavor, version: string) =>
   `${flavor.name}-v${version}`;
+/**
+ * The Go module's tag. The module ships in the full SDK archive, so it takes
+ * the capnpc-wasm version and belongs at the commit of that release.
+ */
+export const goModuleTag = (version: string) => `sdk/go/v${version}`;
+
+/**
+ * Every tag a flavor's version names: its release tag and, for the flavor
+ * that ships the Go SDK, the Go module tag.
+ */
+export function versionTags(flavor: Flavor, version: string): string[] {
+  return [
+    releaseTag(flavor, version),
+    ...(flavor.goSdk ? [goModuleTag(version)] : []),
+  ];
+}
+
+/** release.json: one version per flavor and the settings they share. */
+export interface ReleaseFile {
+  /** The full SDK's package name. */
+  name: string;
+  /** Each flavor's own version; releasing one flavor changes no other. */
+  versions: Record<FlavorName, string>;
+  private: true;
+  license: "Apache-2.0";
+}
+
+/** One flavor's release metadata. */
+export interface ReleaseMetadata {
+  /** The flavor's package name, `@nullstyle/<flavor>`. */
+  name: string;
+  /** The flavor's own version, `versions["<flavor>"]` in release.json. */
+  version: string;
+  private: true;
+  license: "Apache-2.0";
+}
+
+/** The private release-candidate scheme; no other version is prepared yet. */
+const candidateVersion = /^\d+\.\d+\.\d+-rc\.\d+$/;
+
+/**
+ * Parses and validates release.json: the keys `name` (the full SDK's package
+ * name), `versions`, `private` (true), and `license` (Apache-2.0) and no
+ * others, and in `versions` exactly one `X.Y.Z-rc.N` version per flavor. A
+ * missing or unknown flavor is an error.
+ */
+export function parseReleaseFile(
+  text: string,
+  path = "release.json",
+): ReleaseFile {
+  const problem = (message: string) => new Error(`${path}: ${message}`);
+  const isObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value);
+  const metadata: unknown = JSON.parse(text);
+  if (!isObject(metadata)) throw problem("expected a JSON object");
+  for (const key of Object.keys(metadata)) {
+    if (key === "version") {
+      throw problem(
+        'unexpected key "version": each flavor has its own version under "versions"',
+      );
+    }
+    if (!["name", "versions", "private", "license"].includes(key)) {
+      throw problem(`unexpected key "${key}"`);
+    }
+  }
+  const fullName = packageName(flavorNamed("capnpc-wasm"));
+  if (metadata.name !== fullName) throw problem(`name must be ${fullName}`);
+  if (metadata.private !== true) {
+    throw problem(
+      "private must be true; only private release candidates are prepared",
+    );
+  }
+  if (metadata.license !== "Apache-2.0") {
+    throw problem("license must be Apache-2.0");
+  }
+  const versions = metadata.versions;
+  if (!isObject(versions)) {
+    throw problem("versions must be an object with one version per flavor");
+  }
+  for (const key of Object.keys(versions)) {
+    if (!flavors.some((flavor) => flavor.name === key)) {
+      throw problem(`versions names an unknown flavor "${key}"`);
+    }
+  }
+  for (const flavor of flavors) {
+    if (!Object.hasOwn(versions, flavor.name)) {
+      throw problem(`versions has no entry for ${flavor.name}`);
+    }
+    const version = versions[flavor.name];
+    if (typeof version !== "string" || !candidateVersion.test(version)) {
+      throw problem(
+        `${flavor.name} version ${
+          JSON.stringify(version)
+        } is not a private release candidate (X.Y.Z-rc.N)`,
+      );
+    }
+  }
+  return metadata as unknown as ReleaseFile;
+}
+
+/** Reads release.json and returns one flavor's package name and version. */
+export async function readMetadata(
+  flavor: Flavor,
+  path = "release.json",
+): Promise<ReleaseMetadata> {
+  const release = parseReleaseFile(await Deno.readTextFile(path), path);
+  return {
+    name: packageName(flavor),
+    version: release.versions[flavor.name],
+    private: release.private,
+    license: release.license,
+  };
+}
 
 export interface PrepareOptions {
   flavor: Flavor;
@@ -658,70 +757,117 @@ export function spdxDocument(input: SbomInput): string {
 
 // Preparation -----------------------------------------------------------------
 
+export interface RefusalInput {
+  flavor: Flavor;
+  /** The flavor's own version from release.json. */
+  version: string;
+  /** HEAD. */
+  commit: string;
+  /** Whether `git status --porcelain` lists anything. */
+  dirty: boolean;
+  /** The commit each of versionTags(flavor, version) names, if it exists. */
+  tags: Readonly<Record<string, string | undefined>>;
+  publish: boolean;
+  allowDirty: boolean;
+  allowExistingTag: boolean;
+}
+
+/**
+ * Why a build of one flavor's version from `commit` must not proceed, or
+ * undefined. An archive is tied to one clean commit, and a version names one
+ * set of bytes: candidate mode refuses a dirty tree and a version whose tags
+ * exist at another commit, and publish mode requires the release tag at HEAD.
+ * Each flavor answers only for its own version and tags; the full SDK's also
+ * cover the Go module tag, which may be created later but only at the same
+ * commit.
+ */
+export function refusal(input: RefusalInput): string | undefined {
+  const { flavor, version, commit, tags } = input;
+  const [tag, ...related] = versionTags(flavor, version);
+  const subject = (name: string) =>
+    name === tag
+      ? `version ${version} of ${packageName(flavor)}`
+      : `version ${version} of the Go module`;
+  if (input.publish) {
+    if (input.allowDirty || input.allowExistingTag) {
+      return "--allow-dirty and --allow-existing-tag are not accepted with --publish";
+    }
+    if (input.dirty) {
+      return "refusing to publish from a working tree with uncommitted or untracked changes (git status --porcelain is not empty)";
+    }
+    const tagCommit = tags[tag];
+    if (tagCommit === undefined) {
+      return `refusing to publish: HEAD ${
+        short(commit)
+      } is not tagged ${tag}; publishable archives are built from the tagged commit`;
+    }
+    if (tagCommit !== commit) {
+      return `refusing to publish: tag ${tag} points at ${
+        short(tagCommit)
+      }, not at HEAD ${short(commit)}`;
+    }
+    for (const name of related) {
+      const tagged = tags[name];
+      if (tagged !== undefined && tagged !== commit) {
+        return `refusing to publish: tag ${name} points at ${
+          short(tagged)
+        }, not at HEAD ${
+          short(commit)
+        }; ${tag} and ${name} must name the same source`;
+      }
+    }
+    return undefined;
+  }
+  if (input.dirty && !input.allowDirty) {
+    return "the working tree has uncommitted or untracked changes; commit them, or pass --allow-dirty for a local candidate (candidates are never published)";
+  }
+  if (!input.allowExistingTag) {
+    for (const name of [tag, ...related]) {
+      const tagged = tags[name];
+      if (tagged !== undefined && tagged !== commit) {
+        return `${name} already exists at ${short(tagged)}: ${
+          subject(name)
+        } was tagged from another commit, so a candidate built here could never be published under it. Choose the next ${flavor.name} version in release.json (versions["${flavor.name}"]; docs/releases.md describes the procedure), or pass --allow-existing-tag for a throwaway candidate`;
+      }
+    }
+  }
+  return undefined;
+}
+
 export async function prepareRelease(
   options: PrepareOptions,
 ): Promise<PreparedRelease> {
   const { flavor } = options;
   const publish = options.publish === true;
-  const allowDirty = options.allowDirty === true;
-  const allowExistingTag = options.allowExistingTag === true;
-  if (publish && (allowDirty || allowExistingTag)) {
-    throw new Error(
-      "--allow-dirty and --allow-existing-tag are not accepted with --publish",
-    );
-  }
-  const metadata = await readMetadata();
-  const name = packageName(flavor);
-  const version = metadata.version;
+  const metadata = await readMetadata(flavor);
+  const { name, version } = metadata;
   const stem = archiveStem(flavor, version);
   const tag = releaseTag(flavor, version);
 
-  // Refusals: an archive is tied to one clean commit, and a version names one
-  // set of bytes.
   const commit = await command(["git", "rev-parse", "HEAD"]);
   const dirty = (await command(["git", "status", "--porcelain"])) !== "";
-  const tagged = await run([
-    "git",
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    `refs/tags/${tag}^{commit}`,
-  ]);
-  const tagCommit = tagged.success ? tagged.stdout.trim() : undefined;
-  if (publish) {
-    if (dirty) {
-      throw new Error(
-        "refusing to publish from a working tree with uncommitted or untracked changes (git status --porcelain is not empty)",
-      );
-    }
-    if (tagCommit === undefined) {
-      throw new Error(
-        `refusing to publish: HEAD ${
-          short(commit)
-        } is not tagged ${tag}; publishable archives are built from the tagged commit`,
-      );
-    }
-    if (tagCommit !== commit) {
-      throw new Error(
-        `refusing to publish: tag ${tag} points at ${
-          short(tagCommit)
-        }, not at HEAD ${short(commit)}`,
-      );
-    }
-  } else {
-    if (dirty && !allowDirty) {
-      throw new Error(
-        "the working tree has uncommitted or untracked changes; commit them, or pass --allow-dirty for a local candidate (candidates are never published)",
-      );
-    }
-    if (tagCommit !== undefined && tagCommit !== commit && !allowExistingTag) {
-      throw new Error(
-        `${tag} already exists at ${
-          short(tagCommit)
-        }: version ${version} of ${name} was tagged from another commit, so a candidate built here could never be published under it. Choose a new version in release.json (docs/releases.md describes the procedure), or pass --allow-existing-tag for a throwaway candidate`,
-      );
-    }
+  const tags: Record<string, string | undefined> = {};
+  for (const tagName of versionTags(flavor, version)) {
+    const tagged = await run([
+      "git",
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      `refs/tags/${tagName}^{commit}`,
+    ]);
+    tags[tagName] = tagged.success ? tagged.stdout.trim() : undefined;
   }
+  const refused = refusal({
+    flavor,
+    version,
+    commit,
+    dirty,
+    tags,
+    publish,
+    allowDirty: options.allowDirty === true,
+    allowExistingTag: options.allowExistingTag === true,
+  });
+  if (refused !== undefined) throw new Error(refused);
   const changelog = changelogEntry(
     await Deno.readTextFile("CHANGELOG.md"),
     flavor,
@@ -878,8 +1024,10 @@ export async function prepareRelease(
       "package.json",
       JSON.stringify(
         {
-          ...metadata,
           name,
+          version,
+          private: metadata.private,
+          license: metadata.license,
           type: "module",
           description: flavor.description,
           ...(flavor.typescript

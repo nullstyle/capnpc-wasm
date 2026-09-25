@@ -159,6 +159,14 @@ version that ships them.
   Windows against Linux-built modules with the native-oracle comparisons
   skipped; Node.js and Bun direct execution is best effort, and
   `createWorkerCompiler` rejects both.
+- Release versions: each archive flavor has its own version under `versions` in
+  `release.json` (`capnpc-wasm` 0.1.0-rc.4, `capnp-wasm-tools` 0.1.0-rc.3,
+  `capnp-wasm-compiler-host` 0.1.0-rc.4). `scripts/release.ts` rejects a missing
+  or unknown flavor and the old single `version`, and refuses a flavor version
+  whose own tag, or for the full SDK the Go module tag `sdk/go/v<version>`,
+  exists at another commit, so `release:compiler-host` builds again without
+  `--allow-existing-tag`. The launcher's `--version` reads only the packaged
+  `package.json`, and the package receipt records the tools archive's version.
 
 ## capnp-wasm-compiler-host
 
