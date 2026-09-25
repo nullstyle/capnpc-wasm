@@ -23,8 +23,8 @@ sha256sum -c SHA256SUMS
 gh attestation verify {{stem}}.tgz --repo nullstyle/capnpc-wasm
 gh attestation verify {{stem}}.spdx.json --repo nullstyle/capnpc-wasm
 tar -xzf {{stem}}.tgz
-# From a checkout of the repository at the tag:
-deno run --allow-read scripts/verify-release.ts --sums SHA256SUMS \
+# In the download directory, with the verifier of a checkout at the tag:
+deno run --allow-read /path/to/capnpc-wasm/scripts/verify-release.ts --sums SHA256SUMS \
   --expect-manifest-sha256 {{manifestSha256}} --expect-commit {{commit}} \
   --require-clean ./package
 ```

@@ -26,12 +26,13 @@ gh attestation verify {{stem}}.tgz --repo nullstyle/capnpc-wasm
 
 After extraction, `package/manifest.json` is byte-identical to
 `{{stem}}.manifest.json`, and `verify-release.ts` checks every packaged file
-against it. Run the verifier from a checkout of the repository at the tag; the
-copy inside the package is the same program but shares the archive's trust:
+against it. In the download directory, run the verifier from a checkout of the
+repository at the tag (`/path/to/capnpc-wasm` below); the copy inside the
+package is the same program but shares the archive's trust:
 
 ```sh
 tar -xzf {{stem}}.tgz
-deno run --allow-read scripts/verify-release.ts --sums SHA256SUMS ./package
+deno run --allow-read /path/to/capnpc-wasm/scripts/verify-release.ts --sums SHA256SUMS ./package
 ```
 
 ## TypeScript: compile and generate

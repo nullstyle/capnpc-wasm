@@ -45,15 +45,15 @@ The digests below were read on 2026-09-22 from the GitHub release assets
 (`gh release view <tag> --json assets`) so that consumers can pin them
 independently of the download host. For these three releases `SHA256SUMS` lists
 two lines, the archive and `package/manifest.json`, so `sha256sum -c` needs
-`--ignore-missing` before extraction. From the next release on, `SHA256SUMS`
-lists the three published assets (`<stem>.tgz`, `<stem>.manifest.json`, and
-`<stem>.spdx.json`) and passes on the download directory as is. The
-compiler-host manifest digests come from local archives whose bytes match the
-published archive digests. No byte-identical local copy of the tools rc.2
-archive exists, so its manifest digest is not recorded; the digest of its
-`SHA256SUMS` asset, which lists it, is recorded instead. Every release adds a
-row here after its draft is verified and before it is published (the
-[release process](#release-process) below).
+`--ignore-missing` before extraction and `verify-release.ts` runs without
+`--sums`. From the next release on, `SHA256SUMS` lists the three published
+assets (`<stem>.tgz`, `<stem>.manifest.json`, and `<stem>.spdx.json`) and passes
+on the download directory as is. The compiler-host manifest digests come from
+local archives whose bytes match the published archive digests. No
+byte-identical local copy of the tools rc.2 archive exists, so its manifest
+digest is not recorded; the digest of its `SHA256SUMS` asset, which lists it, is
+recorded instead. Every release adds a row here after its draft is verified and
+before it is published (the [release process](#release-process) below).
 
 | Release                        | Archive                                                  | Archive SHA-256                                                    | `package/manifest.json` SHA-256                                                                     | Producer commit                            | CI on the producer commit                                                                                                                                                                      |
 | ------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -112,16 +112,17 @@ grants.
 To verify a download, check the assets, compare the archive digest with the
 [published releases](#published-releases) row (a channel independent of the
 release page), verify the provenance, then verify the extracted inventory with
-the verifier from a checkout of the repository at the tag rather than the copy
-inside the archive:
+the verifier from a checkout of the repository at the tag
+(`/path/to/capnpc-wasm` below) rather than the copy inside the archive. Every
+command runs in the download directory:
 
 ```sh
 sha256sum -c SHA256SUMS
 gh attestation verify capnp-wasm-tools-<version>.tgz --repo nullstyle/capnpc-wasm
 gh attestation verify capnp-wasm-tools-<version>.spdx.json --repo nullstyle/capnpc-wasm
 tar -xzf capnp-wasm-tools-<version>.tgz
-deno run --allow-read scripts/verify-release.ts --sums SHA256SUMS \
-  --expect-manifest-sha256 <digest from the published releases row> \
+deno run --allow-read /path/to/capnpc-wasm/scripts/verify-release.ts \
+  --sums SHA256SUMS --expect-manifest-sha256 <digest from the published releases row> \
   --expect-commit <producer commit> --require-clean ./package
 ```
 
@@ -176,10 +177,11 @@ reference commits. `provenance/` includes source-file hashes, `mise.toml`,
 `mise.lock`, and the exact Go runtime module version, checksum, and Git
 revision. `verify-release.ts` (also copied into the package) checks the
 extracted inventory and file contents, and its options tie the package to the
-published assets and the producer commit:
+published assets and the producer commit. From the checkout root:
 
 ```sh
-deno run --allow-read scripts/verify-release.ts --sums dist/releases/<stem>/SHA256SUMS ./package
+deno run --allow-read scripts/verify-release.ts \
+  --sums dist/releases/<stem>/SHA256SUMS dist/releases/<stem>/package
 ```
 
 The manifest detects changed, missing, and unexpected package files. It is not a
