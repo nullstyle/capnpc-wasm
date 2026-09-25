@@ -58,11 +58,12 @@ TypeScript:
 - Requests and options: `CompileRequest`, `GenerationRequest`, `Modules`,
   `WasmModule`, `Files`, `Language`, `CompilerOptions`, `WorkerCompilerOptions`,
   `JobOptions`, and `ResourceLimits`.
-- Results and errors: `CompileResult`, `GenerationResult`, `Diagnostic`, and
-  `CompileError` (`instanceof`, `name`, `stage`, `diagnostics`, `exitCode`, and
-  `cause`).
-- Constants and probes: `defaultLimits`, `supportedDenoWorkerVersion`,
-  `supportsWasmExceptions()`, and `isBoundedWorkerSupported()`.
+- Results and errors: `CompileResult`, `GenerationResult`, `Diagnostic`,
+  `FailureKind`, `CompileErrorOptions`, and `CompileError` (`instanceof`,
+  `name`, `stage`, `diagnostics`, `exitCode`, `kind`, `limit`, and `cause`).
+- Constants and probes: `defaultLimits`, `supportsWasmExceptions()`, and
+  `isBoundedWorkerSupported()`. `supportedDenoWorkerVersion` is deprecated
+  (nothing checks it) and can be removed in `0.2.0`.
 - Package entry points: `.`, `./worker`, `./wasm/*`, `./include/*`, and
   `./manifest.json`. Load `./worker` from the same package version as `.`.
 

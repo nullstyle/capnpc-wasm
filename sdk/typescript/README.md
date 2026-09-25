@@ -59,6 +59,9 @@ workbench with multi-file editing, language selection, and ZIP downloads, and
 its HTTP URL; opening the HTML file directly shows launch instructions. The
 server only delivers static files; schema compilation runs in the browser.
 
+The [API stability policy](../../docs/api-stability.md) lists which exports are
+stable.
+
 ## Reusing a compiled request
 
 Both direct and worker compilers expose `generate` for already-compiled
