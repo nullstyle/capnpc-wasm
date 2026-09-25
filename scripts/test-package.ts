@@ -763,6 +763,9 @@ try {
     "build/test/package-receipt.json",
     JSON.stringify(
       {
+        // docs/release-evidence/schemas/private-package.schema.json: a copy
+        // committed as <commit>-private-package.json must validate.
+        schemaVersion: 1,
         version,
         source: original.source,
         archiveSha256: originalHash,
