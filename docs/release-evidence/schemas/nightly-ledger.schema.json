@@ -31,14 +31,8 @@
       "additionalProperties": false,
       "required": ["repository", "path", "event"],
       "properties": {
-        "repository": {
-          "type": "string",
-          "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
-        },
-        "path": {
-          "type": "string",
-          "pattern": "^\\.github/workflows/[A-Za-z0-9_.-]+\\.ya?ml$"
-        },
+        "repository": { "const": "nullstyle/capnpc-wasm" },
+        "path": { "const": ".github/workflows/nightly.yml" },
         "event": { "const": "schedule" }
       }
     },
@@ -62,7 +56,9 @@
       "required": ["scheduledDateUtc", "kind", "detail", "runUrl"],
       "properties": {
         "scheduledDateUtc": { "$ref": "#/$defs/date" },
-        "kind": { "enum": ["conclusion", "native_revision", "missed"] },
+        "kind": {
+          "enum": ["conclusion", "rerun", "native_revision", "missed"]
+        },
         "detail": { "type": "string", "minLength": 1 },
         "runUrl": {
           "type": ["string", "null"],

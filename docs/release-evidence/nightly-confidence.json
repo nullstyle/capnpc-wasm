@@ -18,9 +18,9 @@
   "streakEnd": null,
   "rules": [
     "A cycle is a run of the workflow named in workflow, triggered by schedule; GitHub runs scheduled workflows on the default branch only.",
-    "A cycle qualifies when the run concluded success on its first attempt, so every job without continue-on-error succeeded without a re-run, and the ref/capnp-zig gitlink at the run's head commit equals nativeRevision, the gitlink the index pins when the ledger is computed.",
+    "A cycle qualifies when the run concluded success on its first attempt and was never re-run, so every job without continue-on-error succeeded, and the ref/capnp-zig gitlink at the run's head commit equals nativeRevision, the gitlink the index pins when the ledger is computed.",
     "Manually dispatched runs, runs of other workflows, and local runs are never cycles.",
-    "The streak counts qualifying cycles on consecutive UTC dates, newest first, starting on the current or the previous UTC date. A scheduled run that did not conclude success on its first attempt, including a run that passed only on a re-run, or that tested another native revision ends it, and so does a UTC date without a completed scheduled run. A run that has not completed is never counted: the newest run in progress leaves the streak to the completed runs before it, and an older one leaves its date without a completed run.",
+    "The streak counts qualifying cycles on consecutive UTC dates, newest first, starting on the current or the previous UTC date. A scheduled run that did not conclude success or that tested another native revision ends it, and so does a UTC date without a completed scheduled run. Any re-run ends the streak, even of a run whose first attempt succeeded, because the API reports only the latest attempt; do not re-run scheduled nightly runs. A run that has not completed is never counted: a run in progress dated today leaves the streak to the completed runs before it, and one dated earlier leaves its date without a completed run.",
     "Bumping the ref/capnp-zig gitlink restarts the count at zero. Changes to this repository's other sources do not; per-push CI gates them.",
     "scripts/audit-nightly.ts (mise run audit:nightly) computes every other field from the GitHub API; only requiredConsecutiveScheduledRuns, rules, publicationAuthorized, and supersedes are edited by hand."
   ],

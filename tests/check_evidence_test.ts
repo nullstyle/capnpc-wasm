@@ -152,6 +152,25 @@ Deno.test("planted: forged first-attempt cycles from another repository, out of 
   );
 });
 
+Deno.test("planted: another repository with matching run URLs", async () => {
+  expectFailures(
+    await planted(editLedger((ledger) => {
+      ledger.workflow = {
+        repository: "someone/else",
+        path: ".github/workflows/nightly.yml",
+        event: "schedule",
+      };
+      ledger.status = "measured";
+      ledger.statusDetail = null;
+      ledger.cycles = cycles("someone/else", 1, "newest first");
+      ledger.currentConsecutiveScheduledRuns = 2;
+      ledger.firstQualifyingScheduledDateUtc = "2026-09-23";
+      ledger.lastQualifyingScheduledDateUtc = "2026-09-24";
+    })),
+    `${ledgerName}.workflow.repository: expected "nullstyle/capnpc-wasm"`,
+  );
+});
+
 Deno.test("planted: the ledger supersedes itself", async () => {
   expectFailures(
     await planted(editLedger((ledger) => {

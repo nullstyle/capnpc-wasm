@@ -492,7 +492,16 @@ if (import.meta.main) {
     Deno.exit(2);
   }
   const directory = Deno.args[0] ?? "docs/release-evidence";
-  const report = await checkEvidence(directory);
+  let report: EvidenceReport;
+  try {
+    report = await checkEvidence(directory);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    console.error(
+      `check-evidence.ts: ${directory} not found; run it from the repository root (mise run check:evidence) or pass the evidence directory`,
+    );
+    Deno.exit(2);
+  }
   for (const line of report.lines) console.log(line);
   if (report.failures.length > 0) {
     for (const failure of report.failures) console.error(failure);

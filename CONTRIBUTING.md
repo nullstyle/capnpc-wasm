@@ -142,9 +142,13 @@ Per reference:
 - `capnp-zig`, in this order: (a) if `ref/capnp-zig/mise.toml` changed its `zig`
   line, bump the tool pin as above, then run `mise lock zig` and
   `mise run mirror:zig -- lock --write`; (b) with the new gitlink staged, run
+  `mise run audit:nightly` (network, read-only `gh`) and commit the regenerated
+  `docs/release-evidence/nightly-confidence.json` with the bump: the bump
+  restarts the nightly streak, and `check:evidence` in `lint` and
+  `test:evidence` in `test` fail until the ledger names the new gitlink; (c) run
   `mise run build:zig`, which exports the tree at the gitlink and fails in
   `check-zig-sync.ts` for every mirrored fixture that differs from its native
-  file; (c) refresh the mirrors from the gitlink and review the diff:
+  file; (d) refresh the mirrors from the gitlink and review the diff:
 
   ```sh
   mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \
@@ -153,13 +157,11 @@ Per reference:
 
   `generators/zig/sync.json` only maps native fixture paths to their mirrors
   (add an entry for a new fixture); every expectation comes from the reference
-  commit itself; (d) run `mise run test` (the reflection, generator API, RPC
+  commit itself; (e) run `mise run test` (the reflection, generator API, RPC
   codegen, wire, feature corpus, SDK, and browser suites all consume Zig
-  output), and `mise run test:browser`; (e) leave
+  output), and `mise run test:browser`; (f) leave
   `generators/zig/historical-reference` unchanged; it pins the wire suite's
-  oracle; (f) run `mise run audit:nightly` and commit the regenerated
-  `docs/release-evidence/nightly-confidence.json`: the bump restarts the nightly
-  streak, and `check:evidence` fails until the ledger names the new gitlink.
+  oracle.
 - `wazero`: `sdk/go/go.mod` must require the pseudo-version of the new gitlink
   (`mise exec -- go -C sdk/go get github.com/tetratelabs/wazero@<commit>` then
   `mise exec -- go -C sdk/go mod tidy`); `tests/hosts/wazero` replaces the

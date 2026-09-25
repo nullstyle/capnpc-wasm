@@ -57,7 +57,8 @@ candidate.
   repository's nightly workflow at the pinned `ref/capnp-zig` revision (decision
   D5 = A), recorded in the generated ledger (`mise run audit:nightly`). This
   repository's nightly runs no fuzz jobs; capnp-zig's own nightly fuzz receipts
-  are supporting evidence only.
+  are supporting evidence only, unless the maintainer asks for a fuzz leg in
+  this repository's nightly; that question is open.
 - Signing: `SHA256SUMS` for every published asset is signed or attested, and the
   release guide tells consumers how to verify it.
 - Registry workflow: a tag-triggered CI job builds the archives from a clean
@@ -106,15 +107,17 @@ the count. The ledger now records `"status": "no_scheduled_runs"` and a streak
 of 0 of 7 for `295ff5e`. `publicationAuthorized` remains `false`.
 
 Rules, from the JSON: a cycle is a scheduled run of the workflow. It qualifies
-when the run concluded `success` on its first attempt, so every job without
-`continue-on-error` succeeded without a re-run, and the gitlink at its head
+when the run concluded `success` on its first attempt and was never re-run, so
+every job without `continue-on-error` succeeded, and the gitlink at its head
 commit is the pinned revision. Manual and local runs never count. Qualifying
 cycles fall on consecutive UTC dates, the newest today or yesterday; a scheduled
-run that failed, was cancelled, passed only on a re-run, or tested another
-native revision ends the streak, and so does a date without a completed
-scheduled run, even while a re-run of that date's run is in progress. A gitlink
-bump restarts the count; changes to this repository's other sources do not,
-because per-push CI gates them.
+run that failed, was cancelled, or tested another native revision ends the
+streak, and so does a date without a completed scheduled run. Any re-run ends
+the streak, even of a run whose first attempt succeeded, because the API reports
+only the latest attempt; do not re-run scheduled nightly runs. A run in progress
+dated today is not counted yet; one dated earlier leaves its date without a
+completed run. A gitlink bump restarts the count; changes to this repository's
+other sources do not, because per-push CI gates them.
 
 ### capnp-zig scheduled Nightly
 

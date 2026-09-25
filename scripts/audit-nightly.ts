@@ -44,7 +44,7 @@ export type Cycle = {
 
 export type StreakEnd = {
   scheduledDateUtc: string;
-  kind: "conclusion" | "native_revision" | "missed";
+  kind: "conclusion" | "rerun" | "native_revision" | "missed";
   detail: string;
   runUrl: string | null;
 };
@@ -78,17 +78,18 @@ export function dayBefore(date: string): string {
 
 /**
  * The current streak, newest cycle first. A cycle is a scheduled run that
- * concluded success on its first attempt at the pinned native revision; the
- * API reports only a run's latest attempt, so a run that passed on a re-run
- * ends the streak. Cycles fall on consecutive UTC dates, the newest on `today`
- * or the day before (today's run may not have happened yet), and a second run
- * on a counted date must qualify too but adds no cycle.
+ * concluded success on its first attempt at the pinned native revision. The
+ * API reports only a run's latest attempt, so any re-run ends the streak, even
+ * of a run whose first attempt succeeded. Cycles fall on consecutive UTC
+ * dates, the newest on `today` or the day before (today's run may not have
+ * happened yet), and a second run on a counted date must qualify too but adds
+ * no cycle.
  *
- * Runs that have not completed are never counted. On the newest dates they
- * leave the streak to the completed runs before them, so the nightly's own
- * ledger job, which runs inside a pending run, counts the runs before it. On
- * an older date, a pending run, such as a re-run in progress, leaves that date
- * without a completed run and ends the streak there; the detail names it.
+ * Runs that have not completed are never counted. A run in progress dated
+ * today leaves the streak to the completed runs before it, so the nightly's
+ * own ledger job, which runs inside that run, counts the runs before it. A run
+ * in progress dated earlier, such as a re-run, leaves its date without a
+ * completed run: the streak ends there, and the detail names the run.
  */
 export async function computeStreak(
   runs: readonly Run[],
@@ -110,23 +111,24 @@ export async function computeStreak(
     cycles,
     streakEnd: { scheduledDateUtc, kind, detail, runUrl },
   });
+  const missed = (due: string): Streak => {
+    const pending = scheduled.find((other) =>
+      other.status !== "completed" && other.created_at.slice(0, 10) === due
+    );
+    return end(
+      due,
+      "missed",
+      pending
+        ? `no completed scheduled run on ${due}; run ${pending.id} (attempt ${pending.run_attempt}) is ${pending.status}`
+        : `no completed scheduled run on ${due}`,
+      pending?.html_url ?? null,
+    );
+  };
   let counted: string | undefined;
   for (const run of completed) {
     const date = run.created_at.slice(0, 10);
     const due = dayBefore(counted ?? today);
-    if (date !== counted && date < due) {
-      const pending = scheduled.find((other) =>
-        other.status !== "completed" && other.created_at.slice(0, 10) === due
-      );
-      return end(
-        due,
-        "missed",
-        pending
-          ? `no completed scheduled run on ${due}; run ${pending.id} (attempt ${pending.run_attempt}) is ${pending.status}`
-          : `no completed scheduled run on ${due}`,
-        pending?.html_url ?? null,
-      );
-    }
+    if (date !== counted && date < due) return missed(due);
     if (run.conclusion !== "success") {
       return end(
         date,
@@ -138,8 +140,8 @@ export async function computeStreak(
     if (run.run_attempt !== 1) {
       return end(
         date,
-        "conclusion",
-        `run ${run.id} passed only on attempt ${run.run_attempt}`,
+        "rerun",
+        `run ${run.id} was re-run (attempt ${run.run_attempt})`,
         run.html_url,
       );
     }
@@ -164,6 +166,15 @@ export async function computeStreak(
       });
       counted = date;
     }
+  }
+  // Every completed run is counted; a run in progress older than all of them
+  // still leaves the day before the oldest cycle without a completed run.
+  const oldest = counted;
+  if (
+    oldest !== undefined &&
+    scheduled.some((other) => other.created_at.slice(0, 10) < oldest)
+  ) {
+    return missed(dayBefore(oldest));
   }
   return { cycles, streakEnd: null };
 }
@@ -279,7 +290,7 @@ export async function indexGitlink(): Promise<string> {
     "ls-files",
     "--stage",
     "--",
-    nativeReference,
+    `:(top)${nativeReference}`,
   ])).trim().split("\n").filter(Boolean);
   const [mode, revision, stage] = lines.length === 1
     ? lines[0].split(/\s+/)
@@ -369,7 +380,16 @@ function committedFields(text: string): HandFields {
 if (import.meta.main) {
   const { repo, workflow, check } = parseArgs(Deno.args);
   const workflowPath = `.github/workflows/${workflow}`;
-  const committedText = await Deno.readTextFile(ledgerPath);
+  let committedText: string;
+  try {
+    committedText = await Deno.readTextFile(ledgerPath);
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    console.error(
+      `audit-nightly.ts: ${ledgerPath} not found; run it from the repository root (mise run audit:nightly)`,
+    );
+    Deno.exit(2);
+  }
   const committed = committedFields(committedText);
   const pinned = await indexGitlink();
 

@@ -148,8 +148,8 @@ version that ships them.
   (`mise run check:evidence`, part of `lint`, which also checks the ledger's
   counters against its cycles and its gitlink against the index); the
   nightly-confidence ledger measures this repository's scheduled `nightly.yml`
-  at the `ref/capnp-zig` gitlink (decision D5 = A), counts only first-attempt
-  successes, and is regenerated from the GitHub API by `mise run audit:nightly`
+  at the `ref/capnp-zig` gitlink (decision D5 = A), ends the streak on any
+  re-run, and is regenerated from the GitHub API by `mise run audit:nightly`
   (streak 0 until the held workflow runs from `main`); `mise run test:evidence`
   tests both scripts; the capnp-zig-based ledger is kept as
   `capnp-zig-nightly-confidence.json`.

@@ -36,16 +36,18 @@ workflow, held on the `quality/held-workflows` branch until it reaches `main`,
 runs the task in a `ledger` job after its other jobs and uploads the result as
 an artifact; CI never commits it. Commit a regenerated ledger with any
 `ref/capnp-zig` bump, since the bump restarts the streak; until then
-`check:evidence` fails because the ledger names the previous gitlink. Only a
-first-attempt success counts: a run that passed on a re-run ends the streak.
+`check:evidence` fails because the ledger names the previous gitlink. Any re-run
+ends the streak, even of a run whose first attempt succeeded, because the API
+reports only the latest attempt; do not re-run scheduled nightly runs.
 
 ## Versions
 
 Every receipt carries the version its schema requires, in its family's key:
 `schemaVersion` in the camelCase receipts, `schema_version` in the snake_case
-capnp-zig fuzz receipts. Receipts are evidence: never rewrite a committed one
-except to add a missing version. When a producer changes its format, bump the
-version it writes and extend the schema so that it accepts both versions (an
+capnp-zig fuzz receipts. Hand-audited receipts are evidence: never rewrite one
+except to add a missing version. `nightly-confidence.json` is generated, and
+`mise run audit:nightly` rewrites it. When a producer changes its format, bump
+the version it writes and extend the schema so that it accepts both versions (an
 `enum` of versions, with the new fields optional), or give the new receipts a
 new type. `scripts/check-evidence.ts` implements a subset of JSON Schema and
 rejects a schema that uses any other keyword, so an external validator accepts

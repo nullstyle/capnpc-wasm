@@ -102,8 +102,9 @@ a local cold build is comparable. For quick iteration, run one suite task, or
   `scripts/audit-nightly.ts`): `mise run check:evidence`, part of `lint`,
   validates every receipt against its schema under
   `docs/release-evidence/schemas/`, and `mise run test:evidence` tests both
-  scripts; a new receipt type needs a schema, and a committed receipt is never
-  rewritten except to add its schema version.
+  scripts; a new receipt type needs a schema, and a hand-audited receipt is
+  never rewritten except to add its schema version (`mise run audit:nightly`
+  regenerates `nightly-confidence.json`).
 - Markdown only: `mise run check:links` and
   `mise exec -- deno fmt --check <files>`; `mise run lint` runs both with every
   other static check.
@@ -173,9 +174,10 @@ finish with `mise run ci` before a rebase or hand-off.
   mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \
     scripts/check-zig-sync.ts --update-fixtures
   ```
-- After a `ref/capnp-zig` bump, run `mise run audit:nightly` and commit the
-  regenerated ledger: the bump restarts the nightly streak, and `check:evidence`
-  fails until the ledger names the new gitlink.
+- After staging a `ref/capnp-zig` bump and before `mise run test`, run
+  `mise run audit:nightly` and commit the regenerated ledger with the bump: the
+  bump restarts the nightly streak, and `check:evidence` and `test:evidence`
+  fail until the ledger names the new gitlink.
 - `generators/zig/historical-reference` pins the audited revision `08a3e3d` that
   the wire tests use as an oracle; `refs:sync` fetches it. It stays fixed across
   bumps.

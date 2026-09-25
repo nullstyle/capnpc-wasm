@@ -126,16 +126,17 @@ Deno.test("a failed run is never looked up", async () => {
   eq(s.streakEnd?.detail.includes("cancelled"), true, "detail");
 });
 
-Deno.test("a run that passed only on a re-run ends the streak", async () => {
-  // The API reports a run's latest attempt: attempt 1 failed, attempt 2 passed.
+Deno.test("any re-run ends the streak", async () => {
+  // The API reports only a run's latest attempt, so a re-run after a failed
+  // first attempt and a re-run of a passed one look the same: success, attempt 2.
   const [d0, d1, d2] = days(3);
   const rerun = run(d1, { run_attempt: 2 });
   const s = await streak([run(d0), rerun, run(d2)]);
   eq(s.cycles.map((c) => c.scheduledDateUtc), [d0], "dates");
   eq(s.streakEnd, {
     scheduledDateUtc: d1,
-    kind: "conclusion",
-    detail: `run ${rerun.id} passed only on attempt 2`,
+    kind: "rerun",
+    detail: `run ${rerun.id} was re-run (attempt 2)`,
     runUrl: rerun.html_url,
   }, "end");
 });
@@ -354,4 +355,28 @@ Deno.test("ledger: status, detail, streak end, and supersedes must agree", async
     "streakEnd.runUrl https://github.com/someone/else/actions/runs/1 is not a run of o/r",
     "streakEnd is dated 2026-01-01",
   );
+});
+
+Deno.test("a re-run in progress older than every completed run is named", async () => {
+  const [d0, d1] = days(2);
+  const pending = run(d1, {
+    status: "in_progress",
+    conclusion: null,
+    run_attempt: 2,
+  });
+  const s = await streak([run(d0), pending]);
+  eq(s.cycles.map((c) => c.scheduledDateUtc), [d0], "dates");
+  eq(s.streakEnd?.runUrl, pending.html_url, "names the pending run");
+  eq(ledgerProblems(ledgerOf(s), pinned), [], "consistent");
+});
+
+Deno.test("a pending run two days before the oldest cycle ends the streak the day before it", async () => {
+  const [d0, , d2] = days(3);
+  const s = await streak([
+    run(d0),
+    run(d2, { status: "queued", conclusion: null }),
+  ]);
+  eq(s.streakEnd?.scheduledDateUtc, dayBefore(d0), "missed date");
+  eq(s.streakEnd?.runUrl, null, "no run that day");
+  eq(ledgerProblems(ledgerOf(s), pinned), [], "consistent");
 });
