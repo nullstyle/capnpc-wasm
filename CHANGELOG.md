@@ -197,6 +197,14 @@ every flavor it applies to has shipped it.
   without an accepted expression. The SBOM's `capnpc-wasm` component (the
   project's own code) is versioned by the producer commit, not by the flavor's
   version.
+- TypeScript SDK: every guest module is instrumented when it is compiled: one
+  `capnp_wasm.interrupt` import polled from loop headers, from the entry of each
+  function that calls guest code, and after each import call, with a trap after
+  `proc_exit`; function indices and the `name` section's function and local
+  names are renumbered, other code-offset custom sections are dropped, and
+  constructs the rewriter cannot parse exactly (GC types, table initializers,
+  unknown opcodes) are rejected with `TypeError`. Generated output is
+  byte-identical.
 
 ## capnp-wasm-compiler-host
 

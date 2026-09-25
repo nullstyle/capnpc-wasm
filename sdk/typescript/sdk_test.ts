@@ -8,6 +8,8 @@ import {
   supportedDenoWorkerVersion,
 } from "./mod.ts";
 import { runCommand } from "./runtime.ts";
+import { compileBounded } from "./wasm.ts";
+import { defaultLimits } from "./types.ts";
 import {
   assert,
   commandGuest,
@@ -353,9 +355,7 @@ Deno.test("SDK compiler filesystem is read-only", async () => {
   const compiler = await createCompiler(modules);
   const compiled = await compiler.compile({ ...request, generators: [] });
   const result = await runCommand(
-    await WebAssembly.compile(
-      new Uint8Array(modules.generators.cpp as Uint8Array),
-    ),
+    await compileBounded(modules.generators.cpp!, defaultLimits.memoryPages),
     ["capnpc-c++"],
     compiled.request,
     { sentinel: encoder.encode("unchanged") },
@@ -1574,7 +1574,10 @@ Deno.test("SDK reports malformed requests as generator exit 1 without outputs", 
 
 Deno.test("SDK runs capnp id with host randomness", async () => {
   const { modules } = await fixture();
-  const module = await WebAssembly.compile(new Uint8Array(modules.compiler));
+  const module = await compileBounded(
+    modules.compiler,
+    defaultLimits.memoryPages,
+  );
   const ids: string[] = [];
   for (let i = 0; i < 2; i++) {
     const result = await runCommand(

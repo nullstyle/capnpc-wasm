@@ -5,6 +5,7 @@ import {
   LimitError,
 } from "./resource-fs.ts";
 import { checkPath } from "./limits.ts";
+import { interruptModule, interruptName } from "./interrupt.ts";
 import { defaultLimits, type ResourceLimits } from "./types.ts";
 import WASI from "../../ref/browser_wasi_shim/src/wasi.ts";
 import {
@@ -269,6 +270,8 @@ export async function runCommand(
   try {
     const instance = await WebAssembly.instantiate(module, {
       wasi_snapshot_preview1: wasi.wasiImport,
+      // compileBounded's checks poll here; nothing interrupts a guest yet.
+      [interruptModule]: { [interruptName]: () => 0 },
     });
     const { memory, _start } = instance.exports;
     if (
