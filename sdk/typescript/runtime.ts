@@ -5,6 +5,7 @@ import {
   LimitError,
 } from "./resource-fs.ts";
 import { checkPath } from "./limits.ts";
+import { checkName, correctShimAbi } from "./shim-abi.ts";
 import {
   Cancelled,
   countdownExport,
@@ -17,17 +18,14 @@ import {
   CLOCKID_MONOTONIC,
   CLOCKID_REALTIME,
   Directory,
-  ERRNO_BADF,
   ERRNO_INTR,
   ERRNO_INVAL,
-  ERRNO_NOTDIR,
   ERRNO_NOTSUP,
   ERRNO_ROFS,
   EVENTTYPE_CLOCK,
   File,
   OFLAGS_CREAT,
   OFLAGS_TRUNC,
-  OpenDirectory,
   OpenFile,
   PreopenDirectory,
   SUBCLOCKFLAGS_SUBSCRIPTION_CLOCK_ABSTIME,
@@ -53,12 +51,6 @@ export class CommandError extends Error {
 export const wasiImportNames: ReadonlySet<string> = new Set(
   Object.keys(new WASI([], [], [], { debug: false }).wasiImport),
 );
-
-function checkName(name: string): void {
-  if (!name || name === "." || name === ".." || /[\\/\0]/.test(name)) {
-    throw new Error(`invalid filesystem entry name: ${JSON.stringify(name)}`);
-  }
-}
 
 /**
  * A file over bytes the caller already owns privately. Read-only files are
@@ -314,36 +306,7 @@ export async function runCommand(
     if (countdown) countdown.value = 0;
   };
 
-  // The in-memory filesystem has no symlinks. Zig checks each output path
-  // with readlink before writing; preserve lookup failures and report INVAL
-  // for existing non-links instead of the shim's default NOTSUP.
-  wasi.wasiImport.path_readlink = (
-    fd: number,
-    path: number,
-    length: number,
-  ) => {
-    const descriptor = wasi.fds[fd];
-    if (!descriptor) return ERRNO_BADF;
-    if (!(descriptor instanceof OpenDirectory)) return ERRNO_NOTDIR;
-    const bytes = new Uint8Array(wasi.inst.exports.memory.buffer);
-    const name = new TextDecoder().decode(bytes.subarray(path, path + length));
-    const { ret } = descriptor.path_filestat_get(0, name);
-    return ret || ERRNO_INVAL;
-  };
-
-  // args_get writes UTF-8, whereas the pinned shim's sizing counts UTF-16.
-  const encoder = new TextEncoder();
-  const argumentBytes = argv.reduce(
-    (size, arg) => size + encoder.encode(arg).length + 1,
-    0,
-  );
-  wasi.wasiImport.args_sizes_get = (argc: number, bufferSize: number) => {
-    const memory = new DataView(wasi.inst.exports.memory.buffer);
-    memory.setUint32(argc, argv.length, true);
-    memory.setUint32(bufferSize, argumentBytes, true);
-    return 0;
-  };
-
+  correctShimAbi(wasi, argv);
   wasi.wasiImport.poll_oneoff = clockPoll(
     wasi,
     control,
