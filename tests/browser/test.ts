@@ -1026,20 +1026,62 @@ try {
     }
   }
 
+  // The resource-limits step starts four compilers (two with every module)
+  // and runs six small jobs. In nightly 36141746707 (ubuntu-24.04, three
+  // engines at once) a WebKit worker's init ran out of the SDK's implicit
+  // 30-second default, while such an init measures about 0.1 s idle and
+  // 0.15 s with every core busy (macOS arm64; jobs 16 ms or less): a start
+  // stall more than slowness (ledger row 139). Init and every job get
+  // explicit bounds with that headroom, the step's deadline covers one init
+  // at its bound with a minute to spare, and whatever runs out names itself
+  // and its duration; the OBSERVED line keeps every duration.
+  const limitsInitTimeoutMs = 60_000;
+  const limitsJobTimeoutMs = 30_000;
+  const limitsStepMs = limitsInitTimeoutMs + 60_000;
   for (const host of ["direct", "worker"] as const) {
     const evidence = await evaluate(
-      async ({ host, input, request }) => {
+      async ({ host, input, request, initTimeoutMs, jobTimeoutMs }) => {
         const state = (globalThis as BrowserGlobal).capnpTest;
-        const create = (modules: Modules, options: CompilerOptions) =>
-          host === "direct"
-            ? state.sdk.createCompiler(modules, options)
-            : state.sdk.createWorkerCompiler(state.workerURL, modules, options);
+        const durations: Record<string, number> = {};
+        const timed = async <T>(label: string, run: () => Promise<T>) => {
+          const started = performance.now();
+          try {
+            return await run();
+          } catch (error) {
+            if ((error as Error).name !== "TimeoutError") throw error;
+            throw new Error(
+              `${label} timed out after ${
+                Math.round(performance.now() - started)
+              } ms`,
+            );
+          } finally {
+            durations[label] = Math.round(performance.now() - started);
+          }
+        };
+        const create = (
+          label: string,
+          modules: Modules,
+          options: CompilerOptions,
+        ) =>
+          timed(
+            `${label} ${host === "direct" ? "creation" : "worker init"}`,
+            () =>
+              host === "direct"
+                ? state.sdk.createCompiler(modules, options)
+                // The SDK's WorkerCompilerOptions add initTimeoutMs; the
+                // driver's SDK type declares only CompilerOptions.
+                : state.sdk.createWorkerCompiler(state.workerURL, modules, {
+                  ...options,
+                  initTimeoutMs,
+                } as CompilerOptions),
+          );
+        const job = { timeoutMs: jobTimeoutMs };
         const close = (compiler: Compiler | WorkerCompiler) => {
           if ("dispose" in compiler) compiler.dispose();
         };
-        const rejected = async (run: () => Promise<unknown>) => {
+        const rejected = async (label: string, run: () => Promise<unknown>) => {
           try {
-            await run();
+            await timed(label, run);
             return null;
           } catch (error) {
             return {
@@ -1049,57 +1091,74 @@ try {
             };
           }
         };
-        const workspace = await create(state.modules, {
+        const workspace = await create("workspace-limited", state.modules, {
           limits: { workspaceBytes: 0 },
         });
         let workspaceFailure;
         try {
-          workspaceFailure = await rejected(() => workspace.compile(input));
-          await workspace.generate({ request, generators: ["zig"] });
+          workspaceFailure = await rejected(
+            "workspace-limited compile",
+            () => workspace.compile(input, job),
+          );
+          await timed(
+            "workspace-limited zig generation",
+            () => workspace.generate({ request, generators: ["zig"] }, job),
+          );
         } finally {
           close(workspace);
         }
-        const output = await create(state.modules, {
+        const output = await create("output-limited", state.modules, {
           limits: { outputBytes: 0 },
         });
         let outputFailure;
         try {
-          outputFailure = await rejected(() =>
-            output.generate({ request, generators: ["zig"] })
+          outputFailure = await rejected(
+            "output-limited zig generation",
+            () => output.generate({ request, generators: ["zig"] }, job),
           );
-          await output.compile({ ...input, generators: [] });
+          await timed(
+            "output-limited compile",
+            () => output.compile({ ...input, generators: [] }, job),
+          );
         } finally {
           close(output);
         }
-        const memory = await create({
+        const memory = await create("memory-limited", {
           compiler: state.memoryGuest,
           generators: {},
         }, { limits: { memoryPages: 2 } });
         try {
-          const result = await memory.compile({
-            files: { "unused.capnp": "" },
-            includeFiles: {},
-            entrypoints: ["unused.capnp"],
-            generators: [],
-          });
-          const stream = await create({
-            compiler: state.streamGuest,
-            generators: {},
-          }, { limits: { stdoutBytes: 6 } });
-          try {
-            const streamFailure = await rejected(() =>
-              stream.compile({
+          const result = await timed(
+            "memory-limited compile",
+            () =>
+              memory.compile({
                 files: { "unused.capnp": "" },
                 includeFiles: {},
                 entrypoints: ["unused.capnp"],
                 generators: [],
-              })
+              }, job),
+          );
+          const stream = await create("stream-limited", {
+            compiler: state.streamGuest,
+            generators: {},
+          }, { limits: { stdoutBytes: 6 } });
+          try {
+            const streamFailure = await rejected(
+              "stream-limited compile",
+              () =>
+                stream.compile({
+                  files: { "unused.capnp": "" },
+                  includeFiles: {},
+                  entrypoints: ["unused.capnp"],
+                  generators: [],
+                }, job),
             );
             return {
               workspaceFailure,
               outputFailure,
               streamFailure,
               memory: [...result.request],
+              durations,
             };
           } finally {
             close(stream);
@@ -1112,20 +1171,34 @@ try {
         host,
         input: data.scenarios[0].input,
         request: data.scenarios[0].request,
+        initTimeoutMs: limitsInitTimeoutMs,
+        jobTimeoutMs: limitsJobTimeoutMs,
       },
       `${engine} ${host} resource limits`,
+      limitsStepMs,
+    );
+    console.log(
+      `OBSERVED ${engine} ${host} resource limits: ${
+        Object.entries(evidence.durations).map(([label, ms]) =>
+          `${label} ${ms} ms`
+        ).join(", ")
+      }`,
     );
     assert(
       evidence.workspaceFailure?.name === "TypeError" &&
         evidence.workspaceFailure.message.includes("workspaceBytes") &&
         !evidence.workspaceFailure.hasOutputs,
-      `${host} did not enforce its workspace limit`,
+      `${host} did not enforce its workspace limit: ${
+        JSON.stringify(evidence.workspaceFailure)
+      }`,
     );
     assert(
       evidence.outputFailure?.name === "CompileError" &&
         evidence.outputFailure.message.includes("outputBytes") &&
         !evidence.outputFailure.hasOutputs,
-      `${host} exposed output from a resource-limited job`,
+      `${host} exposed output from a resource-limited job: ${
+        JSON.stringify(evidence.outputFailure)
+      }`,
     );
     assert(
       JSON.stringify(evidence.memory) === "[2]",
@@ -1135,7 +1208,9 @@ try {
       evidence.streamFailure?.name === "CompileError" &&
         evidence.streamFailure.message.includes("stdoutBytes") &&
         !evidence.streamFailure.hasOutputs,
-      `${host} in-place buffer growth bypassed its stdout limit`,
+      `${host} in-place buffer growth bypassed its stdout limit: ${
+        JSON.stringify(evidence.streamFailure)
+      }`,
     );
     console.log(
       `PASS ${engine} ${host}: workspace/output/stream limits, recovery, and guest memory ceiling`,

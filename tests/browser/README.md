@@ -123,6 +123,11 @@ job. A small Wasm command attempts two memory grows from one page; its observed
 memory size must remain at the configured two-page ceiling in every engine. A
 second command writes seven single-byte chunks under a six-byte stdout limit,
 catching quota bypasses when the shim grows a resizable ArrayBuffer in place.
+This step gives each worker init 60 seconds and each job 30 seconds explicitly,
+since a WebKit worker's init once ran out of the SDK's implicit 30-second
+default under load (nightly 36141746707), although it measures about 0.15 s with
+every core busy. An init or job that runs out names itself and its duration, and
+`OBSERVED <engine> <host> resource limits: ...` prints every duration.
 
 The hostile guests under `guests/` run in both modes as well. Each one-page
 command asks the host for more than the guest owns (oversized read iovec arrays,
