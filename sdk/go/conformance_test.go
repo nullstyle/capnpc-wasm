@@ -29,17 +29,26 @@ import (
 // modules stage rejected input, and the contract messages are protocol
 // violations. A trap needs wazero's own report (`wasm error:`); any other
 // failure is reported as error:<type> and matches no row.
+//
+// The "go" surface is the SDK with default options, so every corpus compiler
+// uses EngineAuto whatever CAPNPC_WASM_TEST_ENGINE selects for the rest of the
+// suite: stack depth, and so the deep rows, depend on the engine.
 func TestConformance(t *testing.T) {
 	corpus := loadConformanceCorpus(t)
+	if testEngine != capnpcwasm.EngineAuto {
+		t.Logf("the corpus pins EngineAuto, the go surface's default; CAPNPC_WASM_TEST_ENGINE does not apply to it")
+	}
 	compilers := map[string]*capnpcwasm.Compiler{}
 	t.Cleanup(func() {
 		for _, c := range compilers {
 			_ = c.Close(context.Background())
 		}
 	})
+	corpus.real = conformanceNew(t, corpus.modules, nil, compilers, "real")
 	for _, spec := range corpus.cases {
 		expectation, skip := corpus.expectationFor(t, spec.Name, "go")
 		if skip != "" {
+			t.Run(spec.Name, func(t *testing.T) { t.Skip(skip) })
 			continue
 		}
 		t.Run(spec.Name, func(t *testing.T) {
@@ -132,11 +141,13 @@ type caseExpectation struct {
 }
 
 type conformanceCorpus struct {
-	root      string
-	cases     []conformanceCase
-	expected  map[string]caseExpectation
-	guests    map[string][]byte
-	modules   capnpcwasm.Modules
+	root     string
+	cases    []conformanceCase
+	expected map[string]caseExpectation
+	guests   map[string][]byte
+	modules  capnpcwasm.Modules
+	// real runs the real modules with default limits on EngineAuto.
+	real      *capnpcwasm.Compiler
 	validOnce func() []byte
 }
 
@@ -165,7 +176,7 @@ func loadConformanceCorpus(t *testing.T) *conformanceCorpus {
 	var valid []byte
 	corpus.validOnce = func() []byte {
 		if valid == nil {
-			result, err := sharedCompiler(t).Compile(context.Background(), capnpcwasm.Request{
+			result, err := corpus.real.Compile(context.Background(), capnpcwasm.Request{
 				Files:       map[string][]byte{"a.capnp": []byte(conformanceSimpleSchema)},
 				Entrypoints: []string{"a.capnp"},
 			})
@@ -372,7 +383,7 @@ func languagesOf(names []string) []capnpcwasm.Language {
 func conformanceCompiler(t *testing.T, corpus *conformanceCorpus, spec conformanceCase, cache map[string]*capnpcwasm.Compiler) *capnpcwasm.Compiler {
 	t.Helper()
 	if spec.Compiler == "" && len(spec.GeneratorGuests) == 0 && len(spec.Limits) == 0 {
-		return sharedCompiler(t)
+		return corpus.real
 	}
 	key, _ := json.Marshal([]any{spec.Compiler, spec.GeneratorGuests, spec.Generators, spec.Limits})
 	if c, ok := cache[string(key)]; ok {
@@ -389,7 +400,7 @@ func conformanceCompiler(t *testing.T, corpus *conformanceCorpus, spec conforman
 			modules.Generators[capnpcwasm.Language(language)] = corpus.modules.Generators[capnpcwasm.Language(language)]
 		}
 	}
-	options := testOptions()
+	options := []capnpcwasm.Option{capnpcwasm.WithEngine(capnpcwasm.EngineAuto)}
 	if len(spec.Limits) > 0 {
 		limits := capnpcwasm.DefaultLimits()
 		for name, value := range spec.Limits {
@@ -430,6 +441,18 @@ func conformanceCompiler(t *testing.T, corpus *conformanceCorpus, spec conforman
 		return nil
 	}
 	cache[string(key)] = c
+	return c
+}
+
+// conformanceNew builds a corpus compiler on EngineAuto and closes it with
+// the test; the real modules must compile.
+func conformanceNew(t *testing.T, modules capnpcwasm.Modules, options []capnpcwasm.Option, cache map[string]*capnpcwasm.Compiler, key string) *capnpcwasm.Compiler {
+	t.Helper()
+	c, err := capnpcwasm.New(t.Context(), modules, append([]capnpcwasm.Option{capnpcwasm.WithEngine(capnpcwasm.EngineAuto)}, options...)...)
+	if err != nil {
+		t.Fatalf("the real modules: %v", err)
+	}
+	cache[key] = c
 	return c
 }
 
