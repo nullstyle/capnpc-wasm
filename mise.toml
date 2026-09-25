@@ -16,7 +16,9 @@ run_auto_install = false
 # sends both requests to the release; mise still verifies the minisign
 # signature and the sha256 in mise.lock, and the rule matches nothing but
 # ziglang.org development builds. `mise run mirror:zig` stages, verifies, and
-# locks a release; its lock entries name the rewritten URLs.
+# locks a release; its lock entries name the rewritten URLs, and lint's
+# `check:zig-lock` checks both tables and those entries offline. Side effects
+# inside this project are listed in CONTRIBUTING.md, "Tool pins".
 [settings.zig]
 use_community_mirrors = false
 
@@ -166,6 +168,7 @@ run = [
   "zig fmt --check {{vars.zig_dirs}}",
   { task = "check:links" },
   { task = "check:evidence" },
+  { task = "check:zig-lock" },
 ]
 
 [tasks.fmt]
@@ -449,8 +452,12 @@ description = "Run the Schema Studio state and workspace unit tests on the pinne
 run = "deno test --config examples/browser/deno.json --frozen examples/browser/"
 
 [tasks."mirror:zig"]
-description = "Stage, verify, or lock the project's mirror release of the pinned Zig toolchain: stage | verify [<base-url>] | lock [--write]"
-run = "deno run --allow-read --allow-write=build,mise.lock --allow-net scripts/mirror-zig.ts"
+description = "Stage, check, verify, or lock the project's mirror release of the pinned Zig toolchain: stage | check | verify [<base-url>] | lock [--write]"
+run = "deno run --allow-read --allow-write=build,mise.lock --allow-net --allow-env=MISE_URL_REPLACEMENTS,MISE_ZIG_USE_COMMUNITY_MIRRORS,MISE_SAFE scripts/mirror-zig.ts"
+
+[tasks."check:zig-lock"]
+description = "Check offline that mise.toml sends core:zig to the project's Zig mirror release with the community mirrors off, and that mise.lock pins every platform there with a sha256 and minisign provenance"
+run = "deno run --allow-read=mise.toml,mise.lock,mise.local.toml,.mise.local.toml --allow-env=MISE_URL_REPLACEMENTS,MISE_ZIG_USE_COMMUNITY_MIRRORS,MISE_SAFE scripts/mirror-zig.ts check"
 
 # Scheduled verification (.github/workflows/nightly.yml and supply-chain.yml).
 # The tasks also run locally; they need network access.

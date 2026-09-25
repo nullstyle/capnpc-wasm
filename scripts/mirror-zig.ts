@@ -20,11 +20,17 @@
 //                       signature (and the mise.lock checksums when the lock
 //                       records this version), write SHA256SUMS and NOTES.md,
 //                       and print the gh command that publishes the release
-//   verify              check the lock against what mise installs: every zig
-//                       entry names the URL that mise.toml's rule sends mise
-//                       to, records a sha256 and minisign provenance, and the
-//                       release serves a tarball and a .minisig that verify
-//                       against the ZSF key and match that sha256
+//   check               offline (`mise run check:zig-lock`, part of lint):
+//                       mise.toml turns the community mirrors off and its
+//                       url_replacements send every tarball and .minisig
+//                       request to the mirror release, and every zig entry of
+//                       mise.lock names that URL with a sha256 and minisign
+//                       provenance; warns about local overrides of those
+//                       settings (MISE_URL_REPLACEMENTS, MISE_SAFE,
+//                       mise.local.toml)
+//   verify              check, then download from the release: it serves a
+//                       tarball and a .minisig that verify against the ZSF
+//                       key and match the locked sha256
 //   verify <base-url>   fetch every file from <base-url>/<name> (renamed asset
 //                       names are tried as well) and verify the signatures,
 //                       and the checksums when the lock records this version
@@ -67,7 +73,7 @@ type Verified = {
 
 function usage(): never {
   console.error(
-    "usage: scripts/mirror-zig.ts stage | verify [<base-url>] | lock [--write]",
+    "usage: scripts/mirror-zig.ts stage | check | verify [<base-url>] | lock [--write]",
   );
   Deno.exit(2);
 }
@@ -153,13 +159,38 @@ function applyRules(url: string, rules: Rule[]): string {
   return url;
 }
 
-// The zig entries of mise.lock, when they are for `version`.
-function lockEntries(lock: string, version: string): Map<Platform, LockEntry> {
-  const entries = new Map<Platform, LockEntry>();
+// A table of mise.toml: the lines after its header, up to the next header.
+function tomlTable(toml: string, name: string): string {
+  const header = name.replaceAll(".", "\\.");
+  return toml.match(
+    new RegExp(`^\\[${header}\\]\\n((?:(?!\\[)[^\\n]*\\n)*)`, "m"),
+  )?.[1] ?? "";
+}
+
+// The zig.use_community_mirrors value mise.toml sets, in any TOML spelling:
+// a [settings.zig] table, a dotted key, or an inline table in [settings].
+function communityMirrors(toml: string): string | undefined {
+  const settings = tomlTable(toml, "settings");
+  return tomlTable(toml, "settings.zig").match(
+    /^use_community_mirrors\s*=\s*(\w+)/m,
+  )?.[1] ??
+    settings.match(/^zig\.use_community_mirrors\s*=\s*(\w+)/m)?.[1] ??
+    settings.match(/^zig\s*=\s*\{[^}]*use_community_mirrors\s*=\s*(\w+)/m)
+      ?.[1];
+}
+
+// The [[tools.zig]] section of mise.lock, when it records `version`.
+function lockSection(lock: string, version: string): string | undefined {
   const start = lock.indexOf(`[[tools.zig]]\nversion = "${version}"\n`);
-  if (start < 0) return entries;
+  if (start < 0) return undefined;
   const next = lock.indexOf("\n[[", start + 1);
-  const section = lock.slice(start, next < 0 ? undefined : next + 1);
+  return lock.slice(start, next < 0 ? undefined : next + 1);
+}
+
+// The platform entries of a [[tools.zig]] section.
+function lockEntries(section: string | undefined): Map<Platform, LockEntry> {
+  const entries = new Map<Platform, LockEntry>();
+  if (!section) return entries;
   for (
     const block of section.matchAll(
       /\[tools\.zig\."platforms\.([a-z0-9-]+)"\]\n((?:[a-z_]+ = .*\n)*)/g,
@@ -294,6 +325,40 @@ async function readIfPresent(path: string): Promise<Uint8Array | undefined> {
   }
 }
 
+// Local settings that silently undo mise.toml's Zig redirect. mise does not
+// merge url_replacements tables: the environment variable or a table in
+// mise.local.toml replaces the project's, and MISE_SAFE ignores project
+// settings altogether.
+async function overrideWarnings(): Promise<string[]> {
+  const warnings: string[] = [];
+  const effects: Record<string, string> = {
+    MISE_URL_REPLACEMENTS:
+      "replaces mise.toml's url_replacements, so mise requests the pruned ziglang.org URL",
+    MISE_ZIG_USE_COMMUNITY_MIRRORS:
+      "overrides mise.toml's zig.use_community_mirrors",
+    MISE_SAFE:
+      "makes mise ignore mise.toml's settings, so Zig comes from the (still verified) community mirrors",
+  };
+  for (const [name, effect] of Object.entries(effects)) {
+    if (Deno.env.get(name) !== undefined) warnings.push(`${name} ${effect}`);
+  }
+  for (const path of ["mise.local.toml", ".mise.local.toml"]) {
+    const bytes = await readIfPresent(path);
+    const text = bytes ? new TextDecoder().decode(bytes) : "";
+    if (/url_replacements/.test(text)) {
+      warnings.push(
+        `${path} sets url_replacements, which replace mise.toml's table and drop the Zig rule`,
+      );
+    }
+    if (/use_community_mirrors/.test(text)) {
+      warnings.push(
+        `${path} sets zig.use_community_mirrors, which overrides mise.toml's`,
+      );
+    }
+  }
+  return warnings;
+}
+
 async function verified(
   platform: Platform,
   file: string,
@@ -345,12 +410,15 @@ function lockBlock(platform: Platform, digest: string, url: string): string {
 }
 
 const command = Deno.args[0];
-if (!command || !["stage", "verify", "lock"].includes(command)) usage();
+if (!command || !["stage", "check", "verify", "lock"].includes(command)) {
+  usage();
+}
 const toml = await Deno.readTextFile("mise.toml");
 const version = pinnedVersion(toml);
 const rules = urlReplacements(toml);
 const lock = await Deno.readTextFile("mise.lock");
-const entries = lockEntries(lock, version);
+const section = lockSection(lock, version);
+const entries = lockEntries(section);
 const staging = `build/mirror/zig/${version}`;
 const tag = `toolchain-zig-${version}`;
 const keys = Object.keys(platforms) as Platform[];
@@ -361,9 +429,77 @@ function miseUrls(platform: Platform) {
   const upstream = upstreamUrl(version, file);
   return {
     file,
+    upstream,
     tarball: applyRules(upstream, rules),
     signature: applyRules(`${upstream}.minisig${miseRequestSuffix}`, rules),
   };
+}
+
+// mise.toml must send every core:zig request to the mirror release: with the
+// community mirrors on, core:zig tries a random mirror before the redirected
+// URL and trusts that mirror for the .minisig too.
+function configProblems(): string[] {
+  const problems: string[] = [];
+  const mirrors = communityMirrors(toml);
+  if (mirrors !== "false") {
+    problems.push(
+      `mise.toml must set [settings.zig] use_community_mirrors = false (it sets ${
+        mirrors ?? "nothing"
+      }): with the mirrors on, core:zig takes the tarball and its .minisig from a randomly chosen community mirror`,
+    );
+  }
+  for (const platform of keys) {
+    const { file, upstream, tarball, signature } = miseUrls(platform);
+    const release = `${releaseBase(version)}/${file}`;
+    if (tarball !== release || signature !== `${release}.minisig`) {
+      problems.push(
+        `${platform}: mise.toml's url_replacements send ${upstream} to ${tarball} and its signature to ${signature}, not to ${release} and its .minisig`,
+      );
+    }
+  }
+  return problems;
+}
+
+// Every zig entry of mise.lock must name the URL mise fetches and pin it.
+function lockProblems(): string[] {
+  if (!section) {
+    return [
+      `mise.lock records no zig ${version}; run \`mise lock zig\`, then \`mise run mirror:zig -- lock --write\``,
+    ];
+  }
+  const problems: string[] = [];
+  if (!/^backend = "core:zig"$/m.test(section)) {
+    problems.push(`mise.lock records zig ${version} with another backend`);
+  }
+  for (const platform of keys) {
+    const { file, tarball } = miseUrls(platform);
+    const entry = entries.get(platform);
+    if (!entry) {
+      problems.push(`${platform}: mise.lock has no zig ${version} entry`);
+      continue;
+    }
+    const rewrite = "run `mise run mirror:zig -- lock --write`";
+    if (entry.url !== tarball) {
+      problems.push(
+        `${platform}: mise.lock names ${
+          entry.url ?? "no url"
+        }, but mise downloads ${tarball}; ${rewrite}`,
+      );
+    }
+    if (!/^sha256:[0-9a-f]{64}$/.test(entry.checksum ?? "")) {
+      problems.push(
+        `${platform}: mise.lock records no sha256 for ${file} (${
+          entry.checksum ?? "no checksum"
+        }); ${rewrite}`,
+      );
+    }
+    if (entry.provenance !== "minisign") {
+      problems.push(
+        `${platform}: mise.lock does not require minisign provenance for ${file}; ${rewrite}`,
+      );
+    }
+  }
+  return problems;
 }
 
 if (command === "stage") {
@@ -517,38 +653,36 @@ if (command === "stage") {
     }
   }
   if (failed) Deno.exit(1);
+} else if (command === "check") {
+  if (Deno.args.length > 1) usage();
+  const problems = [...configProblems(), ...lockProblems()];
+  for (const problem of problems) console.log(`FAIL ${problem}`);
+  for (const warning of await overrideWarnings()) {
+    console.log(`warning: ${warning}`);
+  }
+  if (problems.length > 0) Deno.exit(1);
+  console.log(
+    `zig ${version}: mise.toml sends core:zig to ${
+      releaseBase(version)
+    } with the community mirrors off, and mise.lock pins all ${keys.length} platforms there with a sha256 and minisign provenance`,
+  );
 } else if (command === "verify") {
   let failed = false;
   const fail = (message: string) => {
     console.log(`FAIL ${message}`);
     failed = true;
   };
-  if (entries.size === 0) {
-    fail(
-      `mise.lock records no zig ${version}; run \`mise lock zig\`, then \`mise run mirror:zig -- lock --write\``,
-    );
+  for (const problem of [...configProblems(), ...lockProblems()]) {
+    fail(problem);
+  }
+  for (const warning of await overrideWarnings()) {
+    console.log(`warning: ${warning}`);
   }
   for (const platform of keys) {
     const { file, tarball, signature } = miseUrls(platform);
     const entry = entries.get(platform);
-    if (!entry) {
-      fail(`mise.lock has no zig ${version} entry for ${platform}`);
-      continue;
-    }
-    if (entry.url !== tarball) {
-      fail(
-        `${platform}: mise.lock names ${entry.url}, but mise downloads ${tarball}; run \`mise run mirror:zig -- lock --write\``,
-      );
-      continue;
-    }
-    if (!entry.checksum?.startsWith("sha256:")) {
-      fail(`${platform}: mise.lock records no sha256 for ${file}`);
-      continue;
-    }
-    if (entry.provenance !== "minisign") {
-      fail(`${platform}: mise.lock does not require minisign provenance`);
-      continue;
-    }
+    // Missing or mismatched entries are reported above.
+    if (!entry?.checksum || entry.url !== tarball) continue;
     try {
       const result = await fetchVerified(
         platform,
@@ -572,6 +706,11 @@ if (command === "stage") {
 } else {
   const write = Deno.args[1] === "--write";
   if (Deno.args.length > (write ? 2 : 1)) usage();
+  // Lock entries are only meaningful for the URLs mise actually fetches.
+  const problems = configProblems();
+  if (problems.length > 0) {
+    throw new Error(`fix mise.toml first:\n${problems.join("\n")}`);
+  }
   if (entries.size === 0) {
     throw new Error(
       `mise.lock does not record zig ${version}; run \`mise lock zig\` first`,
