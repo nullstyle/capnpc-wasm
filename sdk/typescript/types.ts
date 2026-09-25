@@ -120,20 +120,47 @@ export interface Compiler {
 }
 
 /**
- * A guest stage failed: a nonzero exit (`exitCode` set), a trap, or a host
- * budget from ResourceLimits exceeded while the guest ran (the message names
- * the limit; `cause` carries the underlying error). Identical in direct and
- * worker execution.
+ * How a guest stage failed, as CompileError.kind:
+ * - `exit`: the stage exited nonzero; `exitCode` holds the status.
+ * - `trap`: the guest trapped, or the host failed inside a WASI import.
+ * - `limit`: a running guest exceeded the host budget named by `limit`.
+ * - `protocol`: the stage exited 0 without honoring its contract (the
+ *   compiler emitted no request, or a generator wrote to stdout).
+ * The Go SDK's `*Error` maps the same way: `Limit != ""` is a limit,
+ * `ExitCode != 0` an exit, the two contract messages a protocol failure,
+ * and anything else a trap.
+ */
+export type FailureKind = "exit" | "trap" | "limit" | "protocol";
+
+/** Options for CompileError beyond ErrorOptions. */
+export interface CompileErrorOptions extends ErrorOptions {
+  /** Defaults to `exit` when an exit code is given, else `trap`. */
+  kind?: FailureKind;
+  /** The exceeded budget, for kind `limit`. */
+  limit?: keyof ResourceLimits;
+}
+
+/**
+ * A guest stage failed: a nonzero exit (`exitCode` set), a trap, a host
+ * budget from ResourceLimits exceeded while the guest ran (`limit` names it;
+ * the message names it too), or a broken stage contract; `kind` says which,
+ * and `cause` carries the underlying error. Identical in direct and worker
+ * execution.
  */
 export class CompileError extends Error {
   override readonly name = "CompileError";
+  readonly kind: FailureKind;
+  /** The ResourceLimits budget a running guest exceeded, for kind `limit`. */
+  readonly limit?: keyof ResourceLimits;
   constructor(
     message: string,
     public readonly stage: "compiler" | Language,
     public readonly diagnostics: readonly Diagnostic[],
     public readonly exitCode?: number,
-    options?: ErrorOptions,
+    options?: CompileErrorOptions,
   ) {
     super(message, options);
+    this.kind = options?.kind ?? (exitCode === undefined ? "trap" : "exit");
+    if (options?.limit !== undefined) this.limit = options.limit;
   }
 }

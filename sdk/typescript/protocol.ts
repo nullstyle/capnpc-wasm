@@ -11,9 +11,12 @@
 import {
   CompileError,
   type CompilerOptions,
+  defaultLimits,
   type Diagnostic,
+  type FailureKind,
   type Language,
   type Modules,
+  type ResourceLimits,
 } from "./types.ts";
 
 export interface InitMessage {
@@ -85,6 +88,9 @@ export type WireError =
     stage: "compiler" | Language;
     diagnostics: Diagnostic[];
     exitCode?: number;
+    /** CompileError.kind; absent or unknown decodes to the default. */
+    failure?: FailureKind;
+    limit?: keyof ResourceLimits;
     cause?: ErrorSummary;
   }
   | { kind: "type"; message: string; cause?: ErrorSummary }
@@ -127,6 +133,8 @@ export function encodeError(cause: unknown): WireError {
         stderr,
       })),
       exitCode: cause.exitCode,
+      failure: cause.kind,
+      limit: cause.limit,
       cause: summarize(cause.cause, causeDepth),
     };
   }
@@ -175,6 +183,13 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : String(value);
 }
 
+const failureKinds: ReadonlySet<unknown> = new Set<FailureKind>([
+  "exit",
+  "trap",
+  "limit",
+  "protocol",
+]);
+
 // The sender already bounds its summary; bound decoding independently so a
 // malformed, cyclic or very deep chain can never overflow the stack here.
 const decodeDepth = 8;
@@ -204,14 +219,27 @@ export function decodeError(error: WireError): Error {
     const options = cause ? { cause } : undefined;
     const message = text(error.message);
     switch (error.kind) {
-      case "compile":
+      case "compile": {
+        const exitCode = typeof error.exitCode === "number"
+          ? error.exitCode
+          : undefined;
+        const limit = typeof error.limit === "string" &&
+            Object.hasOwn(defaultLimits, error.limit)
+          ? error.limit
+          : undefined;
         return new CompileError(
           message,
           error.stage,
           Array.isArray(error.diagnostics) ? error.diagnostics : [],
-          typeof error.exitCode === "number" ? error.exitCode : undefined,
-          options,
+          exitCode,
+          {
+            ...options,
+            // An unknown kind falls back to the constructor's default.
+            kind: failureKinds.has(error.failure) ? error.failure : undefined,
+            limit,
+          },
         );
+      }
       case "type":
         return new TypeError(message, options);
       case "range":

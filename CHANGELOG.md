@@ -231,6 +231,10 @@ every flavor it applies to has shipped it.
   unrecognized hosts are still rejected, and `isBoundedWorkerSupported()`
   follows. `supportedDenoWorkerVersion` is deprecated and no longer checked, and
   the 2.1 s Deno restart grace is gone. The worker tests run on the pinned Deno.
+- TypeScript SDK: `CompileError` gains `kind` (`exit`, `trap`, `limit`, or
+  `protocol`) and, for budget overruns, `limit` naming the exceeded
+  `ResourceLimits` field; both cross the worker protocol unchanged. Messages and
+  classes are unchanged.
 
 ## capnp-wasm-compiler-host
 

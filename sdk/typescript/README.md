@@ -153,18 +153,20 @@ messages; the worker path rebuilds them from a typed protocol rather than
 matching on `name`, and `cause` carries a name/message summary of the original
 cause chain.
 
-| Failure                                                                                                                                                   | Rejection                                                                                                                               |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| Invalid caller input: paths, entrypoints, generators, import roots, request bytes, limits, module shape                                                   | `TypeError`, before any copy, post, or guest start                                                                                      |
-| Module bytes the SDK cannot bound, or that the engine rejects (corrupt bytes, unsupported instructions)                                                   | `TypeError`; when the engine rejected it, `cause` is the engine's `WebAssembly.CompileError`                                            |
-| Engine without standardized Wasm exception handling                                                                                                       | `TypeError` from the factory, before any module is compiled; see below                                                                  |
-| A guest stage exits nonzero                                                                                                                               | `CompileError` with `stage`, `exitCode`, and every stage's `diagnostics`                                                                |
-| A guest stage traps, or exceeds a host budget while running (stdout, stderr, output bytes or entries, path length, or `requestBytes` for compiler output) | `CompileError` with `stage`, no `exitCode`, `diagnostics` captured so far, and `cause`; a budget failure names the limit in its message |
-| A caller input exceeds a budget before any guest starts (`workspaceBytes`, `workspaceEntries`, `pathBytes`, or `requestBytes` for a supplied request)     | `TypeError` reading `<subject> exceeds <limit> limit`                                                                                   |
-| Job cancelled, in either mode                                                                                                                             | `DOMException` named `TimeoutError`, or the abort `signal.reason` (an `AbortError` by default)                                          |
-| Worker client disposed, or a second concurrent job                                                                                                        | `Error` (`worker compiler is disposed`, `worker compiler already has an active job`)                                                    |
-| Worker script failed to load, or the worker crashed                                                                                                       | `Error` with the engine's message                                                                                                       |
-| Unsupported worker runtime                                                                                                                                | `Error` naming the runtime and pointing to `createCompiler`                                                                             |
+| Failure                                                                                                                                               | Rejection                                                                                                                     |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Invalid caller input: paths, entrypoints, generators, import roots, request bytes, limits, module shape                                               | `TypeError`, before any copy, post, or guest start                                                                            |
+| Module bytes the SDK cannot bound, or that the engine rejects (corrupt bytes, unsupported instructions)                                               | `TypeError`; when the engine rejected it, `cause` is the engine's `WebAssembly.CompileError`                                  |
+| Engine without standardized Wasm exception handling                                                                                                   | `TypeError` from the factory, before any module is compiled; see below                                                        |
+| A guest stage exits nonzero                                                                                                                           | `CompileError` with `kind: "exit"`, `stage`, `exitCode`, and every stage's `diagnostics`                                      |
+| A guest stage traps, or the host fails inside a WASI import                                                                                           | `CompileError` with `kind: "trap"`, `stage`, no `exitCode`, `diagnostics` captured so far, and `cause`                        |
+| A guest stage exceeds a host budget while running (stdout, stderr, output bytes or entries, path length, or `requestBytes` for compiler output)       | `CompileError` with `kind: "limit"` and `limit` naming the budget (the message names it too), no `exitCode`, and `cause`      |
+| A guest stage exits 0 without honoring its contract                                                                                                   | `CompileError` with `kind: "protocol"`: `compiler emitted no request`, or `<language> generator unexpectedly wrote to stdout` |
+| A caller input exceeds a budget before any guest starts (`workspaceBytes`, `workspaceEntries`, `pathBytes`, or `requestBytes` for a supplied request) | `TypeError` reading `<subject> exceeds <limit> limit`                                                                         |
+| Job cancelled, in either mode                                                                                                                         | `DOMException` named `TimeoutError`, or the abort `signal.reason` (an `AbortError` by default)                                |
+| Worker client disposed, or a second concurrent job                                                                                                    | `Error` (`worker compiler is disposed`, `worker compiler already has an active job`)                                          |
+| Worker script failed to load, or the worker crashed                                                                                                   | `Error` with the engine's message                                                                                             |
+| Unsupported worker runtime                                                                                                                            | `Error` naming the runtime and pointing to `createCompiler`                                                                   |
 
 One budget can therefore surface either way, depending on when it is detected:
 `generate` rejects an oversized supplied request with `TypeError` before
@@ -172,6 +174,12 @@ starting, while `compile` bounds the compiler's request output with the same
 `requestBytes` limit while the guest runs and reports an overrun as
 `CompileError`. Traps also retain captured stderr. Source locations are not
 inferred from human-readable diagnostics.
+
+Branch on `CompileError.kind` rather than on messages: `kind === "limit"`
+exactly when `limit` is set, and `kind === "exit"` exactly when `exitCode` is.
+The Go SDK's `*Error` maps the same way: `Limit != ""` is a limit,
+`ExitCode != 0` an exit, the two contract messages a protocol failure, and
+anything else a trap.
 
 ## Execution and cancellation
 

@@ -83,6 +83,36 @@ Deno.test("SDK protocol round-trips error classes, fields and causes", () => {
       ((compile.cause as Error).cause as Error).message === "deeper",
     `compile round trip: ${compile}`,
   );
+  const limited = decodeError(encodeError(
+    new CompileError("over", "zig", [], undefined, {
+      kind: "limit",
+      limit: "outputBytes",
+    }),
+  ));
+  assert(
+    limited instanceof CompileError && limited.kind === "limit" &&
+      limited.limit === "outputBytes" && limited.exitCode === undefined,
+    `limit round trip: ${JSON.stringify(limited)}`,
+  );
+  assert(
+    (compile as CompileError).kind === "exit" &&
+      (compile as CompileError).limit === undefined,
+    "exit kind lost",
+  );
+  // Unknown or missing wire values fall back to the constructor's defaults.
+  const unknown = decodeError({
+    kind: "compile",
+    message: "m",
+    stage: "cpp",
+    diagnostics: [],
+    failure: "bogus" as never,
+    limit: "nope" as never,
+  });
+  assert(
+    unknown instanceof CompileError && unknown.kind === "trap" &&
+      unknown.limit === undefined,
+    `unknown kind: ${JSON.stringify(unknown)}`,
+  );
   const type = decodeError(encodeError(new TypeError("bad input")));
   assert(
     type instanceof TypeError && type.message === "bad input" &&

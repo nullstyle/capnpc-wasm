@@ -149,6 +149,8 @@ type Outcome = {
   message: string;
   stage?: string;
   exitCode?: number;
+  kind?: string;
+  limit?: string;
   diagnostics?: string;
   causeName?: string;
   causeMessage?: string;
@@ -168,6 +170,8 @@ async function outcome(run: () => Promise<unknown>): Promise<Outcome> {
         ? {
           stage: error.stage,
           exitCode: error.exitCode,
+          kind: error.kind,
+          limit: error.limit,
           diagnostics: JSON.stringify(error.diagnostics),
         }
         : {}),
@@ -957,6 +961,113 @@ workerTest(
       });
     } finally {
       URL.revokeObjectURL(url);
+    }
+  },
+);
+
+workerTest(
+  "SDK reports failure kinds identically in both execution modes",
+  async () => {
+    // The compiler exits 0 without a request; cpp is catchRetryGuest, rust
+    // writes to stdout and exits 0, and zig traps.
+    const modules: Modules = {
+      compiler: commandGuest([]),
+      generators: {
+        cpp: catchRetryGuest,
+        rust: commandGuest(writeX),
+        zig: trapGuest,
+      },
+    };
+    const limited = { limits: { stdoutBytes: 0 } };
+    const direct = await createCompiler(modules);
+    const directLimited = await createCompiler(modules, limited);
+    const worker = await createWorkerCompiler(workerURL, modules);
+    const workerLimited = await createWorkerCompiler(
+      workerURL,
+      modules,
+      limited,
+    );
+    const cases: [
+      string,
+      boolean,
+      (compiler: Compiler | WorkerCompiler) => Promise<unknown>,
+      Partial<Omit<Outcome, "constructor">>,
+    ][] = [
+      [
+        "no request",
+        false,
+        (compiler) => compiler.compile({ ...simpleRequest(), generators: [] }),
+        { kind: "protocol", message: "compiler emitted no request" },
+      ],
+      [
+        "exit",
+        false,
+        (compiler) => compiler.generate(generation(catchRetryMode.exit)),
+        { kind: "exit", exitCode: 3 },
+      ],
+      [
+        "host failure",
+        false,
+        (compiler) => compiler.generate(generation(catchRetryMode.hostThrow)),
+        { kind: "trap" },
+      ],
+      [
+        "stdout from a generator",
+        false,
+        (compiler) =>
+          compiler.generate({
+            request: Uint8Array.of(1),
+            generators: ["rust"],
+          }),
+        {
+          kind: "protocol",
+          message: "rust generator unexpectedly wrote to stdout",
+        },
+      ],
+      [
+        "guest trap",
+        false,
+        (compiler) =>
+          compiler.generate({ request: Uint8Array.of(1), generators: ["zig"] }),
+        {
+          kind: "trap",
+          message: "zig trapped: WASI command failed: unreachable",
+        },
+      ],
+      [
+        "budget",
+        true,
+        (compiler) => compiler.generate(generation(catchRetryMode.stdout)),
+        { kind: "limit", limit: "stdoutBytes" },
+      ],
+    ];
+    try {
+      for (const [label, withLimits, run, expected] of cases) {
+        const fromDirect = await outcome(() =>
+          run(withLimits ? directLimited : direct)
+        );
+        const fromWorker = await outcome(() =>
+          run(withLimits ? workerLimited : worker)
+        );
+        same(label, fromDirect, fromWorker);
+        for (const [key, value] of Object.entries(expected)) {
+          assert(
+            fromWorker[key as keyof Outcome] === value,
+            `${label}: ${key} is ${fromWorker[key as keyof Outcome]}`,
+          );
+        }
+        assert(
+          fromWorker.constructor === "CompileError" &&
+            (fromWorker.kind === "limit") ===
+              (fromWorker.limit !== undefined) &&
+            (fromWorker.kind === "exit") ===
+              (fromWorker.exitCode !== undefined),
+          `${label}: ${JSON.stringify(fromWorker)}`,
+        );
+      }
+    } finally {
+      worker.dispose();
+      workerLimited.dispose();
     }
   },
 );

@@ -7,6 +7,7 @@
 import { compileBounded, inspectModules } from "./wasm.ts";
 import { resolveLimits } from "./limits.ts";
 import { CommandError, runCommand } from "./runtime.ts";
+import { LimitError } from "./resource-fs.ts";
 import { requireWasmExceptions } from "./environment.ts";
 import { Cancelled, JobControl } from "./interrupt.ts";
 import {
@@ -105,12 +106,17 @@ export async function createEngine(
       if (cause instanceof CommandError && cause.stderr) {
         diagnostics.push({ stage, stderr: cause.stderr });
       }
+      // A budget stops the guest with a trap too; its cause names the limit.
+      const limit = cause instanceof CommandError &&
+          cause.cause instanceof LimitError
+        ? cause.cause.limit
+        : undefined;
       throw new CompileError(
         `${stage} trapped: ${cause instanceof Error ? cause.message : cause}`,
         stage,
         diagnostics,
         undefined,
-        { cause },
+        { cause, kind: limit ? "limit" : "trap", limit },
       );
     }
     if (result.stderr) diagnostics.push({ stage, stderr: result.stderr });
@@ -149,6 +155,8 @@ export async function createEngine(
           `${language} generator unexpectedly wrote to stdout`,
           language,
           diagnostics,
+          undefined,
+          { kind: "protocol" },
         );
       }
       outputs[language] = generated.files;
@@ -191,6 +199,8 @@ export async function createEngine(
           "compiler emitted no request",
           "compiler",
           diagnostics,
+          undefined,
+          { kind: "protocol" },
         );
       }
       // runCommand bounds compiler stdout at requestBytes while the guest
