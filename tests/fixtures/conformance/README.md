@@ -44,13 +44,23 @@ table.
 | `protocol`           | A guest exited 0 without honoring its contract (an empty request, a generator that wrote to stdout).   |
 | `timeout`            | The host deadline stopped the job.                                                                     |
 
-Every TypeScript surface classifies from the error class, message, and cause
-chain, as [the SDK contract](../../../docs/sdk-contract.md#errors) describes
-them today; when `CompileError` gains `kind` and `limit`, the classifier reads
-those fields and the table stays as it is. The Go runner derives the same words
-from `Error.Limit`, `Error.ExitCode`, the `validate` and `modules` stages, the
-contract messages, and wazero's trap text. The launcher runner reads the exit
-status and Wasmtime's trap text (`call stack exhausted`, `interrupt`).
+Every TypeScript surface classifies from the error class, the phase that threw
+(only `validation:memoryPages` may fail in a factory), and the innermost cause:
+the engine's or the host's own error, as
+[the SDK contract](../../../docs/sdk-contract.md#errors) describes them. It
+never reads guest stderr, which the SDK appends to its wrapper messages: a
+`RuntimeError` is a `trap`, an engine's stack report is `trap:stack`, and an
+unrecognized cause is `error:<name>`, which matches no row. When `CompileError`
+gains `kind` and `limit`, those fields replace the class-based split into exit,
+limit, trap, and protocol, and the table stays as it is; `trap:stack` and
+`policy:output-name` stay derived from the innermost cause, because the planned
+kinds cannot express them. The Go runner derives the same words from
+`Error.Limit`, `Error.ExitCode`, the `validate` and `modules` stages, the
+contract messages, and wazero's own `wasm error:` report. The launcher runner
+reads the exit status and Wasmtime's own report: status 134 is a trap only with
+a `wasm trap:` line in it (`call stack exhausted`, `interrupt`). A row can also
+pin a message fragment (`message`), as the two bare validation rows do with "is
+not a directory in files".
 
 ## Surfaces
 
