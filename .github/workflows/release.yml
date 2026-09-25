@@ -3,8 +3,8 @@
 # a maintainer runs locally: scripts/release.ts in --publish mode (which
 # refuses a dirty tree, an untagged HEAD, a missing CHANGELOG.md entry, and
 # for capnpc-wasm a Go module tag sdk/go/v<version> at another commit),
-# the package gates (test:package, test:compiler-host-package, test:launcher,
-# test:deno-worker), and scripts/verify-release.ts from the checkout.
+# the package gates (test:package, test:compiler-host-package,
+# test:launcher), and scripts/verify-release.ts from the checkout.
 #
 # A tag push (capnp-wasm-tools-v*, capnp-wasm-compiler-host-v*, or
 # capnpc-wasm-v*, naming that flavor's own version under "versions" in
@@ -174,8 +174,6 @@ jobs:
         run: mise run test:package
       - name: Verify the packaged Wasmtime launcher
         run: mise run test:launcher
-      - name: Verify supported Deno worker execution and termination
-        run: mise run test:deno-worker
       # Independent of release.ts: the manifest asset must name this commit
       # and a clean tree, and the archive must extract to exactly that manifest.
       - name: Verify the assets from the checkout's verifier

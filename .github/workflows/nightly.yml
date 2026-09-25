@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       soak_rounds:
-        description: Soak rounds (each round is 20 cancellation cycles per browser engine and the SDK suite on the Deno worker runtime)
+        description: Soak rounds (each round is 20 cancellation cycles per browser engine and the SDK suite on the pinned Deno)
         type: string
         default: "5"
 
@@ -77,8 +77,6 @@ jobs:
         run: mise run check
       - name: Verify release archives and external package consumers
         run: mise run test:package
-      - name: Verify supported Deno worker execution and termination
-        run: mise run test:deno-worker
       - name: Run the Go SDK concurrency tests under the race detector
         run: mise run test:sdk-go-race
       - name: Verify checks leave the tree unchanged
@@ -152,8 +150,8 @@ jobs:
         run: mise run test:studio chromium firefox webkit
       - name: Soak worker cancellation and recovery in every engine
         run: mise run test:browser-soak chromium firefox webkit
-      - name: Soak the SDK suite on the supported Deno worker runtime
-        run: mise run test:deno-worker-soak
+      - name: Soak the SDK suite on the pinned Deno
+        run: mise run test:sdk-ts-soak
       - name: Verify checks leave the tree unchanged
         run: |
           changes="$(git status --porcelain)"
@@ -230,13 +228,12 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Non-gating: does Worker.terminate() stop a spinning JS, Wasm, or Wasm
-  # catch_all guest on the supported worker runtime (Deno 2.6.8), the pinned
-  # Deno, and the newest Deno release (GAP2-08)? The SDK admits worker
-  # execution only where it does, and the SDK tests only prove the pinned
-  # worker runtime; this job notices an upstream fix or a Wasm-only
-  # regression. A result that departs from the recorded table fails the job
-  # without failing the nightly run.
+  # Non-gating upstream tracker: does Worker.terminate() stop a spinning JS,
+  # Wasm, or Wasm catch_all guest on the pinned Deno and the newest Deno
+  # release (GAP2-08)? The SDK stops guests itself and does not rely on
+  # terminate(); this job notices an upstream fix or a Wasm-only regression
+  # for docs/deno-worker-termination.md to record. A result that departs from
+  # the recorded table fails the job without failing the nightly run.
   termination-canary:
     name: Deno worker termination canary (non-gating)
     runs-on: ubuntu-24.04
@@ -246,14 +243,14 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      # Only the two locked Deno runtimes; --locked never rewrites mise.lock.
-      # The canary task downloads the newest release itself from dl.deno.land.
+      # Only the pinned Deno; --locked never rewrites mise.lock. The canary
+      # task downloads the newest release itself from dl.deno.land.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
         with:
           version: 2026.9.1
-          install_args: --locked deno deno-worker
+          install_args: --locked deno
           cache: false
       - name: Probe worker termination on each Deno runtime
         run: mise run test:termination-canary

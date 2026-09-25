@@ -51,8 +51,8 @@ jobs:
       # Confine the token to this step, where the WASI SDK resolves through the
       # GitHub releases API. mise-action exports MISE_GITHUB_TOKEN to every later
       # step unless the variable is already set, so it is set here as step env.
-      # Later steps run repository code without it: every tool, including the
-      # locked Deno worker runtime (deno-worker), is installed by then.
+      # Later steps run repository code without it: every tool is installed by
+      # then.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
@@ -94,10 +94,6 @@ jobs:
           retention-days: 7
       - name: Verify release archive and external package consumers
         run: mise run test:package
-      # The task checks the locked worker runtime (tool deno-worker, installed
-      # above) against the version in sdk/typescript/environment.ts.
-      - name: Verify supported Deno worker execution and termination
-        run: mise run test:deno-worker
       - name: Run the Go SDK concurrency tests under the race detector
         run: mise run test:sdk-go-race
       - name: Verify checks leave the tree unchanged
@@ -225,8 +221,8 @@ jobs:
       # Confine the token to this step, where the WASI SDK resolves through the
       # GitHub releases API. mise-action exports MISE_GITHUB_TOKEN to every later
       # step unless the variable is already set, so it is set here as step env.
-      # Later steps run repository code without it: every tool, including the
-      # locked Deno worker runtime (deno-worker), is installed by then.
+      # Later steps run repository code without it: every tool is installed by
+      # then.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
