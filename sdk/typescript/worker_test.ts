@@ -25,6 +25,7 @@ import {
   costlyStepsGuest,
 } from "./testdata/interrupt_guests.ts";
 import { resolveWorkerURL } from "./worker-client.ts";
+import { settleGraceMs } from "./interrupt.ts";
 import process from "node:process";
 import {
   assert,
@@ -44,26 +45,57 @@ import {
   writeX,
 } from "./testdata/support.ts";
 
+/** A terminate() call, as countingWorkers records it. */
+interface Termination {
+  /** performance.now() at the call. */
+  at: number;
+  /** Process CPU (cpuMs) at the call. */
+  cpu: number;
+  /** Jobs the client posted to the worker whose reply never reached this thread. */
+  unanswered: number[];
+}
+
 /**
- * Count Worker constructions while `run` executes, and record the process CPU
- * (cpuMs) at every terminate() call.
+ * Count Worker constructions while `run` executes, and record every
+ * terminate() call: when it came, the process CPU then, and which of the jobs
+ * the client posted to that worker had no reply reach this thread.
  */
 async function countingWorkers<T>(
   run: (
     constructions: () => number,
-    terminations: readonly number[],
+    terminations: readonly Termination[],
   ) => Promise<T>,
 ): Promise<T> {
   const RealWorker = globalThis.Worker;
   let constructions = 0;
-  const terminations: number[] = [];
+  const terminations: Termination[] = [];
   globalThis.Worker = class extends RealWorker {
+    #posted = new Set<number>();
+    #answered = new Set<number>();
     constructor(url: string | URL, options?: WorkerOptions) {
       constructions++;
       super(url, options);
+      // Added before the client's own listener, so this one sees a reply
+      // first, in the same dispatch.
+      this.addEventListener("message", (event: MessageEvent) => {
+        const id = (event.data as { id?: unknown } | null)?.id;
+        if (typeof id === "number") this.#answered.add(id);
+      });
+    }
+    override postMessage(
+      message: unknown,
+      transfer?: Transferable[] | StructuredSerializeOptions,
+    ): void {
+      const id = (message as { id?: unknown } | null)?.id;
+      if (typeof id === "number") this.#posted.add(id);
+      super.postMessage(message, transfer as Transferable[]);
     }
     override terminate(): void {
-      terminations.push(cpuMs());
+      terminations.push({
+        at: performance.now(),
+        cpu: cpuMs(),
+        unanswered: [...this.#posted].filter((id) => !this.#answered.has(id)),
+      });
       super.terminate();
     }
   };
@@ -723,7 +755,8 @@ Deno.test("SDK resolves relative worker URLs against the document base", () => {
 // A cancelled job rejects on the calling thread at once, and a timed-out one
 // when the client's timer fires; `lateMs` leaves 5x headroom over a 100 ms
 // target for that thread on loaded CI (see interrupt_test). Whether the guest
-// then stopped inside its worker is judged by CPU, not wall time (stopsInGuest).
+// then stopped inside its worker is judged from the client's terminate()
+// calls, not wall time (stopsInGuest).
 const timeoutMs = 200;
 const lateMs = 500;
 
@@ -735,34 +768,75 @@ const lateMs = 500;
  * ignores the cancellation keeps a core busy for the client's one-second
  * grace (1,006 ms measured with memory.fill left uncharged). The bound also
  * leaves room above `timeoutMs`, the longest a guest without a shared cell
- * may still run towards its own deadline after the client's timer fired. A
- * guest that never reports fails whatever the bound, since every attempt then
- * ends in a termination; the bound only decides how soon.
+ * may still run towards its own deadline after the client's timer fired.
  */
 const runawayCpuMs = 400;
 
 /**
+ * How a guest that ignored its cancellation would run on: `busy` on a core
+ * (spinning, tail calls, bulk operations, costly imports), or `waiting`
+ * without CPU (a sleep that missed its wake-up).
+ */
+type Runaway = "busy" | "waiting";
+
+/**
+ * When a step cancelled its job: a time no later than the moment the client
+ * began its grace (just before an abort, or a timed-out job's start plus its
+ * timeout), and the process CPU then.
+ */
+interface Cancellation {
+  at: number;
+  cpu: number;
+}
+
+/**
  * Run one cancellation `step` until its cancelled guest reports from inside
- * the worker, which then keeps its worker. The step cancels a job, returns
- * cpuMs() once the job rejected, and runs the next job on the same client,
- * which starts only once the cancelled guest reported or the client replaced
- * its worker. The client terminates a worker whose cancelled job has not
- * reported within settleGraceMs, and on a starved host a guest that does stop
- * can miss that grace as well. A termination fails the step when the process
- * had the CPU to run the guest past its next check, and is retried, at most
- * twice, when it did not.
+ * the worker, which then keeps its worker. The step cancels a job and runs
+ * the next job on the same client, which starts only once the cancelled job
+ * reported or the client replaced its worker. The client terminates a worker
+ * whose cancelled job has not reported within settleGraceMs; each such
+ * termination fails the step:
+ *
+ * - before the grace ended: the client did not wait for the report;
+ * - with every job's reply received: the client dropped the report;
+ * - for a `waiting` runaway: no measure tells a guest that waits on from a
+ *   starved host, so the guest must report in time;
+ * - for a `busy` runaway, when the process used `runawayCpuMs` of CPU since
+ *   the cancellation: the guest kept running.
+ *
+ * A `busy` step whose guest had too little CPU to reach its next check is a
+ * starved host, and is retried, at most twice.
  */
 async function stopsInGuest(
   label: string,
-  terminations: readonly number[],
-  step: () => Promise<number>,
+  terminations: readonly Termination[],
+  runaway: Runaway,
+  step: () => Promise<Cancellation>,
 ): Promise<void> {
   const spent: string[] = [];
   for (let attempt = 1;; attempt++) {
     const before = terminations.length;
     const cancelled = await step();
     if (terminations.length === before) return;
-    const used = terminations[before] - cancelled;
+    const { at, cpu, unanswered } = terminations[before];
+    const waited = at - cancelled.at;
+    assert(
+      waited >= settleGraceMs - 25,
+      `${label}: the client terminated the worker ${
+        waited.toFixed(0)
+      } ms after the cancellation, before its ${settleGraceMs} ms grace ended`,
+    );
+    assert(
+      unanswered.length > 0,
+      `${label}: the client terminated a worker whose every reply had reached it, so it dropped the cancelled job's report`,
+    );
+    assert(
+      runaway === "busy",
+      `${label}: job ${
+        unanswered.join(", ")
+      } did not report within the client's grace; a guest that ignores its cancellation here waits without CPU, so no CPU measure can excuse it`,
+    );
+    const used = cpu - cancelled.cpu;
     spent.push(`${used.toFixed(1)} ms`);
     assert(
       used < runawayCpuMs,
@@ -774,14 +848,27 @@ async function stopsInGuest(
       attempt < 3,
       `${label}: the client terminated the worker in all 3 attempts, after ${
         spent.join(", ")
-      } of process CPU since each cancellation: a host too starved to show the guest stopping, or a report the client never received`,
+      } of process CPU since each cancellation: a host too starved to run the guest to its next check, or a worker that never reports a stopped job`,
     );
     console.log(
-      `${label}: the client terminated the worker after its grace, but the process had used only ${
+      `${label}: the client terminated the worker after its grace with job ${
+        unanswered.join(", ")
+      } unanswered, but the process had used only ${
         used.toFixed(1)
       } ms of CPU since the cancellation, so the host starved the guest; retrying`,
     );
   }
+}
+
+/** Every worker after the first replaced one the client terminated. */
+function assertReplacedOnly(
+  constructions: number,
+  terminations: readonly Termination[],
+): void {
+  assert(
+    constructions === 1 + terminations.length,
+    `the client started ${constructions} workers and terminated ${terminations.length}: a worker it started did not replace a terminated one`,
+  );
 }
 
 function generation(mode: number): GenerationRequest {
@@ -802,7 +889,7 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 workerTest(
   "SDK worker cancellation stops the guest and keeps its worker",
   async () => {
-    await countingWorkers(async (_constructions, terminations) => {
+    await countingWorkers(async (constructions, terminations) => {
       const worker = await catchRetryWorker();
       // One worker thread: the next job runs only once the cancelled guest
       // has stopped, not merely once its promise rejected.
@@ -814,44 +901,56 @@ workerTest(
         );
       try {
         for (
-          const [name, mode] of Object.entries({
-            spin: catchRetryMode.spin,
-            sleep: catchRetryMode.sleep,
-            tailCalls: catchRetryMode.tailCalls,
-          })
+          const [name, mode, runaway] of [
+            ["spin", catchRetryMode.spin, "busy"],
+            ["sleep", catchRetryMode.sleep, "waiting"],
+            ["tailCalls", catchRetryMode.tailCalls, "busy"],
+          ] as const
         ) {
-          await stopsInGuest(`${name} timeout`, terminations, async () => {
-            const [, took] = await timed(() =>
-              rejects(
-                () => worker.generate(generation(mode), { timeoutMs }),
-                "TimeoutError",
-              )
-            );
-            const cancelled = cpuMs();
-            // The client's timer may fire a fraction of a millisecond early.
-            assert(
-              took > timeoutMs - 10 && took < timeoutMs + lateMs,
-              `${name}: timeout took ${took} ms`,
-            );
-            await next();
-            return cancelled;
-          });
-          await stopsInGuest(`${name} abort`, terminations, async () => {
-            const controller = new AbortController();
-            const running = worker.generate(generation(mode), {
-              signal: controller.signal,
-            });
-            await delay(100);
-            const [, aborted] = await timed(async () => {
-              controller.abort();
-              await rejects(() => running, "AbortError");
-            });
-            const cancelled = cpuMs();
-            assert(aborted < lateMs, `${name}: abort took ${aborted} ms`);
-            await next();
-            return cancelled;
-          });
+          await stopsInGuest(
+            `${name} timeout`,
+            terminations,
+            runaway,
+            async () => {
+              const started = performance.now();
+              const [, took] = await timed(() =>
+                rejects(
+                  () => worker.generate(generation(mode), { timeoutMs }),
+                  "TimeoutError",
+                )
+              );
+              const cancelled = { at: started + timeoutMs, cpu: cpuMs() };
+              // The client's timer may fire a fraction of a millisecond early.
+              assert(
+                took > timeoutMs - 10 && took < timeoutMs + lateMs,
+                `${name}: timeout took ${took} ms`,
+              );
+              await next();
+              return cancelled;
+            },
+          );
+          await stopsInGuest(
+            `${name} abort`,
+            terminations,
+            runaway,
+            async () => {
+              const controller = new AbortController();
+              const running = worker.generate(generation(mode), {
+                signal: controller.signal,
+              });
+              await delay(100);
+              const cancelled = { at: performance.now(), cpu: cpuMs() };
+              const [, aborted] = await timed(async () => {
+                controller.abort();
+                await rejects(() => running, "AbortError");
+              });
+              assert(aborted < lateMs, `${name}: abort took ${aborted} ms`);
+              await next();
+              return cancelled;
+            },
+          );
         }
+        assertReplacedOnly(constructions(), terminations);
       } finally {
         worker.dispose();
       }
@@ -862,22 +961,22 @@ workerTest(
 workerTest(
   "SDK worker aborts stop bulk operations and costly imports inside the guest",
   async () => {
-    await countingWorkers(async (_constructions, terminations) => {
+    await countingWorkers(async (constructions, terminations) => {
       const worker = await createWorkerCompiler(workerURL, {
         compiler: trapGuest,
         generators: { cpp: costlyStepsGuest },
       });
       try {
         for (const [step, mode] of Object.entries(costlyStep)) {
-          await stopsInGuest(step, terminations, async () => {
+          await stopsInGuest(step, terminations, "busy", async () => {
             const controller = new AbortController();
             const running = worker.generate(generation(mode), {
               signal: controller.signal,
             });
             await delay(100);
+            const cancelled = { at: performance.now(), cpu: cpuMs() };
             controller.abort();
             await rejects(() => running, "AbortError");
-            const cancelled = cpuMs();
             // The trapping compiler runs only once the aborted guest stopped,
             // or once the client replaced a worker whose guest did not report.
             await rejects(
@@ -888,6 +987,7 @@ workerTest(
             return cancelled;
           });
         }
+        assertReplacedOnly(constructions(), terminations);
       } finally {
         worker.dispose();
       }
@@ -946,24 +1046,30 @@ workerTest(
       }
       const worker = await pending;
       try {
-        await stopsInGuest("timeout without a cell", terminations, async () => {
-          const [, took] = await timed(() =>
-            rejects(
-              () =>
-                worker.generate(generation(catchRetryMode.spin), {
-                  timeoutMs,
-                }),
-              "TimeoutError",
-            )
-          );
-          const cancelled = cpuMs();
-          assert(took < timeoutMs + lateMs, `timeout took ${took} ms`);
-          await rejects(
-            () => worker.generate(generation(catchRetryMode.exit)),
-            "CompileError",
-          );
-          return cancelled;
-        });
+        await stopsInGuest(
+          "timeout without a cell",
+          terminations,
+          "busy",
+          async () => {
+            const started = performance.now();
+            const [, took] = await timed(() =>
+              rejects(
+                () =>
+                  worker.generate(generation(catchRetryMode.spin), {
+                    timeoutMs,
+                  }),
+                "TimeoutError",
+              )
+            );
+            const cancelled = { at: started + timeoutMs, cpu: cpuMs() };
+            assert(took < timeoutMs + lateMs, `timeout took ${took} ms`);
+            await rejects(
+              () => worker.generate(generation(catchRetryMode.exit)),
+              "CompileError",
+            );
+            return cancelled;
+          },
+        );
         // An abort cannot reach the guest: the worker is terminated and
         // replaced at once, and the guest stops at its own deadline even
         // where terminate() does not stop it.
@@ -984,6 +1090,7 @@ workerTest(
           constructions() === built + 1,
           "an abort did not replace the worker",
         );
+        assertReplacedOnly(constructions(), terminations);
         // Let the orphaned guest reach its deadline before the test ends.
         await delay(1000);
       } finally {
@@ -1061,41 +1168,50 @@ workerTest(
     );
     const job: CompileRequest = { ...simpleRequest(), generators: [] };
     try {
-      await countingWorkers(async (_constructions, terminations) => {
+      await countingWorkers(async (constructions, terminations) => {
         const worker = await createWorkerCompiler(url, {
           compiler: trapGuest,
           generators: {},
         });
         try {
           for (let round = 0; round < 3; round++) {
-            // A termination means the timed-out job's reply never settled it
-            // within the grace; stopsInGuest retries only a starved host.
-            await stopsInGuest(`round ${round}`, terminations, async () => {
-              const racing = worker.compile(job, { timeoutMs: 50 }).then(
-                () => "reply",
-                (error: Error) => error.name,
-              );
-              // Let the client post the job and start its timer, then block.
-              await delay(1);
-              const start = performance.now();
-              while (performance.now() - start < 150) {
-                // Both the reply and the timer become due meanwhile.
-              }
-              const winner = await racing;
-              const cancelled = cpuMs();
-              assert(
-                winner === "reply" || winner === "TimeoutError",
-                `round ${round}: ${winner}`,
-              );
-              // The next job gets its own reply.
-              const result = await worker.compile(job, { timeoutMs: 10_000 });
-              assert(
-                result.request.length === 1,
-                `round ${round}: the next job got ${JSON.stringify(result)}`,
-              );
-              return cancelled;
-            });
+            // The stand-in always replies, so a termination means the client
+            // did not settle the timed-out job with that reply within its
+            // grace. stopsInGuest fails it once the reply has reached this
+            // thread, and retries only a stand-in too starved to reply.
+            await stopsInGuest(
+              `round ${round}`,
+              terminations,
+              "busy",
+              async () => {
+                const started = performance.now();
+                const racing = worker.compile(job, { timeoutMs: 50 }).then(
+                  () => "reply",
+                  (error: Error) => error.name,
+                );
+                // Let the client post the job and start its timer, then block.
+                await delay(1);
+                const start = performance.now();
+                while (performance.now() - start < 150) {
+                  // Both the reply and the timer become due meanwhile.
+                }
+                const winner = await racing;
+                const cancelled = { at: started + 50, cpu: cpuMs() };
+                assert(
+                  winner === "reply" || winner === "TimeoutError",
+                  `round ${round}: ${winner}`,
+                );
+                // The next job gets its own reply.
+                const result = await worker.compile(job, { timeoutMs: 10_000 });
+                assert(
+                  result.request.length === 1,
+                  `round ${round}: the next job got ${JSON.stringify(result)}`,
+                );
+                return cancelled;
+              },
+            );
           }
+          assertReplacedOnly(constructions(), terminations);
         } finally {
           worker.dispose();
         }
