@@ -67,20 +67,29 @@ jobs:
       # time.
       - name: Check native and Wasm parity, generated consumers, and SDKs
         run: mise run check
-      # The wasm-digests job compares these between the two hosts. Neither step
-      # may fail this required job: the comparison is report-only.
+      # The wasm-digests job compares these between the two hosts, and each
+      # module's class, taken from the artifact contract's one list (`modules`
+      # in scripts/check-wasm-artifacts.ts), tells it which modules may differ.
+      # Neither step may fail this required job: the comparison is report-only.
       - name: Record the digests of the built Wasm modules
         continue-on-error: true
         run: |
           mkdir -p build/digests
           (cd dist/wasm && shasum -a 256 -- *.wasm) > build/digests/wasm.sha256
-          cat build/digests/wasm.sha256
+          mise exec -- deno eval --no-config --no-lock \
+            'import { modules } from "./scripts/check-wasm-artifacts.ts";
+            for (const [name, contract] of Object.entries(modules)) {
+              console.log(name + ".wasm " + contract.class);
+            }' > build/digests/wasm-classes.txt
+          cat build/digests/wasm.sha256 build/digests/wasm-classes.txt
       - name: Upload the Wasm module digests
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: wasm-sha256-${{ matrix.os }}
-          path: build/digests/wasm.sha256
+          path: |
+            build/digests/wasm.sha256
+            build/digests/wasm-classes.txt
           if-no-files-found: error
           retention-days: 7
       - name: Verify release archive and external package consumers
@@ -108,13 +117,17 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Report-only: are the six Wasm modules byte-identical between the Linux
-  # and macOS builds? Each host checks its own modules against the artifact
-  # contract, and the build is reproducible on one host, but nothing yet
-  # guarantees equality across hosts (different WASI SDK, Rust, Go, and Zig
-  # host binaries, per-host build roots). A difference therefore fails this
-  # job without blocking the run, so the evidence accumulates until the
-  # cross-host claim can be made or withdrawn.
+  # Report-only: are the Wasm modules byte-identical between the Linux and
+  # macOS builds? Each host checks its own modules against the artifact
+  # contract, and the build is reproducible on one host. The cpp class
+  # (capnp, capnpc-c++, capnpc-capnp) keeps two libc++abi source paths that
+  # differ between the WASI SDK's Linux and macOS tarballs
+  # (sdkBuildPathPrefixes in scripts/check-wasm-artifacts.ts), so its modules
+  # are expected to differ; a cpp module that matches is reported as a
+  # notice. A difference in any other module, a module one host lacks, or a
+  # missing digest or class file fails this job without blocking the run, so
+  # the evidence accumulates until the cross-host claim for the generators
+  # can be made or withdrawn.
   wasm-digests:
     name: Wasm modules across Linux and macOS (report only)
     needs: check
@@ -129,31 +142,67 @@ jobs:
           path: digests
       - name: Compare the module digests
         run: |
-          linux=digests/wasm-sha256-ubuntu-24.04/wasm.sha256
-          macos=digests/wasm-sha256-macos-15/wasm.sha256
-          for file in "$linux" "$macos"; do
+          linux=digests/wasm-sha256-ubuntu-24.04
+          macos=digests/wasm-sha256-macos-15
+          missing=no
+          for file in "$linux/wasm.sha256" "$linux/wasm-classes.txt" \
+            "$macos/wasm.sha256" "$macos/wasm-classes.txt"; do
             if [ ! -s "$file" ]; then
-              echo "::warning::no digests in $file: its check job stopped before recording them"
-              exit 1
+              echo "::warning::no $file: its check job stopped before recording it"
+              missing=yes
             fi
           done
-          {
-            echo "| Module | Linux | macOS | Equal |"
-            echo "| --- | --- | --- | --- |"
-            join -1 2 -2 2 <(sort -k2 "$linux") <(sort -k2 "$macos") |
-              while read -r module linux_digest macos_digest; do
-                equal=no
-                if [ "$linux_digest" = "$macos_digest" ]; then equal=yes; fi
-                printf '| %s | %.16s | %.16s | %s |\n' \
-                  "$module" "$linux_digest" "$macos_digest" "$equal"
-              done
-          } >> "$GITHUB_STEP_SUMMARY"
-          if diff <(sort -k2 "$linux") <(sort -k2 "$macos"); then
-            echo "The Linux and macOS builds produced byte-identical Wasm modules."
-          else
-            echo "::warning::the Linux and macOS builds produced different Wasm modules; see the job summary"
+          if [ "$missing" = yes ]; then exit 1; fi
+          if ! cmp -s "$linux/wasm-classes.txt" "$macos/wasm-classes.txt"; then
+            echo "::warning::the Linux and macOS check jobs recorded different module classes"
             exit 1
           fi
+          # One row per module that either host built or the contract lists:
+          # module, class, Linux digest, macOS digest, verdict.
+          rows="$(awk '
+            FNR == 1 { part++ }
+            part == 1 { class[$1] = $2; seen[$1] = 1; next }
+            part == 2 { linux[$2] = $1; seen[$2] = 1; next }
+            { macos[$2] = $1; seen[$2] = 1 }
+            END {
+              for (module in seen) {
+                c = (module in class) ? class[module] : "unlisted"
+                l = (module in linux) ? linux[module] : "missing"
+                m = (module in macos) ? macos[module] : "missing"
+                if (l == "missing" && m == "missing") verdict = "unexpected: built on neither host"
+                else if (l == "missing") verdict = "unexpected: missing on Linux"
+                else if (m == "missing") verdict = "unexpected: missing on macOS"
+                else if (l != m && c == "cpp") verdict = "expected: per-platform WASI SDK strings"
+                else if (l != m) verdict = "unexpected: differs"
+                else if (c == "cpp") verdict = "notice: equal"
+                else verdict = "equal"
+                printf "%s\t%s\t%s\t%s\t%s\n", module, c, l, m, verdict
+              }
+            }' "$linux/wasm-classes.txt" "$linux/wasm.sha256" "$macos/wasm.sha256" | sort)"
+          {
+            echo "| Module | Class | Linux | macOS | Result |"
+            echo "| --- | --- | --- | --- | --- |"
+            while IFS=$'\t' read -r module class l m verdict; do
+              printf '| %s | %s | %.16s | %.16s | %s |\n' \
+                "$module" "$class" "$l" "$m" "$verdict"
+            done <<< "$rows"
+          } >> "$GITHUB_STEP_SUMMARY"
+          status=0
+          expected=0
+          while IFS=$'\t' read -r module class l m verdict; do
+            case "$verdict" in
+              expected:*) expected=$((expected + 1)) ;;
+              "notice: equal")
+                echo "::notice::$module is byte-identical across the hosts although its $class class embeds per-platform WASI SDK strings" ;;
+              unexpected:*)
+                echo "::warning::$module ($class): $verdict (Linux $l, macOS $m)"
+                status=1 ;;
+            esac
+          done <<< "$rows"
+          if [ "$status" = 0 ]; then
+            echo "No unexpected difference: $expected cpp module(s) differ as expected (per-platform WASI SDK strings) and every other module is byte-identical; see the job summary."
+          fi
+          exit "$status"
 
   browsers:
     name: Chromium, Firefox, and WebKit
