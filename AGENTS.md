@@ -79,6 +79,11 @@ release status; update it instead of restating status here.
   `sdk/typescript/testdata/hostile_guests.ts` and `interrupt_guests.ts`.
   `test:browser` fails when a pair drifts: after editing a `.wat` file,
   regenerate its hex with the command in the embedding file's header.
+- Keep test timing bounds valid on a loaded host: judge a guest's progress by
+  CPU (`process.cpuUsage` counts worker threads) or by the guest's own clock,
+  keep wall-clock bounds for one thread's timers, and build test programs under
+  `buildTimeoutMs` (`tests/lib/process.ts`) before running them as a separate
+  step with the default timeout.
 - Generated files and build trees go under `build/`, distributable output under
   `dist/`, caches under `.cache/`, ad-hoc probes under `build/scratch/`.
 - Shipped Wasm modules meet the contract in `scripts/check-wasm-artifacts.ts`
