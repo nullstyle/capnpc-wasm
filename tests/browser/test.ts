@@ -36,6 +36,15 @@ import {
 } from "./soak-stalls.ts";
 import { describeObservation } from "../conformance/outcome.ts";
 import {
+  closedTargetError,
+  crashFailure,
+  crashObservation,
+  type EngineCrash,
+  latestCrashReport,
+  summarizeCrashReport,
+  TraceMirror,
+} from "./engine-crash.ts";
+import {
   type BrowserRow,
   browserSurfaces,
   bundleStudioAdapter,
@@ -650,20 +659,46 @@ const server = Deno.serve(
 );
 const origin = `http://127.0.0.1:${server.addr.port}`;
 let browser: Browser | undefined;
+// Engine crashes (engine-crash.ts): a page that crashed, or a browser that
+// disconnected before the driver began to close it. The pages mirror their
+// workers' trace events here as they happen, so the trace outlives the page.
+let closing = false;
+let engineCrash: EngineCrash | undefined;
+let soakCycle: number | null = null;
+const traces = new TraceMirror();
+const runStarted = Date.now();
+function crashed(event: string, page: string) {
+  engineCrash ??= { event, step: clock.current, cycle: soakCycle, page };
+}
+/** Watch a page for a crash, and receive its workers' trace events. */
+async function watchPage(page: Page, name: string) {
+  page.on("crash", () => crashed(`the ${name} page crashed`, name));
+  await clock.step(
+    page.exposeFunction(
+      "capnpTraceSink",
+      (worker: number, event: string) => traces.record(name, worker, event),
+    ),
+    `${engine} mirror the ${name} page's worker traces`,
+  );
+}
 // run.ts stops a driver that overruns its engine deadline with SIGTERM: name
 // the step it was on and close the browser before exiting.
 Deno.addSignalListener("SIGTERM", () => {
   console.error(
     `FAIL ${engine}: stopped from outside during: ${clock.current}`,
   );
-  const closing = browser ? browser.close() : Promise.resolve();
-  clock.step(closing, `${engine} close after SIGTERM`, 10_000)
+  closing = true;
+  const shutdown = browser ? browser.close() : Promise.resolve();
+  clock.step(shutdown, `${engine} close after SIGTERM`, 10_000)
     .catch(() => {})
     .finally(() => Deno.exit(1));
 });
 const errors: string[] = [];
 try {
   browser = await clock.step(browserType.launch(), `${engine} launch`);
+  browser.on("disconnected", () => {
+    if (!closing) crashed("the browser disconnected", "main");
+  });
   console.log(`Testing ${engine} ${browser.version()}`);
   const context = await clock.step(
     browser.newContext({ serviceWorkers: "block" }),
@@ -676,6 +711,7 @@ try {
   );
   const page = await clock.step(context.newPage(), `${engine} new page`);
   page.on("pageerror", (error) => errors.push(error.message));
+  await watchPage(page, "main");
   page.setDefaultTimeout(60_000);
   const evaluate = evaluateOn(page);
   await clock.step(page.goto(`${origin}/`), `${engine} load page`);
@@ -758,6 +794,7 @@ try {
       `${engine} new ${name} termination page`,
     );
     auditedPage.on("pageerror", (error) => errors.push(error.message));
+    await watchPage(auditedPage, name);
     auditedPage.setDefaultTimeout(60_000);
     await clock.step(
       auditedPage.goto(`${origin}/${name === "isolated" ? "isolated" : ""}`),
@@ -1383,9 +1420,15 @@ try {
       const byWorker = new WeakMap<Worker, TracedWorker>();
       const RealWorker = globalThis.Worker;
       const soakTrace = { workers, RealWorker, url: "", posts: 0 };
+      // Each event also goes to the driver (capnpTraceSink), which keeps the
+      // trace should the page crash.
+      const sink = (globalThis as unknown as {
+        capnpTraceSink?: (worker: number, event: string) => Promise<void>;
+      }).capnpTraceSink;
       const keep = (traced: TracedWorker, event: string) => {
         traced.events.push(event);
         if (traced.events.length > 60) traced.events.splice(0, 20);
+        sink?.(workers.indexOf(traced), event)?.catch(() => {});
       };
       globalThis.Worker = class extends RealWorker {
         constructor(url: string | URL, options?: WorkerOptions) {
@@ -1466,6 +1509,7 @@ try {
     );
   };
   for (let iteration = 0; iteration < 20; iteration++) {
+    soakCycle = iteration + 1;
     const mode = iteration % 2 === 0 ? "abort" : "timeout";
     const result = await evaluate(
       async ({ mode, input, recovered, recoveryMs }) => {
@@ -1654,6 +1698,7 @@ try {
       }/20)`,
     );
   }
+  soakCycle = null;
   await evaluate(
     () => {
       const state = (globalThis as BrowserGlobal).capnpTest;
@@ -1777,6 +1822,54 @@ try {
 } catch (error) {
   failedStep = clock.current;
   recordStep(failedStep);
+  // A page or browser that went away is an engine crash, which the stall
+  // budget never covers. Playwright may report the crash just after the call
+  // it failed; one it never reports is still the engine's closing the page.
+  if (!engineCrash && closedTargetError(error)) {
+    for (let wait = 0; wait < 20 && !engineCrash; wait++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    crashed("the page or browser closed without a crash event", "main");
+  }
+  if (engineCrash) {
+    failedStep = engineCrash.step;
+    recordStep(failedStep);
+    // The report is written some seconds after the process died. It is
+    // copied next to the receipts, which CI keeps as an artifact.
+    const report = await latestCrashReport(engine, runStarted);
+    let kept: string | null = null;
+    if (report) {
+      const directory = receiptPath
+        ? receiptPath.slice(0, receiptPath.lastIndexOf("/"))
+        : data.work;
+      kept = `${directory}/${engine}-${
+        report.slice(report.lastIndexOf("/") + 1)
+      }`;
+      try {
+        await Deno.copyFile(report, kept);
+        console.log(
+          `OBSERVED ${engine} crash report: ${
+            summarizeCrashReport(await Deno.readTextFile(report))
+          }`,
+        );
+      } catch (copyError) {
+        kept = `${report} (not copied: ${(copyError as Error).message})`;
+      }
+    }
+    console.log(
+      crashObservation(
+        engine,
+        engineCrash,
+        traces.last(engineCrash.page),
+        kept ?? report,
+      ),
+    );
+    const failure = new Error(crashFailure(engine, engineCrash), {
+      cause: error,
+    });
+    console.error(`FAIL ${failure.message}`);
+    throw failure;
+  }
   // Report before shutting down an unhealthy browser so cleanup cannot hide
   // the failing operation or the host-side recovery deadline.
   console.error(
@@ -1785,6 +1878,7 @@ try {
   throw error;
 } finally {
   // A stalled engine may not close either; bound the wait for it.
+  closing = true;
   try {
     await clock.step(
       browser ? browser.close() : Promise.resolve(),

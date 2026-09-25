@@ -114,9 +114,13 @@ export const workerAuditScript = `(() => {
     probes: [],
     traces: [],
   };
+  // Each event also goes to the driver (capnpTraceSink), which keeps the
+  // trace should the page crash.
   const keep = (events, event) => {
     events.push(event);
     if (events.length > 60) events.splice(0, 20);
+    const sink = globalThis.capnpTraceSink;
+    if (sink) sink(audit.traces.indexOf(events), event)?.catch?.(() => {});
   };
   globalThis.Worker = class extends RealWorker {
     constructor(...args) {

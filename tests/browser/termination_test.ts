@@ -2,8 +2,8 @@
 // the samples a real engine would, so each check in termination.ts is
 // exercised on every host, and measureTermination's own page function runs
 // here against a fake SDK. Also the start stalls and how they are read and
-// retried, and the stall budget and warnings (soak-stalls.ts). Runs in
-// test:browser-bootstrap.
+// retried, the stall budget and warnings (soak-stalls.ts), and how an engine
+// crash is reported instead (engine-crash.ts). Runs in test:browser-bootstrap.
 import {
   checkIsolatedTermination,
   checkPlainTermination,
@@ -25,6 +25,15 @@ import {
   stallJob,
   stallWarning,
 } from "./soak-stalls.ts";
+import {
+  closedTargetError,
+  crashFailure,
+  crashObservation,
+  crashReportDirectory,
+  latestCrashReport,
+  summarizeCrashReport,
+  TraceMirror,
+} from "./engine-crash.ts";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -798,5 +807,140 @@ Deno.test("soak stalls count against the CI job and warn in one line", () => {
     start ===
       "::warning title=Worker start stall (webkit)::webkit isolated termination pure abort: the probe worker did not initialize within 10000 ms",
     start,
+  );
+});
+
+Deno.test("an engine crash is reported with its evidence and never budgeted", async () => {
+  const mirror = new TraceMirror();
+  mirror.record("main", 0, "0:started");
+  mirror.record("main", 1, "page:post:init:8");
+  mirror.record("main", 1, "0:started");
+  mirror.record("isolated", 0, "0:started");
+  assert(
+    JSON.stringify(mirror.last("main")) ===
+        '{"worker":1,"events":["page:post:init:8","0:started"]}' &&
+      mirror.last("plain") === null,
+    `mirror: ${JSON.stringify(mirror.last("main"))}`,
+  );
+  for (let n = 0; n < 70; n++) mirror.record("main", 1, `${n}:event`);
+  assert(
+    mirror.last("main")!.events.length <= 60,
+    "the mirror kept more than 60 events of a worker",
+  );
+  assert(
+    closedTargetError(
+      new Error(
+        "page.evaluate: Target page, context or browser has been closed",
+      ),
+    ) && closedTargetError(new Error("page.evaluate: Target crashed")) &&
+      !closedTargetError(
+        new Error("page.evaluate: TimeoutError: compilation timed out"),
+      ),
+    "closed-target errors misread",
+  );
+  const crash = {
+    event: "the main page crashed",
+    step: "webkit worker timeout recovery cycle 10",
+    cycle: 10,
+    page: "main",
+  };
+  const observed = crashObservation(
+    "webkit",
+    crash,
+    { worker: 1, events: ["page:post:compile:9"] },
+    null,
+    "/reports",
+  );
+  assert(
+    observed ===
+      'OBSERVED webkit engine crash: the main page crashed during webkit worker timeout recovery cycle 10 (soak cycle 10); the last worker trace that reached the driver (main page, worker 1): ["page:post:compile:9"]; crash report: none written to /reports since the run started',
+    observed,
+  );
+  assert(
+    crashFailure("webkit", crash) ===
+      "webkit: engine crash: the main page crashed during webkit worker timeout recovery cycle 10 (soak cycle 10); a crash is not a stall, and the stall budget does not cover it",
+    crashFailure("webkit", crash),
+  );
+  assert(
+    crashReportDirectory("darwin", "/Users/a") ===
+        "/Users/a/Library/Logs/DiagnosticReports" &&
+      crashReportDirectory("linux", "/home/a") === null,
+    "crash report directory",
+  );
+  // The newest report of the engine's processes since the run started.
+  const now = Date.now();
+  const entries = [
+    {
+      name: "com.apple.WebKit.WebContent.Development-old.ips",
+      time: now - 60_000,
+    },
+    { name: "test-2026.ips", time: now },
+    { name: "com.apple.WebKit.WebContent.Development-new.ips", time: now },
+    { name: "Playwright-2026.ips", time: now - 500 },
+  ];
+  const list = () => Promise.resolve(entries);
+  const since = now - 1000;
+  assert(
+    await latestCrashReport("webkit", since, {
+      directory: "/reports",
+      waitMs: 0,
+      list,
+    }) === "/reports/com.apple.WebKit.WebContent.Development-new.ips",
+    "the newest WebKit report was not chosen",
+  );
+  assert(
+    await latestCrashReport("chromium", since, {
+          directory: "/reports",
+          waitMs: 0,
+          list,
+        }) === null &&
+      await latestCrashReport("webkit", since, {
+          directory: "/nonexistent/DiagnosticReports",
+          waitMs: 0,
+        }) === null &&
+      await latestCrashReport("webkit", since, {
+          directory: null,
+          waitMs: 0,
+        }) ===
+        null,
+    "a report of another engine, or no directory, was reported",
+  );
+});
+
+Deno.test("a crash report is summarized in one line", () => {
+  const report = [
+    JSON.stringify({ app_name: "com.apple.WebKit.WebContent.Development" }),
+    JSON.stringify({
+      procName: "com.apple.WebKit.WebContent.Development",
+      exception: {
+        type: "EXC_BAD_ACCESS",
+        signal: "SIGSEGV",
+        subtype: "KERN_INVALID_ADDRESS at 0x10",
+      },
+      termination: { namespace: "SIGNAL", indicator: "Segmentation fault: 11" },
+      faultingThread: 1,
+      threads: [
+        { frames: [] },
+        {
+          triggered: true,
+          name: "WebCore: Worker",
+          frames: [
+            { imageIndex: 0, symbol: "JSC::Wasm::OMGPlan::work" },
+            { imageIndex: 1, imageOffset: 4096 },
+          ],
+        },
+      ],
+      usedImages: [{ name: "JavaScriptCore" }, { name: "WebCore" }],
+    }),
+  ].join("\n");
+  const summary = summarizeCrashReport(report);
+  assert(
+    summary ===
+      "com.apple.WebKit.WebContent.Development: EXC_BAD_ACCESS SIGSEGV KERN_INVALID_ADDRESS at 0x10 (SIGNAL Segmentation fault: 11); WebCore: Worker: JavaScriptCore!JSC::Wasm::OMGPlan::work < WebCore!+4096",
+    summary,
+  );
+  assert(
+    summarizeCrashReport("not a report") === "an unreadable crash report",
+    "an unreadable report was summarized",
   );
 });
