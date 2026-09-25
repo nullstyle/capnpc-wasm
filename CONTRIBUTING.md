@@ -57,6 +57,7 @@ mise run setup
 mise run check
 mise run test:package
 mise run test:deno-worker
+mise run test:sdk-go-race
 test -z "$(git status --porcelain)"
 ```
 
