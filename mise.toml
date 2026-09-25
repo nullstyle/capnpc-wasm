@@ -371,14 +371,15 @@ if [[ "${CAPNP_CANARY_LATEST:-1}" != 0 ]]; then
     Darwin-x86_64) target=x86_64-apple-darwin ;;
     *) echo "no Deno release for $(uname -s)-$(uname -m)" >&2; exit 1 ;;
   esac
-  # Only a checked, fully unpacked download is renamed to the -verified
-  # directory, so a binary an older unchecked task left in deno-$version, or
-  # an interrupted download, is never run.
+  # Each run downloads, checks, and unpacks in a directory of its own, and
+  # only a checked, fully unpacked download is renamed to the -verified
+  # directory: a binary an older unchecked task left in deno-$version, an
+  # interrupted download, and a concurrent run's bytes are never run.
   latest="build/test/termination-canary/deno-$version-verified"
   if [[ ! -x "$latest/deno" ]]; then
-    download="build/test/termination-canary/deno-$version-download"
-    rm -rf "$latest" "$download"
-    mkdir -p "$download"
+    mkdir -p build/test/termination-canary
+    download="$(mktemp -d "build/test/termination-canary/deno-$version-download.XXXXXX")"
+    trap 'rm -rf "$download"' EXIT
     curl -fsSL -o "$download/deno.zip" "https://dl.deno.land/release/$version/deno-$target.zip"
     # Check the archive against the release's own checksum file on GitHub,
     # not against the host that served it, before anything is unpacked.
@@ -387,11 +388,11 @@ if [[ "${CAPNP_CANARY_LATEST:-1}" != 0 ]]; then
     actual="$(shasum -a 256 "$download/deno.zip" | cut -d ' ' -f 1)"
     if [[ -z "$expected" || "$actual" != "$expected" ]]; then
       echo "deno-$target.zip $version has sha256 $actual, but its release checksum file lists ${expected:-no digest}" >&2
-      rm -rf "$download"
       exit 1
     fi
     unzip -q "$download/deno.zip" -d "$download"
-    mv "$download" "$latest"
+    # A concurrent run may have published its own verified download first.
+    [[ -x "$latest/deno" ]] || { rm -rf "$latest"; mv "$download" "$latest"; }
   fi
   runtimes+=("latest=$latest/deno")
 fi
