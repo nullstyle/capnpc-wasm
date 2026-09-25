@@ -10,8 +10,10 @@ schema workspace compiled through either SDK produces the same
 This document is the reference for both SDKs and for the cross-host conformance
 tests. Where the SDKs differ, the difference is listed here; an unlisted
 difference is a bug in one of them. Changes to the contract need a line in
-[CHANGELOG.md](../CHANGELOG.md); before the first tagged release a breaking
-change is allowed with that line, after it the contract is additive.
+[CHANGELOG.md](../CHANGELOG.md) and follow the
+[version rules](api-stability.md#version-rules): a break needs a minor release
+(a major one from `1.0.0` on) and a CHANGELOG bullet marked breaking, and after
+a flavor's `0.1.0` a deprecation period first.
 
 The limit defaults are machine-readable in
 [`tests/fixtures/contract/limits.json`](../tests/fixtures/contract/limits.json).

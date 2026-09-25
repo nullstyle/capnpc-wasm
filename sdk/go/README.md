@@ -48,9 +48,10 @@ need no wazero replacement or sibling reference checkout.
 Until a Go module version is published, use a local replacement for this SDK
 module itself, or the self-contained source in a prepared release candidate. See
 [release preparation and external installation checks](../../docs/releases.md).
-The nested module is tagged `sdk/go/v<version>` with the version in
-`release.json`, for example `sdk/go/v0.1.0-rc.3`, so that
-`go get github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.3` resolves it.
+The nested module is tagged `sdk/go/v<version>` with the full SDK's version
+(`versions["capnpc-wasm"]` in `release.json`) at the commit of the
+`capnpc-wasm-v<version>` release, for example `sdk/go/v0.1.0-rc.4`, so that
+`go get github.com/nullstyle/capnpc-wasm/sdk/go@v0.1.0-rc.4` resolves it.
 
 Read modules from the candidate's `wasm/` directory, `build/wasm/bin/`, or embed
 them in your application. The SDK does not download modules or supply annotation
@@ -259,7 +260,8 @@ active calls, which fail with `ErrClosed`, and returns the context error; the
 runtime is released as soon as the last of them stops. Cancel job contexts first
 when they should fail with their own errors instead. Closing twice is safe.
 Module instantiation and filesystem operations use the pinned wazero
-experimental interfaces; this is an initial API, not a stable published release.
+experimental interfaces. The [API stability policy](../../docs/api-stability.md)
+lists which exports are stable; no Go module version is published yet.
 
 ## Verification
 

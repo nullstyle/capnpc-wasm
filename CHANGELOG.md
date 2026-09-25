@@ -178,6 +178,8 @@ every flavor it applies to has shipped it.
   documentation comment, removed no earlier than the next minor release); and
   records the naming rule: `capnp-wasm-<part>` for compiler-only artifacts,
   `capnpc-wasm` for the full SDK package, its archive, and the Go module tag.
+  `docs/sdk-contract.md` now defers to those version rules instead of freezing
+  the contract at the first tag.
 - Release process: a release bumps only its own flavor's entry in `release.json`
   right after publishing, copies the Unreleased bullets that apply to that
   flavor, and adds one published-releases row per flavor release; the Go module

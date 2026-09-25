@@ -24,7 +24,8 @@ release status; update it instead of restating status here.
   [tests/browser/README.md](tests/browser/README.md) for browser setup;
   [examples/browser/README.md](examples/browser/README.md) for Schema Studio;
   [docs/releases.md](docs/releases.md) for packaging;
-  [ref/README.md](ref/README.md) for upstream entry points.
+  [docs/api-stability.md](docs/api-stability.md) for versions, names, and
+  stability tiers; [ref/README.md](ref/README.md) for upstream entry points.
 
 ## Rules
 
@@ -51,8 +52,8 @@ release status; update it instead of restating status here.
 - The two SDKs implement one contract,
   [docs/sdk-contract.md](docs/sdk-contract.md): keep request fields, limits
   (pinned by `tests/fixtures/contract/limits.json`), stage names, and error
-  classes aligned, and change the contract document and `CHANGELOG.md` with any
-  SDK API change.
+  classes aligned, and change the contract document, the export lists in
+  `docs/api-stability.md`, and `CHANGELOG.md` with any SDK API change.
 - The [schema feature corpus](tests/fixtures/features/README.md) is shared by
   the TypeScript, Go, and browser tests. Read embeds as bytes; compare the
   complete canonical request and every generated source byte with native output
@@ -95,9 +96,9 @@ a local cold build is comparable. For quick iteration, run one suite task, or
   Studio's Content-Security-Policy and fails on any axe-core violation. Keep the
   CSP hash in `examples/browser/index.html` in step with its inline boot script;
   `build:studio` fails otherwise.
-- Release scripts, `bin/capnp-wasm`, or packaged docs: `mise run test:package`
-  and `mise run test:launcher`; `mise run test:compiler-host-package` for the
-  compiler-host flavor.
+- Release scripts, `scripts/templates/`, `bin/capnp-wasm`, or packaged docs:
+  `mise run test:package` and `mise run test:launcher`;
+  `mise run test:compiler-host-package` for the compiler-host flavor.
 - Release evidence (`docs/release-evidence/`, `scripts/check-evidence.ts`,
   `scripts/audit-nightly.ts`): `mise run check:evidence`, part of `lint`,
   validates every receipt against its schema under
@@ -147,18 +148,32 @@ finish with `mise run ci` before a rebase or hand-off.
 
 ## Release and packaging
 
-- `release.json` holds one version for the three archive flavors: `capnpc-wasm`
-  (full SDK), `capnp-wasm-tools` (compiler and Wasmtime launcher), and
+- `release.json` holds one version per archive flavor under `versions`:
+  `capnpc-wasm` (full SDK; its version also names the Go module tag),
+  `capnp-wasm-tools` (compiler and Wasmtime launcher), and
   `capnp-wasm-compiler-host` (compiler and TypeScript host).
-  `scripts/release.ts` accepts only `X.Y.Z-rc.N` with `private: true`.
-- Packaged docs are copied verbatim: `docs/releases.md` becomes each archive's
-  `README.md` and `docs/releases.md`; `sdk/typescript/README.md` becomes
-  `docs/typescript.md` in the SDK flavors. Editing them changes packaged bytes.
-- Published assets are immutable; changed bytes need a new version. Tags are
-  `capnp-wasm-tools-v<version>`, `capnp-wasm-compiler-host-v<version>`, and
-  `sdk/go/v<version>` for the Go module. Before tagging, add the archive and
-  manifest digests to the published releases table in `docs/releases.md` and the
-  entry to `CHANGELOG.md`.
+  `scripts/release.ts` accepts only `X.Y.Z-rc.N` with `private: true` and
+  rejects a missing or unknown flavor.
+  [docs/api-stability.md](docs/api-stability.md) holds the naming rule, the
+  stability tiers, and the version rules.
+- Each archive's `README.md` is generated from
+  `scripts/templates/README-<flavor>.md`. `sdk/typescript/README.md` ships as
+  `docs/typescript.md` in the SDK flavors and `sdk/go/README.md` in the full
+  SDK, both with relative links rewritten to the repository at the producer
+  commit. Editing them or the templates changes packaged bytes;
+  `docs/releases.md` is not packaged.
+- Published assets are immutable; changed bytes need a new version. Releases are
+  built only by `.github/workflows/release.yml` (held on
+  `quality/held-workflows` until it reaches `main`) from a pushed tag
+  `<flavor>-v<version>` naming that flavor's own version; `sdk/go/v<version>`
+  tags the Go module with the `capnpc-wasm` version at the commit of that
+  release. `scripts/release.ts` refuses a dirty tree and a flavor version whose
+  tag exists at another commit among the local tags (`--allow-dirty` and
+  `--allow-existing-tag` serve local candidates; `--publish` is the workflow's
+  mode). Add the `CHANGELOG.md` entry before tagging, the archive and manifest
+  digests to the published releases table in `docs/releases.md` before
+  publishing the draft, and bump only that flavor's entry in `release.json`
+  right after publishing it.
 
 ## Zig synchronization
 

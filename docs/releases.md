@@ -69,15 +69,16 @@ The full SDK archive (`capnpc-wasm-<version>.tgz`) has never been published.
 
 ## Release process
 
-`.github/workflows/release.yml` is the only producer of published assets. It
-runs when a tag `capnp-wasm-tools-v<version>`,
-`capnp-wasm-compiler-host-v<version>`, or `capnpc-wasm-v<version>` is pushed,
-and the tag must name that flavor's own version, `versions["<flavor>"]` in
-`release.json`. A `workflow_dispatch` run takes a flavor and performs the same
-build and checks as a dry run: it uploads the assets as workflow artifacts and
-never creates a release, an attestation, or a tag. Each flavor has its own
-version and cadence; releasing one flavor never changes another flavor's
-version.
+`.github/workflows/release.yml` is the only producer of published assets. It is
+held on the `quality/held-workflows` branch with the other new workflows until
+they reach `main`, and it has never run. It runs when a tag
+`capnp-wasm-tools-v<version>`, `capnp-wasm-compiler-host-v<version>`, or
+`capnpc-wasm-v<version>` is pushed, and the tag must name that flavor's own
+version, `versions["<flavor>"]` in `release.json`. A `workflow_dispatch` run
+takes a flavor and performs the same build and checks as a dry run: it uploads
+the assets as workflow artifacts and never creates a release, an attestation, or
+a tag. Each flavor has its own version and cadence; releasing one flavor never
+changes another flavor's version.
 
 1. Check that the flavor's entry in `release.json` names the version to release,
    and change only that entry if it does not (the
