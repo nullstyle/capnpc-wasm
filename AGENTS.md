@@ -39,10 +39,13 @@ release status; update it instead of restating status here.
   `lockfile_version = 1` (CI's mise 2026.9.1 cannot read version 2), and run
   `mise run check`. Native Clang builds native tools; the WASI SDK Clang stays
   off `PATH`.
-- Keep the Zig pin equal to `ref/capnp-zig/mise.toml`. `mise.lock` records
-  hand-verified sha256 digests with minisign provenance for that development
-  build, which only the community mirrors serve: after a Zig bump run
-  `mise lock zig`, then `mise run mirror:zig -- lock --write`.
+- Keep the Zig pin equal to `ref/capnp-zig/mise.toml`. ziglang.org no longer
+  serves that development build, so `mise.toml` turns the Zig community mirrors
+  off and redirects its downloads to the project's `toolchain-zig-<version>`
+  release; mise still checks the ZSF minisign signature and the sha256 that
+  `mise.lock` records. A Zig bump publishes a new release first (a human
+  action), then runs `mise lock zig` and `mise run mirror:zig -- lock --write`;
+  CONTRIBUTING.md lists the steps.
 - Preserve the standard binary `CodeGeneratorRequest` boundary with host
   orchestration of generators, WASI Preview 1 command modules (`wasm32-wasip1`),
   standardized Wasm exception handling, and error propagation. Hosts keep

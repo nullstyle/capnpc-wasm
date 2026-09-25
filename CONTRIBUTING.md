@@ -89,14 +89,31 @@ mise run test:studio chromium firefox webkit
 3. Run `mise run check`.
 
 Zig must equal the `zig` line of `ref/capnp-zig/mise.toml` (both are
-`0.17.0-dev.1683+5ceec001b` today). ziglang.org no longer lists that development
-build: mise installs it from the Zig community mirrors and checks the sha256
-that `mise.lock` records with minisign provenance, so after a Zig bump run
-`mise lock zig`, then `mise run mirror:zig -- lock --write`, which records the
-checksums from signature-verified downloads. The Wasmtime pin is copied into
-every tools archive as the required runtime version, so bumping it changes the
-launcher contract for consumers. The Deno pin is the version for direct and
-worker execution.
+`0.17.0-dev.1683+5ceec001b` today). ziglang.org no longer serves that
+development build, so mise installs it from this repository's pre-release
+`toolchain-zig-<version>`, which holds the Zig Software Foundation's signed
+tarballs: `mise.toml` turns the Zig community mirrors off, and its
+`url_replacements` rule sends core:zig's ziglang.org requests for each tarball
+and its `.minisig` to the release. mise still verifies the minisign signature
+and the sha256 that `mise.lock` records. A Zig bump therefore publishes the new
+release before it locks:
+
+1. `mise run mirror:zig -- stage` downloads the four tarballs and their
+   signatures (from ziglang.org or a community mirror), verifies them, and
+   prints the `gh release create` command.
+2. A maintainer runs that command to publish `toolchain-zig-<version>`.
+3. `mise run mirror:zig -- verify <release URL>` checks the published copies.
+4. `mise lock zig` records the new version with ziglang.org URLs and no
+   checksums; `mise run mirror:zig -- lock --write` replaces them with the
+   release URLs and the verified sha256 digests. Run it after every
+   `mise lock zig`, which drops them again.
+5. `mise run mirror:zig -- verify` checks that the lock, the rule, and the
+   release agree, and `mise run check:lock-urls` that every locked file and
+   signature is served.
+
+The Wasmtime pin is copied into every tools archive as the required runtime
+version, so bumping it changes the launcher contract for consumers. The Deno pin
+is the version for direct and worker execution.
 
 ### Reference bump checklist
 
@@ -138,9 +155,10 @@ Per reference:
   `mise exec -- go -C <dir> mod tidy` in both directories so `go.sum` matches;
   builds use `-mod=readonly`.
 - `capnp-zig`, in this order: (a) if `ref/capnp-zig/mise.toml` changed its `zig`
-  line, bump the tool pin as above, then run `mise lock zig` and
-  `mise run mirror:zig -- lock --write`; (b) with the new gitlink staged, run
-  `mise run audit:nightly` (network, read-only `gh`) and commit the regenerated
+  line, bump the tool pin with the Zig steps above (publish the new mirror
+  release, then `mise lock zig` and `mise run mirror:zig -- lock --write`); (b)
+  with the new gitlink staged, run `mise run audit:nightly` (network, read-only
+  `gh`) and commit the regenerated
   `docs/release-evidence/nightly-confidence.json` with the bump: the bump
   restarts the nightly streak, and `check:evidence` in `lint` and
   `test:evidence` in `test` fail until the ledger names the new gitlink; (c) run

@@ -87,9 +87,9 @@ on GitHub. Runs on verification branches (push or manual triggers) never count.
 A push-triggered verification run of the held workflow
 ([36095603432](https://github.com/nullstyle/capnpc-wasm/actions/runs/36095603432),
 2026-09-25) failed on macOS at the Wasm artifact check, a false positive fixed
-in `c74a7aa`, and in the Linux cold bootstrap at the Zig community mirror, which
-lacks the `.minisig` file; that waits on the upload of the project's own mirror.
-A second verification run, on the throwaway branch `verify/held-nightly`
+in `c74a7aa`, and in the Linux cold bootstrap at a Zig community mirror that
+lacks the `.minisig` file. A second verification run, on the throwaway branch
+`verify/held-nightly`
 ([36106633950](https://github.com/nullstyle/capnpc-wasm/actions/runs/36106633950),
 2026-09-25: `55e8e2d` from `main` plus the held workflows), passed every job but
 one, including the cold bootstrap on ubuntu-24.04, ubuntu-24.04-arm, macos-15,
@@ -102,12 +102,17 @@ that fix, the job passed in the verification runs
 and
 [36120138448](https://github.com/nullstyle/capnpc-wasm/actions/runs/36120138448)
 of T08's branch. The Linux cold bootstraps passed in 36106633950 by mirror
-choice: mise tries the community mirrors in random order and fetches the
+choice: mise tried the community mirrors in random order and fetched the
 `.minisig` from the one that served the tarball, with no fallback, and
-zig.bcr.ist has none, so the failure recurs at random until the project's own
-Zig mirror exists (a run of the per-push CI workflow,
+zig.bcr.ist has none (a run of the per-push CI workflow,
 [36098649887](https://github.com/nullstyle/capnpc-wasm/actions/runs/36098649887),
 failed at that download on attempt 1 and passed on attempt 2 with no change).
+`mise.lock` now points at the project's own Zig release,
+`toolchain-zig-0.17.0-dev.1683+5ceec001b`: `mise.toml` turns the community
+mirrors off and sends mise's Zig requests there, and mise still verifies the
+minisign signature and the locked sha256, so every install takes the same files
+from one source. Cold local installs on macOS arm64 with mise 2026.9.1 and
+2026.9.12 took the tarball and its signature from the release.
 
 The ledger, [nightly-confidence.json](release-evidence/nightly-confidence.json),
 is generated. `mise run audit:nightly` reads the gitlink from the index and the

@@ -265,6 +265,14 @@ every flavor it applies to has shipped it.
   accepts advisories for 2.6.8, the full SDK and compiler-host package READMEs
   no longer say worker execution requires that release, and `lint` also runs the
   strict SDK type check.
+- Toolchain: the pinned Zig development build installs from this repository's
+  pre-release `toolchain-zig-0.17.0-dev.1683+5ceec001b` instead of a randomly
+  chosen Zig community mirror. `mise.toml` turns the mirrors off and redirects
+  core:zig's downloads there with `url_replacements`; mise still verifies the
+  ZSF minisign signature and the locked sha256. `mise.lock` names the release
+  URLs, `mise run mirror:zig -- verify` checks the lock, the rule, and the
+  release against each other, and `check:lock-urls` also checks each Zig
+  `.minisig`.
 
 ## capnp-wasm-compiler-host
 
