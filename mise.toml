@@ -10,12 +10,6 @@ run_auto_install = false
 [tool_alias.wasi-sdk]
 backend = "github:WebAssembly/wasi-sdk"
 
-# The supported Deno worker runtime as a second, separately named tool:
-# `deno-worker` on PATH, locked and checksummed like every other tool, while
-# `deno` stays the pinned direct-execution release.
-[tool_alias.deno-worker]
-backend = "github:denoland/deno"
-
 [tools]
 # Native bootstrap and generated C++ checks. clangxx supplies the C++ driver.
 clang = "23.1.0"
@@ -56,22 +50,6 @@ linux-arm64 = { asset_pattern = "wasi-sdk-*-arm64-linux.tar.gz" }
 macos-x64 = { asset_pattern = "wasi-sdk-*-x86_64-macos.tar.gz" }
 macos-arm64 = { asset_pattern = "wasi-sdk-*-arm64-macos.tar.gz" }
 
-[tools.deno-worker]
-# Keep equal to supportedDenoWorkerVersion in sdk/typescript/environment.ts;
-# deno-worker:install and test:deno-worker fail when the binary reports
-# another version.
-version = "2.6.8"
-version_prefix = "v"
-# The zip holds one `deno` binary; expose it only as `deno-worker`.
-rename_exe = "deno-worker"
-filter_bins = ["deno-worker"]
-
-[tools.deno-worker.platforms]
-linux-x64 = { asset_pattern = "deno-x86_64-unknown-linux-gnu.zip" }
-linux-arm64 = { asset_pattern = "deno-aarch64-unknown-linux-gnu.zip" }
-macos-x64 = { asset_pattern = "deno-x86_64-apple-darwin.zip" }
-macos-arm64 = { asset_pattern = "deno-aarch64-apple-darwin.zip" }
-
 [env]
 CC = "clang"
 CXX = "clang++"
@@ -100,8 +78,6 @@ _.source = { path = "{{config_root}}/scripts/lib/toolchain-env.sh", tools = true
 fmt_paths = "README.md AGENTS.md SECURITY.md CONTRIBUTING.md CHANGELOG.md ref/README.md patches/capnproto/README.md patches/capnp-zig/README.md generators/README.md generators/zig/README.md docs tests sdk examples scripts/*.ts"
 go_dirs = "sdk/go tests/hosts/wazero tests/consumers/go tests/package"
 zig_dirs = "generators/zig tests/consumers/zig tests/wire tests/reflection tests/generator_api tests/rpc_codegen"
-# The supported Deno worker runtime has one source: sdk/typescript/environment.ts.
-worker_version_sed = 's/^export const supportedDenoWorkerVersion = .\([0-9][0-9.]*\).;$/\1/p'
 # Environment the parity suites may read: the keep-test-dirs switch plus the
 # variables they forward to native compilers and the pinned language tools,
 # including what scripts/lib/toolchain-env.sh exports in its fallback mode
@@ -193,11 +169,10 @@ description = "Static checks, the tool doctor, and native/Wasm parity across the
 depends = ["lint", "doctor", "test"]
 
 [tasks.ci]
-description = "Run the CI check job locally: check, package gates, the Deno worker lane, the Go race tests, browser bootstrap, then require a clean tree"
+description = "Run the CI check job locally: check, package gates, the Go race tests, browser bootstrap, then require a clean tree"
 depends = [
   "check",
   "test:package",
-  "test:deno-worker",
   "test:sdk-go-race",
   "test:browser-bootstrap",
 ]
@@ -320,39 +295,6 @@ run = 'deno run --config tests/browser/deno.json --frozen --allow-read --allow-w
 description = "Run offline SDK parity, cancellation, the termination acceptance, and the conformance corpus in Chromium, Firefox, and WebKit, all engines at once (tests/browser/README.md lists the deadline and job variables)"
 depends = ["build:native", "build:sdk"]
 run = "deno run --config tests/browser/deno.json --frozen --no-prompt --allow-read --allow-write=build --allow-run --allow-env --allow-sys --allow-net=127.0.0.1 tests/browser/run.ts"
-
-[tasks."deno-worker:install"]
-description = "Install the locked Deno worker runtime (tool deno-worker) and check it against sdk/typescript/environment.ts"
-run = '''
-set -eu
-version="$(sed -n '{{vars.worker_version_sed}}' sdk/typescript/environment.ts)"
-test -n "$version" || { echo "supportedDenoWorkerVersion not found in sdk/typescript/environment.ts" >&2; exit 1; }
-# --locked installs the recorded artifact and never rewrites mise.lock.
-mise install --locked deno-worker
-case "$("$(mise where deno-worker)/deno-worker" --version | head -n 1)" in
-  "deno $version "*) ;;
-  *) echo "mise.toml pins deno-worker $(mise current deno-worker) but sdk/typescript/environment.ts requires Deno $version" >&2; exit 1 ;;
-esac
-'''
-
-[tasks."test:deno-worker"]
-description = "Run the SDK tests and the compiler-host gate on the supported Deno worker runtime (worker termination coverage)"
-depends = ["deno-worker:install", "build:native", "build:sdk"]
-# Both this lane and test:compiler-host-package write
-# build/test/compiler-host/<stem>; run after it whenever both are scheduled.
-wait_for = ["test:compiler-host-package"]
-run = '''
-set -eu
-version="$(sed -n '{{vars.worker_version_sed}}' sdk/typescript/environment.ts)"
-test -n "$version" || { echo "supportedDenoWorkerVersion not found in sdk/typescript/environment.ts" >&2; exit 1; }
-deno_bin="$(mise where deno-worker)/deno-worker"
-case "$("$deno_bin" --version | head -n 1)" in
-  "deno $version "*) ;;
-  *) echo "expected Deno $version at $deno_bin, got: $("$deno_bin" --version | head -n 1)" >&2; exit 1 ;;
-esac
-"$deno_bin" test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/
-deno run --allow-read --allow-write=build --allow-run=deno,cmake,build/native/bin/normalize-request,build/native/bin/capnp,"$deno_bin" scripts/test-compiler-host-package.ts "$deno_bin"
-'''
 
 [tasks."test:termination-canary"]
 description = "Canary, not a gate: does Worker.terminate() stop a spinning JS, Wasm, or Wasm catch_all guest on the pinned Deno and the newest Deno release? (the newest release needs network; CAPNP_CANARY_LATEST=0 skips it)"
@@ -515,17 +457,16 @@ for ((round = 1; round <= rounds; round++)); do
 done
 '''
 
-[tasks."test:deno-worker-soak"]
-description = "Repeat the SDK tests on the locked Deno worker runtime (termination on timeout and abort, restart, dispose); CAPNP_SOAK_ROUNDS rounds, default 5"
-depends = ["deno-worker:install", "build:wasm", "build:rust", "build:go", "build:zig"]
+[tasks."test:sdk-ts-soak"]
+description = "Repeat the TypeScript SDK tests (test:sdk-ts) on the pinned Deno: worker cancellation on timeout and abort, recovery, dispose; CAPNP_SOAK_ROUNDS rounds, default 5"
+depends = ["build:wasm", "build:rust", "build:go", "build:zig"]
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-deno_bin="$(mise where deno-worker)/deno-worker"
 rounds="${CAPNP_SOAK_ROUNDS:-5}"
 for ((round = 1; round <= rounds; round++)); do
-  echo "worker soak round $round of $rounds on $("$deno_bin" --version | head -n 1)"
-  "$deno_bin" test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/
+  echo "SDK soak round $round of $rounds on $(deno --version | head -n 1)"
+  deno test --config sdk/typescript/deno.json --unstable-sloppy-imports --allow-read sdk/typescript/
 done
 '''
 

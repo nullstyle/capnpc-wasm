@@ -935,66 +935,6 @@ url = "https://dl.deno.land/release/v2.9.6/deno-aarch64-apple-darwin.zip"
 checksum = "sha256:7d4524b82bcc557fe020a1a5b56956ed42b992ae5b28026e8ad5d17329533f5f"
 url = "https://dl.deno.land/release/v2.9.6/deno-x86_64-apple-darwin.zip"
 
-[[tools.deno-worker]]
-version = "2.6.8"
-backend = "github:denoland/deno"
-specifiers = ["2.6.8"]
-
-[tools.deno-worker.options]
-asset_pattern = "deno-aarch64-unknown-linux-gnu.zip"
-version_prefix = "v"
-
-[tools.deno-worker."platforms.linux-arm64"]
-checksum = "sha256:09a0a800be639986515540ddae2f2752625ed412f63d36c7152c2a72ee78c2d7"
-url = "https://github.com/denoland/deno/releases/download/v2.6.8/deno-aarch64-unknown-linux-gnu.zip"
-url_api = "https://api.github.com/repos/denoland/deno/releases/assets/349599211"
-provenance = "github-attestations"
-
-[[tools.deno-worker]]
-version = "2.6.8"
-backend = "github:denoland/deno"
-specifiers = ["2.6.8"]
-
-[tools.deno-worker.options]
-asset_pattern = "deno-x86_64-unknown-linux-gnu.zip"
-version_prefix = "v"
-
-[tools.deno-worker."platforms.linux-x64"]
-checksum = "sha256:e24aa1134b220d7185fa78136886b9a2d4014f0fa16ac6bec08b0f8f623344a1"
-url = "https://github.com/denoland/deno/releases/download/v2.6.8/deno-x86_64-unknown-linux-gnu.zip"
-url_api = "https://api.github.com/repos/denoland/deno/releases/assets/349666555"
-provenance = "github-attestations"
-
-[[tools.deno-worker]]
-version = "2.6.8"
-backend = "github:denoland/deno"
-specifiers = ["2.6.8"]
-
-[tools.deno-worker.options]
-asset_pattern = "deno-aarch64-apple-darwin.zip"
-version_prefix = "v"
-
-[tools.deno-worker."platforms.macos-arm64"]
-checksum = "sha256:9dee1808ebd2c9b95710e2ffd80c756f29df0364b5d6a53df017521cc2383783"
-url = "https://github.com/denoland/deno/releases/download/v2.6.8/deno-aarch64-apple-darwin.zip"
-url_api = "https://api.github.com/repos/denoland/deno/releases/assets/349594747"
-provenance = "github-attestations"
-
-[[tools.deno-worker]]
-version = "2.6.8"
-backend = "github:denoland/deno"
-specifiers = ["2.6.8"]
-
-[tools.deno-worker.options]
-asset_pattern = "deno-x86_64-apple-darwin.zip"
-version_prefix = "v"
-
-[tools.deno-worker."platforms.macos-x64"]
-checksum = "sha256:03a0dccb3fb3d8659cc737e7cc1bbe579d919752725ed2be8c145f75b473add8"
-url = "https://github.com/denoland/deno/releases/download/v2.6.8/deno-x86_64-apple-darwin.zip"
-url_api = "https://api.github.com/repos/denoland/deno/releases/assets/349653233"
-provenance = "github-attestations"
-
 [[tools.go]]
 version = "1.27.1"
 backend = "core:go"
