@@ -171,8 +171,9 @@ Deno.test("SDK instrumentation keeps function names in trap backtraces", async (
   );
   const trap = (failure.cause as Error).cause;
   assert(trap instanceof WebAssembly.RuntimeError, `no trap: ${trap}`);
+  // V8 names Wasm frames `at bravo (wasm://wasm/<hash>:...)`.
   const frames = (trap.stack ?? "").split("\n").filter((line) =>
-    line.includes("wasm-function")
+    line.includes("wasm://")
   );
   assert(
     /\bbravo\b/.test(frames[0]) && /\bcharlie\b/.test(frames[1]),
