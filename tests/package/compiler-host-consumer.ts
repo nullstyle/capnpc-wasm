@@ -83,8 +83,17 @@ assert(
   await digest(pathResult.request) !== await digest(reversedPaths.request),
   "include order was ignored",
 );
-// Worker execution runs on every Deno release; cancellation stops the guest
-// inside the worker, which then serves the next job.
+// Worker execution is admitted on every Deno release; cancellation stops the
+// guest inside the worker, which then serves the next job. Count the workers
+// the client starts: all of the jobs below must run on one.
+let workersCreated = 0;
+const RealWorker = globalThis.Worker;
+globalThis.Worker = class extends RealWorker {
+  constructor(...args: ConstructorParameters<typeof Worker>) {
+    super(...args);
+    workersCreated++;
+  }
+} as typeof Worker;
 const worker = await createWorkerCompiler(workerURL, {
   ...modules,
   generators: { cpp: loopGuest },
@@ -142,6 +151,10 @@ try {
       `worker did not recover after ${mode}`,
     );
   }
+  assert(
+    workersCreated === 1,
+    `cancellation replaced the worker (${workersCreated} workers started)`,
+  );
   const limited = await createCompiler(modules, {
     limits: { requestBytes: 1 },
   });
