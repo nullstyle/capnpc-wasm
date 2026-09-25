@@ -44,6 +44,7 @@ function engineThat(
       mode,
       hasCounter: true,
       countBeforeCancel: 10,
+      advanceBeforeCancel: 5,
       atRejection: 20,
       final: 30,
       rejection: { name: rejections[mode], message: "" },
@@ -88,6 +89,32 @@ Deno.test("Every engine on every host: both guests stop within the bound", async
       );
     }
   }
+});
+
+Deno.test("A stop counts when its last movement is within the bound", async () => {
+  // The page watches for the bound plus the quiet period, so a stop at 1.2 s
+  // is seen even though it is quiet only at 2.2 s; a stop at 2.5 s fails.
+  const late = await checkIsolatedTermination(
+    "chromium",
+    engineThat(() => 1_200),
+    "linux",
+  );
+  assert(late.verdict.startsWith("PASS chromium"), late.verdict);
+  const message = await rejection(() =>
+    checkIsolatedTermination("chromium", engineThat(() => 2_500), "linux")
+  );
+  assert(message.includes("kept running past"), message);
+});
+
+Deno.test("A counter that does not move just before the cancellation fails", async () => {
+  const message = await rejection(() =>
+    checkIsolatedTermination(
+      "webkit",
+      engineThat(() => 0, () => ({ advanceBeforeCancel: 0 })),
+      "darwin",
+    )
+  );
+  assert(message.includes("did not move within 50 ms"), message);
 });
 
 Deno.test("Every engine: a guest that keeps running fails, WebKit's pure guest included", async () => {

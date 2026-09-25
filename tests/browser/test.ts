@@ -1224,18 +1224,21 @@ try {
 
   // Repeated cancellation exposes engine faults that a single one can miss:
   // twenty cycles on one client, alternating an abort and a timeout, each
-  // followed by a complete generation on the same client. The cancelled job
-  // runs a compiler that spins forever, so it can never finish first; both
-  // cancellations reach it while it runs. On this page, which is not
-  // cross-origin isolated, an abort replaces the worker and a timeout keeps it.
-  // The abort fires at 50 ms, before the job's 2 s deadline, which bounds a
-  // spinning guest that terminate() leaves running.
+  // followed by a complete compile on the same client. The client's zig
+  // generator spins forever, so the cancelled job, a compile for zig, can never
+  // finish first, and both cancellations reach a running guest; the recovery
+  // compile then runs the real compiler and the C++, Rust, and Go generators.
+  // On this page, which is not cross-origin isolated, an abort replaces the
+  // worker and a timeout keeps it. The abort fires at 50 ms, before the job's
+  // 2 s deadline, which bounds a spinning guest that terminate() leaves
+  // running.
+  const soakLanguages = ["cpp", "rust", "go"] as const;
   await evaluate(
     async ({ spinGuest }) => {
       const state = (globalThis as BrowserGlobal).capnpTest;
       state.soak = await state.sdk.createWorkerCompiler(state.workerURL, {
         ...state.modules,
-        compiler: spinGuest,
+        generators: { ...state.modules.generators, zig: spinGuest },
       });
     },
     { spinGuest: data.spinGuest },
@@ -1244,18 +1247,19 @@ try {
   for (let iteration = 0; iteration < 20; iteration++) {
     const mode = iteration % 2 === 0 ? "abort" : "timeout";
     const result = await evaluate(
-      async ({ mode, input, request }) => {
+      async ({ mode, input, recovered }) => {
         const soak = (globalThis as BrowserGlobal).capnpTest.soak!;
         const controller = new AbortController();
+        const spinning = { ...input, generators: ["zig" as const] };
         let pending: Promise<Result>;
         if (mode === "abort") {
-          pending = soak.compile(input, {
+          pending = soak.compile(spinning, {
             signal: controller.signal,
             timeoutMs: 2000,
           });
           setTimeout(() => controller.abort(), 50);
         } else {
-          pending = soak.compile(input, { timeoutMs: 100 });
+          pending = soak.compile(spinning, { timeoutMs: 100 });
         }
         try {
           await pending;
@@ -1270,12 +1274,9 @@ try {
               { cause: error },
             );
           }
-          let result: Awaited<ReturnType<WorkerCompiler["generate"]>>;
+          let result: Result;
           try {
-            result = await soak.generate({
-              request: new Uint8Array(request),
-              generators: input.generators,
-            });
+            result = await soak.compile({ ...input, generators: recovered });
           } catch (cause) {
             throw new Error(
               `worker recovery after ${mode} failed: ${
@@ -1302,7 +1303,7 @@ try {
       {
         mode,
         input: data.scenarios[0].input,
-        request: data.scenarios[0].request,
+        recovered: [...soakLanguages],
       },
       `${engine} worker ${mode} recovery cycle ${iteration + 1}`,
     );
@@ -1312,7 +1313,12 @@ try {
     );
     equalOutputs(
       result.outputs,
-      data.scenarios[0].expected,
+      Object.fromEntries(
+        soakLanguages.map((language) => [
+          language,
+          data.scenarios[0].expected[language],
+        ]),
+      ),
       `worker recovery after ${mode}`,
     );
     console.log(

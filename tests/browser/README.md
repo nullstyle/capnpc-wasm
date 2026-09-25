@@ -114,14 +114,16 @@ the generated fixtures for inspection.
 
 Malformed and truncated Zig requests must exit unsuccessfully with preserved
 diagnostics and no exposed output files. Twenty alternating worker abort and
-timeout operations, each cancelling a compile whose compiler spins forever so
-that it can never finish first, must reject their jobs and let the same client
-then generate identical output; on this page, which is not cross-origin
-isolated, each abort replaces the worker and each timeout keeps it. The step
-deadlines detect a stalled browser without changing the SDK's cancellation or
-its normal 30-second recovery budget. Native output and temporary browser
-profiles stay under `build/test/browser-*`; the output remains available for
-inspection.
+timeout operations must reject their jobs and let the same client then compile
+identical output. Each cancels a compile for a zig generator that spins forever
+(`spin-yield.wat`), so the job can never finish first; each recovery compiles
+the workspace with the real compiler and the C++, Rust, and Go generators, whose
+files are checked against the native oracle. On this page, which is not
+cross-origin isolated, each abort replaces the worker and each timeout keeps it.
+The step deadlines detect a stalled browser without changing the SDK's
+cancellation or its normal 30-second recovery budget. Native output and
+temporary browser profiles stay under `build/test/browser-*`; the output remains
+available for inspection.
 
 Direct and worker clients also reject aggregate workspace and output overages
 without returning partial output, then successfully execute another permitted
@@ -149,11 +151,16 @@ cancellations; they do not show that a cancelled guest stopped running.
 `termination.ts` does. Two more pages audit every Worker the SDK creates and
 terminates. On a cross-origin-isolated page (COOP and COEP), a probe worker
 wraps the SDK's `worker.js` and counts the guest's progress in shared memory.
-After each of a timeout, an abort, and a dispose, the counter must stop within 2
-seconds, forty times the 50 ms interval at which the page samples it. The worker
-must survive the timeout and the abort, with no `terminate()` call and no second
-worker, and a follow-up job on the same client must time out in its turn. Two
-guests run through the whole SDK path as the job's compiler:
+Before each cancellation the counter must move within one 50 ms sample, so a
+stop can be observed. After each of a timeout, an abort, and a dispose, the page
+watches the counter for up to 3 seconds, until it has not moved for one second,
+and its last movement must come within 2 seconds of the rejection, forty times
+the 50 ms interval at which the page samples it. The worker must survive the
+timeout and the abort: once the page has waited out the client's one-second
+grace, in which a cancelled guest must report, no `terminate()` call and no
+second worker may have occurred, and a follow-up job on the same client must
+time out in its turn. Two guests run through the whole SDK path as the job's
+compiler:
 
 - `spin-counter.wat`, a loop that never calls an import, like a compiler stuck
   computing; the probe counts its polls of the `capnp_wasm.interrupt` import the
@@ -162,16 +169,17 @@ guests run through the whole SDK path as the job's compiler:
   counts the calls.
 
 A plain page repeats the timeout without isolation. There the guest cannot be
-observed, but the timeout must reject within its deadline, terminate no worker,
-and leave the worker free for a follow-up job: a guest still running a second
-after its cancellation would have cost the client its worker. The checks run
+observed, but the timeout must reject within its deadline, and the page then
+waits out the client's grace before the follow-up job: a guest that had not
+reported by then would have made the client terminate its worker, so no
+`terminate()` call and no second worker show that it stopped. The checks run
 after everything else.
 
-| Engine                         | Pure-Wasm guest stops after | Host-calling guest stops after |
-| ------------------------------ | --------------------------- | ------------------------------ |
-| Chromium 153.0.8010.12 (macOS) | 0-53 ms                     | 0 ms                           |
-| WebKit 26.6 (macOS)            | 0-51 ms                     | 0 ms                           |
-| Firefox 155.0 (Linux CI)       | within the bound (asserted) | within the bound (asserted)    |
+| Engine                         | Pure-Wasm guest stops after    | Host-calling guest stops after |
+| ------------------------------ | ------------------------------ | ------------------------------ |
+| Chromium 153.0.8010.12 (macOS) | 0-53 ms                        | 0 ms                           |
+| WebKit 26.6 (macOS)            | 0-51 ms                        | 0 ms                           |
+| Firefox 155.0 (Linux CI)       | asserted; first CI run pending | asserted; first CI run pending |
 
 The macOS figures were measured on arm64 on 2026-09-24, over a timeout, an
 abort, and a dispose each; the 50 ms sampling quantizes them. Before the SDK
@@ -240,8 +248,9 @@ Replacing the whole SDK client and retaining the full Wasm instance did not
 remove the old-engine stall. Twenty replacements of idle workers passed. The
 full browser regression with revision 2248 stopped during its twelfth recovery.
 The current twenty-cycle test, whose ten aborts each replace the worker, keeps
-exercising that pattern in each engine; compiler requests and every generated
-file remain checked against the native oracle. The A/B evidence motivates the
+exercising that pattern in each engine: every recovery runs the real compiler,
+and its C++, Rust, and Go files are checked against the native oracle, while the
+suite's parity rows check the compiler requests. The A/B evidence motivates the
 browser upgrade without claiming it proves the cause of the earlier hosted trap.
 
 After the upgrade, the complete macOS three-engine matrix passed all sixty

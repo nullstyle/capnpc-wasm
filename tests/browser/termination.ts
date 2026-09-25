@@ -14,9 +14,11 @@
 //
 // The SDK stops both inside the worker, whatever terminate() does: a timeout
 // at the deadline the worker enforces itself, an abort or dispose through the
-// shared cell. The worker survives a timeout or an abort, and a second job on
-// the same client proves it: had the guest kept running past the client's
-// one-second grace, the client would have replaced the worker.
+// shared cell. After a timeout or an abort the page waits out the client's
+// one-second grace (watching the counter where there is one) before it runs a
+// follow-up job on the same client: a guest still running at the end of the
+// grace would have made the client terminate its worker, which the audit
+// counts, so no terminate() call and no second worker mean the guest reported.
 //
 // Under cross-origin isolation (COOP/COEP) the counter is shared memory, which
 // keeps counting whether or not the worker's message port is open after
@@ -30,11 +32,21 @@ import type { Engine } from "./engines.ts";
  * (measured idle in Chromium and WebKit); the page samples the counter every
  * 50 ms, so it observes stops of 0 to about 50 ms. The bound is forty times
  * that sampling interval, for loaded CI hosts, and every engine shares it.
+ * The page watches the counter for the bound plus `quietMs` after the
+ * rejection, so a guest that stops just inside the bound is still seen to
+ * stop, and the check requires its last movement within the bound.
  */
 export const terminationBoundMs = 2_000;
 
 /** A counter that has not moved for this long has stopped. */
 export const quietMs = 1_000;
+
+/**
+ * How long the worker client waits for a cancelled job to report before it
+ * terminates the worker (`settleGraceMs` in sdk/typescript/worker-client.ts),
+ * plus a margin. The page waits this long before a follow-up job.
+ */
+export const clientGraceMs = 1_000 + 200;
 
 /** The SDK deadline for the timeout case, and for the follow-up job. */
 export const timeoutMs = 300;
@@ -113,6 +125,12 @@ export interface TerminationSample {
   hasCounter: boolean;
   /** The counter when the job was cancelled; positive means the guest ran. */
   countBeforeCancel: number | null;
+  /**
+   * How far the counter moved in one 50 ms sample just before the
+   * cancellation. It must be positive: a guest whose counter moves more
+   * slowly than the sampling could otherwise read as stopped at once.
+   */
+  advanceBeforeCancel: number | null;
   atRejection: number | null;
   final: number | null;
   rejection: { name: string; message: string };
@@ -197,7 +215,7 @@ export async function measureTermination(
   label: string,
 ): Promise<TerminationSample> {
   return await evaluate(
-    async ({ guest, mode, timeoutMs, boundMs, quietMs }) => {
+    async ({ guest, mode, timeoutMs, boundMs, quietMs, graceMs }) => {
       type Client = {
         compile(
           job: unknown,
@@ -259,7 +277,12 @@ export async function measureTermination(
           await sleep(10);
         }
       } else await sleep(100);
+      const sampled = read();
+      if (counter) await sleep(50);
       const countBeforeCancel = read();
+      const advanceBeforeCancel = counter
+        ? countBeforeCancel! - sampled!
+        : null;
       if (mode === "abort") controller.abort();
       if (mode === "dispose") client.dispose();
       let rejection: { name: string; message: string };
@@ -278,7 +301,7 @@ export async function measureTermination(
       let lastChange = rejectedAt;
       let stoppedAfterMs: number | null = null;
       if (counter) {
-        while (performance.now() - rejectedAt < boundMs) {
+        while (performance.now() - rejectedAt < boundMs + quietMs) {
           await sleep(50);
           const now = performance.now();
           const value = read();
@@ -291,6 +314,11 @@ export async function measureTermination(
           }
         }
       }
+      // Wait out the client's grace in any case (the loop above may end
+      // sooner): a guest that had not reported by then would have made the
+      // client terminate its worker, which terminateCalls then shows.
+      const waited = performance.now() - rejectedAt;
+      if (waited < graceMs) await sleep(graceMs - waited);
       const final = read();
       // A timeout or abort keeps the worker: the next job runs on it once the
       // cancelled guest has stopped, and times out in its turn.
@@ -317,13 +345,21 @@ export async function measureTermination(
         final,
         rejection,
         rejectionAfterMs: Math.round(rejectedAt - started),
+        advanceBeforeCancel,
         stoppedAfterMs,
         followUp,
         terminateCalls,
         workersCreated,
       };
     },
-    { guest, mode, timeoutMs, boundMs: terminationBoundMs, quietMs },
+    {
+      guest,
+      mode,
+      timeoutMs,
+      boundMs: terminationBoundMs,
+      quietMs,
+      graceMs: clientGraceMs,
+    },
     label,
   );
 }
@@ -402,6 +438,10 @@ export async function checkIsolatedTermination(
         (sample.countBeforeCancel ?? 0) > 0,
         `${label}: the guest had not started when the job was cancelled`,
       );
+      assert(
+        (sample.advanceBeforeCancel ?? 0) > 0,
+        `${label}: the guest's counter did not move within 50 ms before the cancellation, so its stop could not be observed`,
+      );
       checkWorker(sample, label);
     }
   }
@@ -409,7 +449,9 @@ export async function checkIsolatedTermination(
   const host = samples.filter((sample) => sample.guest === "host");
   const summary = `pure Wasm: ${describe(pure)}; host calls: ${describe(host)}`;
   const observed = `${engine} termination on ${os}: ${summary}`;
-  const running = samples.filter((sample) => sample.stoppedAfterMs === null);
+  const running = samples.filter((sample) =>
+    sample.stoppedAfterMs === null || sample.stoppedAfterMs > terminationBoundMs
+  );
   assert(
     running.length === 0,
     `${engine} on ${os}: a guest kept running past the ${terminationBoundMs} ms bound after ${
@@ -430,9 +472,11 @@ export async function checkIsolatedTermination(
 
 /**
  * Without cross-origin isolation the engine offers no shared memory, so guest
- * CPU cannot be observed directly: the timeout must still reject within its
- * deadline and keep its worker, which then runs the follow-up job; a guest
- * still running a second after the timeout would have cost the worker.
+ * CPU cannot be observed directly. The timeout must still reject within its
+ * deadline, and after the page has waited out the client's grace (clientGraceMs)
+ * no worker may have been terminated or replaced: a guest that had not
+ * reported by then would have made the client terminate its worker. The
+ * follow-up job then runs on the same worker and times out in its turn.
  */
 export async function checkPlainTermination(
   engine: Engine,
