@@ -86,6 +86,8 @@ jobs:
       # above) against the version in sdk/typescript/environment.ts.
       - name: Verify supported Deno worker execution and termination
         run: mise run test:deno-worker
+      - name: Run the Go SDK concurrency tests under the race detector
+        run: mise run test:sdk-go-race
       - name: Verify checks leave the tree unchanged
         run: |
           changes="$(git status --porcelain)"
@@ -183,9 +185,10 @@ jobs:
         run: mise run test:browser-bootstrap
       - name: Install all pinned browser engines
         run: mise run browser:install chromium firefox webkit
-      # One build feeds all engines. Each browser still runs in a separate
-      # permission-revoking Deno process; no engine can silently be omitted.
-      - name: Verify offline compilation, canonical requests, and cancellation
+      # One build feeds all engines. Each browser runs in its own
+      # permission-revoking Deno process, all three at once, each under an
+      # overall deadline; no engine can silently be omitted.
+      - name: Verify offline compilation, canonical requests, cancellation, termination, and the conformance corpus
         run: mise run test:browser chromium firefox webkit
       - name: Verify Schema Studio workflows and native output parity
         run: mise run test:studio chromium firefox webkit
