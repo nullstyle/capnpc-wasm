@@ -67,13 +67,16 @@ jobs:
       # time.
       - name: Check native and Wasm parity, generated consumers, and SDKs
         run: mise run check
-      # The wasm-digests job compares these between the two hosts.
+      # The wasm-digests job compares these between the two hosts. Neither step
+      # may fail this required job: the comparison is report-only.
       - name: Record the digests of the built Wasm modules
+        continue-on-error: true
         run: |
           mkdir -p build/digests
           (cd dist/wasm && shasum -a 256 -- *.wasm) > build/digests/wasm.sha256
           cat build/digests/wasm.sha256
       - name: Upload the Wasm module digests
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: wasm-sha256-${{ matrix.os }}
@@ -115,7 +118,7 @@ jobs:
   wasm-digests:
     name: Wasm modules across Linux and macOS (report only)
     needs: check
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     continue-on-error: true
