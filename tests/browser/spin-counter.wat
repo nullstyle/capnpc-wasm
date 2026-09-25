@@ -1,11 +1,9 @@
-;; The termination probe's pure-Wasm guest. The probe worker instantiates it
-;; in place of the job's module: it imports one shared page, exports it as the
-;; guest's memory, and increments the page's first word in a loop that never
-;; leaves Wasm, so only an engine that interrupts Wasm itself can stop it.
+;; The termination probe's pure-Wasm guest, submitted as the job's compiler:
+;; a loop that never calls an import, like a guest stuck computing. Only the
+;; SDK's injected interruption checks leave Wasm, and the probe counts their
+;; polls of capnp_wasm.interrupt.
 (module
-  (import "env" "memory" (memory 1 1 shared))
-  (export "memory" (memory 0))
+  (memory (export "memory") 1)
   (func (export "_start")
-    (loop $again
-      (drop (i32.atomic.rmw.add (i32.const 0) (i32.const 1)))
-      (br $again))))
+    (loop $spin
+      (br $spin))))

@@ -52,10 +52,11 @@ above), `wasm` (a Wasm loop over a shared page), or `wasm-catch-all` (the same
 loop inside `try_table (catch_all)` that retries, as C++ `catch (...)` would).
 `tests/hosts/deno/worker-termination-canary.ts` runs every guest under each
 runtime it is given, kills each run after eight seconds, and compares the result
-with the table below: only `supportedDenoWorkerVersion` may stop the guest.
-`mise run test:termination-canary` runs it on the worker runtime, the pinned
-Deno, and the newest release from dl.deno.land (`CAPNP_CANARY_LATEST=0` skips
-that download); the nightly workflow runs the task without gating, and a
+with the table below: only `supportedDenoWorkerVersion` may stop the guest. (The
+SDK no longer checks that deprecated constant; it stays exported for this
+record.) `mise run test:termination-canary` runs it on the worker runtime, the
+pinned Deno, and the newest release from dl.deno.land (`CAPNP_CANARY_LATEST=0`
+skips that download); the nightly workflow runs the task without gating, and a
 departure in either direction fails that job.
 
 Observed on macOS arm64 on 2026-09-24 with the canary (the counter values are in
@@ -77,25 +78,83 @@ there). The catch_all handler never ran on any version: V8's termination is not
 an exception Wasm can catch, so a C++ catch-all cannot keep a terminated guest
 alive, and cannot help it stop either.
 
+## The SDK no longer relies on terminate()
+
+Every guest the TypeScript SDK runs is instrumented before it is compiled (see
+[Interruption](../sdk/typescript/README.md#interruption)): the guest polls the
+host every 65,536 ticks of its loop headers, function entries, import calls, and
+bulk memory operations, every WASI import polls too, and a stop is a trap. A
+timeout stops the guest at its own deadline in every engine. An abort or
+`dispose()` reaches a running guest through a shared cell wherever a
+`SharedArrayBuffer` can cross to the worker (always in Deno and Bun, in browsers
+on cross-origin isolated pages). The worker survives a timeout or an abort and
+serves the next job. `terminate()` is only a fallback: when a cancelled job does
+not report within a second, for an abort without shared memory, and for a failed
+or disposed worker. The evidence in this document therefore records engine
+behavior, for the upstream report and the canary; the SDK's bounds do not depend
+on it.
+
 ## Worker runtime policy
 
-The SDK now admits Deno worker execution only on the verified 2.6.8 version, and
-browsers; Bun, Node.js and unrecognized hosts are rejected before a worker is
-created. Direct compilation remains available on other runtimes. It waits 2.1
-seconds before restarting a terminated Deno worker, counting the wait toward the
-next job's deadline, and it terminates a worker only for timeouts, aborts,
-disposal, and worker failures, never for ordinary job errors. CI retains
-supported-Deno worker tests and the real termination probe; the producer-pinned
-Deno checks direct execution and early rejection of unsupported worker use. This
-is a host compatibility policy, not a Deno engine fix.
+`createWorkerCompiler` runs in browsers, on every Deno release, and on Bun
+(verified locally on Bun 1.3.14; CI does not run Bun). Node.js has no Web
+`Worker` and is rejected, as are unrecognized hosts.
+`supportedDenoWorkerVersion` remains exported but deprecated; nothing checks it,
+and the 2.1-second restart grace is gone. The SDK worker tests run on the pinned
+Deno in `mise run test`.
+
+Measured on macOS arm64 on 2026-09-24 (Deno 2.9.6 and 2.6.8, Bun 1.3.14): a
+guest that spins, sleeps in `poll_oneoff` for an hour, or tail-calls forever
+without a loop rejects at its 200 ms deadline and stops 0.2 to 5 ms later in
+direct execution; in a worker an abort rejects within 0.1 ms, and the next job
+runs on the same worker 0.5 to 1 ms later, which it could not do while the
+cancelled guest still occupied the worker's thread.
+
+## Why terminate() stops nothing on Deno 2.7 and later
+
+In Deno 2.6.8, `WebWorkerHandle::terminate` (runtime/web_worker.rs) signals the
+worker's event loop and schedules `isolate_handle.terminate_execution()` two
+seconds later. From 2.7.6 on (checked through 2.9.7) it only sets the
+termination signal, disentangles the port, and wakes the event loop; the handle
+still holds the isolate handle, but nothing calls `terminate_execution()`. A
+worker that never returns to its event loop, such as a guest computing in Wasm,
+is never stopped, and from 2.8 the process cannot exit while it runs. This has
+not been reported upstream yet.
+
+Deno 2.6.8 has a second, SDK-relevant quirk: when a message event and an expired
+timer are due in the same turn, the message handler runs first, and the timer
+still runs even if that handler cleared it (100 of 100 probes; Deno 2.9.6 runs
+the timer first). The worker client therefore ignores every callback that
+arrives after its exchange has ended.
 
 ## Browsers
 
-Browser engines have their own termination behavior, which the browser suite's
+The browser suite's
 [termination acceptance](../tests/browser/README.md#termination-acceptance)
-measures with a shared counter after a timeout, an abort, and a dispose.
-Chromium stops a running guest about 2.05 s after `terminate()`. WebKit stops a
-guest when it next calls into JavaScript (a WASI import), but never stops a loop
-that stays in Wasm; that case is an expected failure until T08's in-guest
-interruption (decision D1 = A) lands. Firefox runs in the hosted Linux job; it
-cannot launch on the development host where the table was measured.
+measures SDK cancellation with a shared counter after a timeout, an abort, and a
+dispose. With in-guest interruption, every guest stops within the counter's 50
+ms sampling in Chromium 153 and WebKit 26.6 on macOS arm64, WebKit's pure-Wasm
+loop included, and the worker survives a timeout or an abort. Without isolation,
+a timeout still stops the guest at its deadline and keeps the worker, which
+serves the next job at once. Firefox runs in the hosted Linux job; it cannot
+launch on the development host.
+
+The engines' own `terminate()` differs, as measured before in-guest
+interruption: on Linux CI (run 36103736516) Chromium stopped a terminated
+worker's Wasm about 2.01 to 2.02 s after `terminate()`, Firefox at once in all
+six cases, and WebKit stopped a guest when it next called into JavaScript but
+never stopped a loop that stayed in Wasm (GAP2-V1). The SDK's bounds no longer
+depend on those delays: without cross-origin isolation an abort terminates the
+worker, and a guest that `terminate()` does not stop runs only until its own
+`timeoutMs` and then traps.
+
+## Alternatives considered
+
+- A `node:vm` watchdog (`runInContext` with a timeout around `_start`) stops a
+  Wasm loop on Deno and Node on the calling thread, but cannot deliver an abort,
+  does not stop Wasm on Bun, and races the next script it kills if the guest
+  finishes just as the watchdog fires (GAP2-06). It is not used.
+- A subprocess host (`Deno.Command`, killed on cancellation) stops anything, but
+  needs `--allow-run` for the Deno binary, which is effectively `-A` for the
+  child, does not exist in browsers, and complicates packaging (GAP2-07). It is
+  not used; it remains a possible opt-in for crash and memory containment.

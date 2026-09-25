@@ -679,7 +679,8 @@ try {
   // The termination acceptance (TST-04) runs a spinning guest on two more
   // pages that audit every Worker the SDK creates and terminates: one
   // cross-origin isolated, whose shared counter shows whether cancellation
-  // stopped the guest, and one plain, where only the rejection is visible.
+  // stopped the guest, and one plain, where the rejection, the terminate()
+  // calls, and a follow-up job on the same worker are visible.
   const terminationPages: {
     name: "isolated" | "plain";
     context: BrowserContext;
@@ -1327,8 +1328,8 @@ try {
   );
 
   // The failure and limit corpus on the three browser surfaces (GAP3-01).
-  // Each surface runs its deadline rows last: in WebKit every timed-out guest
-  // keeps spinning until the browser closes.
+  // Each surface runs its deadline rows last; their timed-out guests stop
+  // inside their workers in every engine.
   const conformance: Record<string, { observed: number; skipped: number }> = {};
   const conformanceRows: BrowserRow[] = [];
   for (const surface of browserSurfaces) {
@@ -1361,8 +1362,8 @@ try {
   }
   await teardownConformance(evaluate, `${engine} dispose conformance clients`);
 
-  // Termination acceptance, last: in WebKit a guest that outlives its
-  // cancellation keeps a core busy until the browser closes.
+  // Termination acceptance, last: a guest that outlived its cancellation would
+  // keep a core busy until the browser closed.
   const termination: TerminationResult[] = [];
   for (const { name, page: auditedPage } of terminationPages) {
     const result = name === "isolated"

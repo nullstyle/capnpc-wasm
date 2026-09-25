@@ -1,8 +1,9 @@
 // The termination verdicts without a browser: a fake page evaluator returns
-// the samples a real engine would, so each branch of checkIsolatedTermination
-// is exercised on every host. Runs in test:browser-bootstrap.
+// the samples a real engine would, so each check in termination.ts is
+// exercised on every host. Runs in test:browser-bootstrap.
 import {
   checkIsolatedTermination,
+  checkPlainTermination,
   type TerminationGuest,
   type TerminationMode,
   type TerminationSample,
@@ -18,8 +19,17 @@ const rejections: Record<TerminationMode, string> = {
   dispose: "Error",
 };
 
-/** An evaluator whose guests stop after `stops(guest)` ms, or never (null). */
-function engineThat(stops: (guest: TerminationGuest) => number | null) {
+/**
+ * An evaluator whose guests stop after `stops(guest)` ms, or never (null).
+ * Unless `change` says otherwise, the worker behaves as the SDK's does: a
+ * timeout or abort keeps it for a follow-up job that times out, and dispose
+ * terminates it.
+ */
+function engineThat(
+  stops: (guest: TerminationGuest) => number | null,
+  change: (sample: TerminationSample) => Partial<TerminationSample> =
+    () => ({}),
+) {
   return <T, A>(
     _fn: (argument: A) => T | Promise<T>,
     argument: A,
@@ -39,10 +49,13 @@ function engineThat(stops: (guest: TerminationGuest) => number | null) {
       rejection: { name: rejections[mode], message: "" },
       rejectionAfterMs: 5,
       stoppedAfterMs: stops(guest),
-      terminateCalls: 1,
+      followUp: mode === "dispose"
+        ? null
+        : { name: "TimeoutError", afterMs: 300 },
+      terminateCalls: mode === "dispose" ? 1 : 0,
       workersCreated: 1,
     };
-    return Promise.resolve(sample as unknown as T);
+    return Promise.resolve({ ...sample, ...change(sample) } as unknown as T);
   };
 }
 
@@ -55,71 +68,95 @@ async function rejection(run: () => Promise<unknown>): Promise<string> {
   throw new Error("the check passed");
 }
 
-const webkitMeasured = engineThat((guest) => guest === "pure" ? null : 150);
+const engines = ["chromium", "firefox", "webkit"] as const;
+const hosts = ["darwin", "linux"];
 
-Deno.test("macOS WebKit: a pure-Wasm guest that keeps running is the expected failure", async () => {
-  const result = await checkIsolatedTermination(
-    "webkit",
-    webkitMeasured,
-    "darwin",
-  );
-  assert(
-    result.verdict.startsWith("EXPECTED FAILURE webkit on darwin"),
-    result.verdict,
-  );
-});
-
-Deno.test("macOS WebKit: a pure-Wasm guest that stops fails loudly", async () => {
-  const message = await rejection(() =>
-    checkIsolatedTermination("webkit", engineThat(() => 150), "darwin")
-  );
-  assert(message.includes("no longer holds"), message);
-});
-
-Deno.test("Linux WebKit: the same strict expected failure as on macOS", async () => {
-  const result = await checkIsolatedTermination(
-    "webkit",
-    webkitMeasured,
-    "linux",
-  );
-  assert(
-    result.verdict.startsWith("EXPECTED FAILURE webkit on linux"),
-    result.verdict,
-  );
-  assert(
-    result.observed.startsWith("webkit termination on linux: pure Wasm:"),
-    result.observed,
-  );
-  const message = await rejection(() =>
-    checkIsolatedTermination("webkit", engineThat(() => 150), "linux")
-  );
-  assert(message.includes("no longer holds"), message);
-});
-
-Deno.test("WebKit on any host: a host-calling guest must stop within the bound", async () => {
-  for (const os of ["darwin", "linux"]) {
-    const message = await rejection(() =>
-      checkIsolatedTermination("webkit", engineThat(() => null), os)
-    );
-    assert(message.includes("host-calling guest kept running"), message);
+Deno.test("Every engine on every host: both guests stop within the bound", async () => {
+  for (const engine of engines) {
+    for (const os of hosts) {
+      const result = await checkIsolatedTermination(
+        engine,
+        engineThat(() => 50),
+        os,
+      );
+      assert(result.verdict.startsWith(`PASS ${engine}`), result.verdict);
+      assert(
+        result.observed.startsWith(
+          `${engine} termination on ${os}: pure Wasm:`,
+        ),
+        result.observed,
+      );
+    }
   }
 });
 
-Deno.test("Chromium and Firefox: every guest must stop within the bound", async () => {
-  for (const engine of ["chromium", "firefox"] as const) {
-    const result = await checkIsolatedTermination(
-      engine,
-      engineThat(() => 2_050),
-      "linux",
-    );
-    assert(result.verdict.startsWith(`PASS ${engine}`), result.verdict);
+Deno.test("Every engine: a guest that keeps running fails, WebKit's pure guest included", async () => {
+  for (const engine of engines) {
+    for (const running of ["pure", "host"] as const) {
+      const message = await rejection(() =>
+        checkIsolatedTermination(
+          engine,
+          engineThat((guest) => guest === running ? null : 50),
+          "linux",
+        )
+      );
+      assert(message.includes("kept running past"), message);
+    }
+  }
+});
+
+Deno.test("A timeout or abort keeps the worker, and dispose terminates it", async () => {
+  const cases: [
+    string,
+    (sample: TerminationSample) => Partial<TerminationSample>,
+  ][] = [
+    [
+      "a timeout that terminates the worker",
+      (sample) => sample.mode === "timeout" ? { terminateCalls: 1 } : {},
+    ],
+    [
+      "a replacement worker",
+      (sample) => sample.mode === "abort" ? { workersCreated: 2 } : {},
+    ],
+    [
+      "a dispose that terminates nothing",
+      (sample) => sample.mode === "dispose" ? { terminateCalls: 0 } : {},
+    ],
+    [
+      "a follow-up job that fails differently",
+      (sample) =>
+        sample.mode === "abort"
+          ? { followUp: { name: "Error", afterMs: 5 } }
+          : {},
+    ],
+  ];
+  for (const [label, change] of cases) {
     const message = await rejection(() =>
       checkIsolatedTermination(
-        engine,
-        engineThat((guest) => guest === "pure" ? null : 2_050),
+        "chromium",
+        engineThat(() => 50, change),
         "linux",
       )
     );
-    assert(message.includes("kept running past"), message);
+    assert(
+      message.includes("expected 1 and") ||
+        message.includes("follow-up job on the same client"),
+      `${label}: ${message}`,
+    );
   }
+});
+
+Deno.test("Without isolation: the timeout keeps its worker for the next job", async () => {
+  const plain = engineThat(() => null, () => ({ hasCounter: false }));
+  for (const engine of engines) {
+    const result = await checkPlainTermination(engine, plain);
+    assert(result.verdict.startsWith(`PASS ${engine}`), result.verdict);
+  }
+  const terminated = await rejection(() =>
+    checkPlainTermination(
+      "webkit",
+      engineThat(() => null, () => ({ terminateCalls: 1 })),
+    )
+  );
+  assert(terminated.includes("expected 1 and 0"), terminated);
 });
