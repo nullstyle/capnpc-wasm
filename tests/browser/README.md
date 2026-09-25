@@ -208,6 +208,32 @@ guest stopped within 50 ms in WebKit, at once in Firefox, and at its own
 2-second deadline in Chromium. The cause of the stall is unknown; the next one
 reports its own trace.
 
+## Engine crashes
+
+A page that crashes, or a browser that disconnects before the driver closes it,
+is an engine crash rather than a stall. The stall budget does not cover it, and
+the run fails with `<engine>: engine crash: <what happened> during <step>`. The
+pages send their workers' trace events to the driver as they happen
+(`engine-crash.ts`), so after a crash the driver still prints
+`OBSERVED <engine> engine crash` with the step, the soak cycle, and the last
+worker trace it received. On macOS it also takes the newest crash report that
+the engine's processes wrote to `~/Library/Logs/DiagnosticReports` since the run
+began, prints its exception and top frames, and copies it next to the receipts,
+which CI keeps as an artifact.
+
+One crash has been seen, before the driver recorded them. In the nightly run
+[36153842922](https://github.com/nullstyle/capnpc-wasm/actions/runs/36153842922),
+with the engines in turn on a macos-15 arm64 runner, WebKit's page closed about
+200 ms into soak cycle 10, a timeout, in the first of five rounds. It did not
+recur locally on macOS 27 with the same WebKit revision, in 8 soak rounds (160
+cycles, 3 rounds under 18 CPU hogs) or in 3,450 cycles of a probe that aborts a
+spinning guest on a page without cross-origin isolation, which terminates its
+worker mid-run, or times it out on a reused worker. Sampled every second, the
+main page's WebContent process held 0.8 to 0.9 GB before the soak, gained 90 to
+180 MB as the soak client compiled its modules, and then grew by 1.5 MB per
+cycle on average (-0.3 to +3.4 MB per round), so memory does not accumulate
+across cycles. The cause is unknown; the next crash brings its report.
+
 ## Termination acceptance
 
 The recovery cycles show that a client keeps producing correct output after
