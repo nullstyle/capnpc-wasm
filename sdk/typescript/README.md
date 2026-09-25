@@ -336,7 +336,8 @@ during initialization and every `memory.grow`, including growth that makes no
 host calls. Initial memory above the configured ceiling is rejected. Only one
 defined, unshared wasm32 memory is supported; imported, shared, memory64, and
 multiple memories are rejected. This preserves a module's smaller existing
-maximum. It does not change the guest's code or data sections.
+maximum. The same pass adds the interruption checks described under
+[Interruption](#interruption); it leaves data sections unchanged.
 
 Writable file limits are checked before writes, sparse writes, allocation, and
 resizing. Renumbering a descriptor does not bypass its budget. Deleted files
