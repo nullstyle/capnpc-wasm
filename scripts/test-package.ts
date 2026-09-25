@@ -114,7 +114,8 @@ async function checkAssets(candidate: string, candidateStem: string) {
   const names: string[] = sbom.packages.map((pkg: { name: string }) =>
     pkg.name
   );
-  return { archiveHash, manifestHash, sbomHash, names };
+  const namespace: string = sbom.documentNamespace;
+  return { archiveHash, manifestHash, sbomHash, names, namespace };
 }
 
 function codeBlocks(markdown: string, info: string): string[] {
@@ -259,6 +260,13 @@ if (
   tools1.names.includes("@bjorn3/browser_wasi_shim") ||
   !tools1.names.includes("wasi-sdk")
 ) throw new Error("SBOM components are not selected per flavor");
+if (
+  ![full1, tools1].every((assets) => assets.namespace.endsWith("/candidate"))
+) {
+  throw new Error(
+    "a candidate SBOM shares the publishable document namespace",
+  );
+}
 const originalHash = full1.archiveHash;
 const toolsHash = tools1.archiveHash;
 
@@ -299,6 +307,13 @@ if (probe.success) {
     `${repository}/${probeOut}/${stem}`,
     stem,
   );
+  if (
+    published.namespace !== full1.namespace.slice(0, -"/candidate".length)
+  ) {
+    throw new Error(
+      "publishable SBOM namespace is not the candidate's without /candidate",
+    );
+  }
   if (published.archiveHash !== originalHash) {
     throw new Error(
       "publish mode produced a different archive than candidate mode",
@@ -571,7 +586,7 @@ try {
           "candidates prepared under build/test, not dist/releases",
           "Apache-2.0 package and Go module licenses, THIRD_PARTY_NOTICES.md, per-flavor license texts",
           "manifest integrity, manifest asset, and SBOM listed in SHA256SUMS; sha256sum -c on the download directory",
-          "reproducible archive and SBOM",
+          "reproducible archive and SBOM; candidate SBOM namespace distinct from the publishable one",
           "stale staging cleanup",
           "publish mode refuses candidate flags and an untagged HEAD",
           "verifier --sums (manifest asset required), --expect-manifest-sha256, --expect-commit, and --require-clean",

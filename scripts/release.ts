@@ -637,7 +637,11 @@ export function spdxDocument(input: SbomInput): string {
       dataLicense: "CC0-1.0",
       SPDXID: "SPDXRef-DOCUMENT",
       name: input.stem,
-      documentNamespace: `${repositoryUrl}/spdx/${input.stem}/${input.commit}`,
+      // A candidate and the publishable document differ (download location),
+      // so they cannot share one namespace.
+      documentNamespace: `${repositoryUrl}/spdx/${input.stem}/${input.commit}${
+        input.publish ? "" : "/candidate"
+      }`,
       creationInfo: {
         created: input.created,
         creators: ["Tool: capnpc-wasm-release.ts"],
