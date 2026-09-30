@@ -55,10 +55,16 @@ const timeoutMs = 200;
 const lateMs = 500;
 const hangMs = 30_000;
 
-/** The wall time of a call, and the CPU the whole process spent during it. */
+/**
+ * The wall time of a call, the CPU the whole process spent during it, and
+ * every blocking wait this thread asked for during it: when it asked and for
+ * how long.
+ */
 interface Took {
+  started: number;
   wall: number;
   cpu: number;
+  waits: { at: number; ms: number }[];
 }
 
 function cpuMs(): number {
@@ -67,35 +73,44 @@ function cpuMs(): number {
 }
 
 async function measured<T>(run: () => Promise<T>): Promise<Took> {
+  const waits: { at: number; ms: number }[] = [];
+  const wait = Atomics.wait;
+  // The SDK's host sleeps in Atomics.wait on this thread; record each ask.
+  Atomics.wait = ((...args: unknown[]) => {
+    waits.push({
+      at: performance.now(),
+      ms: (args[3] as number | undefined) ?? Infinity,
+    });
+    return Reflect.apply(wait, Atomics, args);
+  }) as typeof Atomics.wait;
   const started = performance.now();
   const spent = cpuMs();
-  await run();
-  return { wall: performance.now() - started, cpu: cpuMs() - spent };
+  try {
+    await run();
+  } finally {
+    Atomics.wait = wait;
+  }
+  return {
+    started,
+    wall: performance.now() - started,
+    cpu: cpuMs() - spent,
+    waits,
+  };
 }
 
 /**
- * How late this thread wakes from a blocking wait right now: the most that
- * three waits of `timeoutMs`, the kind a sleeping guest's host makes, ran
- * past their timeout. A loaded host wakes every sleeper late.
+ * How far past the deadline a wait may ask to end: the SDK computes its
+ * deadline synchronously within the call, microseconds after `started`.
  */
-function wakeLateness(): number {
-  const cell = new Int32Array(new SharedArrayBuffer(4));
-  let late = 0;
-  for (let i = 0; i < 3; i++) {
-    const started = performance.now();
-    Atomics.wait(cell, 0, 0, timeoutMs);
-    late = Math.max(late, performance.now() - started - timeoutMs);
-  }
-  return late;
-}
+const waitSlackMs = 20;
 
 /**
  * A guest stopped at its deadline: not before it, by wall time, and not
  * after it. A `busy` guest that ran on would spend CPU, so its job's CPU is
- * bounded. A `waiting` guest (a sleep) that ran on would spend none, so its
- * wall time is judged against this thread's own clock: it may run past its
- * deadline by `lateMs` plus however late a plain wait of the same kind wakes
- * right now. The wall-clock bound catches only a hang.
+ * bounded. A `waiting` guest (a sleep) that ran on would spend none, so the
+ * test checks what the SDK asked the host for instead: it must sleep, and no
+ * wait it asks for may end past the job's deadline. That holds however late a
+ * loaded host wakes the thread. The wall-clock bound catches only a hang.
  */
 function stoppedInTime(
   took: Took,
@@ -113,17 +128,16 @@ function stoppedInTime(
     } ms of CPU during a ${timeoutMs} ms job`,
   );
   assert(took.wall < hangMs, `${what} took ${took.wall} ms`);
-  const overran = took.wall - timeoutMs;
-  if (runaway === "waiting" && overran >= lateMs) {
-    const late = wakeLateness();
-    assert(
-      overran < lateMs + late,
-      `${what} slept ${
-        overran.toFixed(0)
-      } ms past its deadline, while ${timeoutMs} ms waits on this thread now run at most ${
-        late.toFixed(0)
-      } ms past theirs`,
-    );
+  if (runaway === "waiting") {
+    assert(took.waits.length > 0, `${what} never slept in Atomics.wait`);
+    const deadline = took.started + timeoutMs;
+    for (const wait of took.waits) {
+      const past = wait.at + wait.ms - deadline;
+      assert(
+        past <= waitSlackMs,
+        `${what} asked to sleep ${past.toFixed(0)} ms past its deadline`,
+      );
+    }
   }
 }
 
