@@ -74,13 +74,13 @@ SIGTERM, names the step it was on, and closes its browser, and it is killed 30
 seconds later if it has not exited. The pages' Playwright timeouts are 60
 seconds. Environment variables adjust this:
 
-| Variable                          | Effect                                                                                     |
-| --------------------------------- | ------------------------------------------------------------------------------------------ |
-| `CAPNP_BROWSER_DEADLINE_MS`       | Each step's deadline (default 60000)                                                       |
-| `CAPNP_BROWSER_ENGINE_TIMEOUT_MS` | Each driver's overall deadline (default 1200000)                                           |
-| `CAPNP_BROWSER_JOBS`              | Drivers that run at once (default 3; 1 runs the engines in turn)                           |
-| `CAPNP_BROWSER_STALL`             | Hangs the first step whose label contains the text, as a drill                             |
-| `CAPNP_TEST_TIMEOUT_SCALE`        | Multiplies both default deadlines, the kill grace, and the Playwright timeouts (default 1) |
+| Variable                          | Effect                                                                                                                           |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `CAPNP_BROWSER_DEADLINE_MS`       | Each step's deadline (default 60000)                                                                                             |
+| `CAPNP_BROWSER_ENGINE_TIMEOUT_MS` | Each driver's overall deadline (default 1200000)                                                                                 |
+| `CAPNP_BROWSER_JOBS`              | Drivers that run at once (default 3; 1 runs the engines in turn)                                                                 |
+| `CAPNP_BROWSER_STALL`             | Hangs the first step whose label contains the text, as a drill                                                                   |
+| `CAPNP_TEST_TIMEOUT_SCALE`        | Multiplies the default step deadline, the kill grace, and the Playwright timeouts, not the engine deadline (1 to 100; default 1) |
 
 For example,
 `CAPNP_BROWSER_STALL="abort recovery cycle 3" CAPNP_BROWSER_DEADLINE_MS=5000 mise run test:browser chromium`
@@ -90,10 +90,16 @@ browser job sets `CAPNP_BROWSER_JOBS=1` on Linux and macOS: with three engines
 at once on a four-CPU runner, WebKit stalled starting or recovering workers in
 nightlies 36112692524, 36132427000, and 36141746707. On macos-15 it also sets
 `CAPNP_TEST_TIMEOUT_SCALE=3` (see `tests/lib/timeout-scale.ts`), which scales
-every default deadline, grace, and Playwright timeout here together so each
-still outlasts the ones inside it; an explicit `CAPNP_BROWSER_*` value is used
-as given, and the SDK bounds inside the pages (termination, soak, resource
-limits) keep their values, since the stall rule budgets their misses.
+the default step deadline, the close steps, the kill grace, and the Playwright
+timeouts here together, so each still outlasts the ones inside it. The engine
+deadline stays 20 minutes: a regression that stalls every driver outside its
+steps then costs each engine at most 21.5 minutes (the deadline plus the
+90-second kill grace), so with the engines in turn the job ends by about 3.8 + 3
+× 21.5 = 68 of its 150 minutes. An explicit `CAPNP_BROWSER_*` value is used as
+given, and the SDK bounds inside the pages keep their values: the termination
+bound asserts behaviour, the probe start and soak recovery bounds are budgeted
+by the stall rule, and the resource-limits bounds already allow 60 and 30
+seconds.
 
 Before compiling, the driver blocks network requests and WebSocket connections,
 closes its asset server, and revokes its own Deno network and process-spawning
@@ -412,9 +418,11 @@ C++/Rust/Go/Zig output. It also covers workspace editing, error recovery,
 cancellation, binary imports/exports, file management, and responsive layouts.
 Each navigation may take two minutes, not Playwright's 30-second default: on a
 loaded runner Firefox once timed out loading Studio right after Chromium passed
-(nightly 36141746707). Navigations and the 30-second action timeout scale by
-`CAPNP_TEST_TIMEOUT_SCALE`, which the nightly sets to 3 on macos-15 after a
-folder upload there outlasted 30 seconds (nightly 36168208228). Evidence lives
-under `build/test/studio-*/`; browser CI retains failing fixtures and the
-complete Studio bundle. See the
-[Studio guide](../../examples/browser/README.md).
+(nightly 36141746707). Navigations, the 30-second action timeout, and the launch
+scale by `CAPNP_TEST_TIMEOUT_SCALE`, which the nightly sets to 3 on macos-15. In
+nightly 36168208228 a single WebKit folder upload there stalled past its 30
+seconds while its locator resolved at once and every other step ran at normal
+speed: a WebKit stall, not a slow host, which 90 seconds tolerates once; a
+recurrence belongs with the WebKit stall rows. Evidence lives under
+`build/test/studio-*/`; browser CI retains failing fixtures and the complete
+Studio bundle. See the [Studio guide](../../examples/browser/README.md).

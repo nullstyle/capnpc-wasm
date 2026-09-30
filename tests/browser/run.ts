@@ -97,12 +97,15 @@ async function verifyRequests(receiptPath: string, engine: string) {
 // a driver that overruns it receives SIGTERM, reports the step it was on, and
 // is killed if it has not exited 30 seconds later. CAPNP_BROWSER_JOBS=1 runs
 // the engines one after another; CAPNP_BROWSER_ENGINE_TIMEOUT_MS sets the
-// deadline (20 minutes by default). The default deadline and the kill grace
-// scale by CAPNP_TEST_TIMEOUT_SCALE with the drivers' step deadlines, so each
-// still outlasts the steps inside it.
+// deadline (20 minutes by default). The kill grace scales by
+// CAPNP_TEST_TIMEOUT_SCALE with the close steps inside it; the deadline does
+// not: at 3 it still outlasts one failing step (3 minutes plus a 90-second
+// close), and unscaled it keeps a regression that stalls every driver
+// outside its steps, with the engines in turn, inside a job's budget
+// (ledger row 143).
 const engineTimeoutMs = envMilliseconds(
   "CAPNP_BROWSER_ENGINE_TIMEOUT_MS",
-  scaled(20 * 60_000),
+  20 * 60_000,
 );
 const jobs = Number(Deno.env.get("CAPNP_BROWSER_JOBS") || 3);
 if (!Number.isInteger(jobs) || jobs < 1) {

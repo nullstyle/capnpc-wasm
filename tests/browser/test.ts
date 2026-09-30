@@ -700,7 +700,10 @@ Deno.addSignalListener("SIGTERM", () => {
 });
 const errors: string[] = [];
 try {
-  browser = await clock.step(browserType.launch(), `${engine} launch`);
+  browser = await clock.step(
+    browserType.launch({ timeout: scaled(180_000) }),
+    `${engine} launch`,
+  );
   browser.on("disconnected", () => {
     if (!closing) crashed("the browser disconnected", "main");
   });

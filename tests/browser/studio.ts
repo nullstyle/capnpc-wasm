@@ -120,8 +120,11 @@ const url = `http://127.0.0.1:${server.addr.port}/`;
 // after Chromium passed; ledger row 139). Each navigation gets two minutes;
 // a page that never loads still fails, naming the URL. Every other action
 // and wait gets 30 seconds. Both scale by CAPNP_TEST_TIMEOUT_SCALE
-// (tests/lib/timeout-scale.ts): at 3, a file input's setInputFiles that took
-// more than 30 seconds on macos-15 (nightly 36168208228) has 90 (row 143).
+// (tests/lib/timeout-scale.ts). In nightly 36168208228 on macos-15 a single
+// WebKit folder upload (setInputFiles) stalled past its 30 seconds: its
+// locator resolved at once and every other step ran at normal speed, so it
+// was a WebKit stall, not a slow host; at 3 such an upload has 90 seconds
+// (ledger row 143), and a recurrence belongs with the WebKit stall rows.
 const navigationTimeoutMs = scaled(120_000);
 const actionTimeoutMs = scaled(30_000);
 
@@ -253,6 +256,8 @@ try {
     await Deno.mkdir(output, { recursive: true });
     const browser = await { chromium, firefox, webkit }[engine].launch({
       headless: true,
+      // Playwright's own launch default, three minutes, scaled.
+      timeout: scaled(180_000),
     });
     try {
       const context = await browser.newContext({
