@@ -3,7 +3,7 @@
 // environment built from one pass-through list.
 
 import { root } from "./paths.ts";
-import { scaled } from "./timeout-scale.ts";
+import { scaled, timeoutScale } from "./timeout-scale.ts";
 
 /**
  * Host environment variables that child processes receive. Everything else is
@@ -149,6 +149,9 @@ export const buildTimeoutMs = scaled(10 * 60_000);
 /** run()'s timeout when the caller passes none: 60 s, scaled. */
 export const defaultTimeoutMs = scaled(60_000);
 
+/** Whether this process has said which factor its timeouts use. */
+let scaleAnnounced = timeoutScale === 1;
+
 let timeouts = 0;
 
 /**
@@ -178,6 +181,15 @@ export async function run(
     timeoutMs = defaultTimeoutMs,
     killAfterMs = 5_000,
   } = options;
+  if (!scaleAnnounced) {
+    // One line per process, so a suite's log shows which bounds applied.
+    scaleAnnounced = true;
+    console.log(
+      `CAPNP_TEST_TIMEOUT_SCALE=${timeoutScale}: run() timeouts ${
+        defaultTimeoutMs / 1000
+      } s by default, ${buildTimeoutMs / 60_000} min for builds`,
+    );
+  }
   if (stdin && stdinFile) {
     throw new Error("run: stdin and stdinFile are mutually exclusive");
   }

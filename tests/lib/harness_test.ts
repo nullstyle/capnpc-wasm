@@ -165,22 +165,46 @@ Deno.test("TRAP_TEXT matches runtime failures and not KJ diagnostics", () => {
   ) assert(!TRAP_TEXT.test(text), `should not match: ${text}`);
 });
 
-Deno.test("CAPNP_TEST_TIMEOUT_SCALE: unset is 1, a positive number scales, anything else fails", async () => {
+Deno.test("CAPNP_TEST_TIMEOUT_SCALE: unset is 1, a plain decimal from 1 to 100 scales, anything else fails", async () => {
   for (const unset of [undefined, "", "  "]) {
     assert(parseTimeoutScale(unset) === 1, `${JSON.stringify(unset)} is not 1`);
   }
-  for (const [value, factor] of [["3", 3], ["1.5", 1.5], ["0.5", 0.5]]) {
+  for (
+    const [value, factor] of [["1", 1], ["3", 3], ["1.5", 1.5], ["100", 100], [
+      " 2 ",
+      2,
+    ]]
+  ) {
     assert(
       parseTimeoutScale(value as string) === factor,
       `${value} is not ${factor}`,
     );
   }
-  for (const bad of ["0", "-1", "abc", "3x", "Infinity", "NaN"]) {
+  for (
+    const bad of [
+      "0",
+      "0.5",
+      "-1",
+      "101",
+      "abc",
+      "3x",
+      "0x3",
+      "0b11",
+      "1e1",
+      "1e308",
+      "Infinity",
+      "NaN",
+      "+3",
+      ".5",
+      "3.",
+    ]
+  ) {
     const message = await failure(() => {
       parseTimeoutScale(bad);
     });
     assert(
-      message.includes("CAPNP_TEST_TIMEOUT_SCALE must be a positive number"),
+      message.includes("CAPNP_TEST_TIMEOUT_SCALE must be a positive number") &&
+        message.includes("from 1 to 100"),
       `${bad} was accepted: ${message}`,
     );
   }

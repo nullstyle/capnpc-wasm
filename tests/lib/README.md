@@ -27,11 +27,12 @@ passes `buildTimeoutMs`, ten minutes, since cold compiler caches on a loaded
 runner outlast the default, and only builds: the program it built then runs as
 its own step under the default, so a hung program fails in 60 s and its own
 timeout stops it. `CAPNP_TEST_TIMEOUT_SCALE` (`timeout-scale.ts`; 1 unless set,
-any positive number) multiplies both, so a slow host widens them without losing
-hang detection: at 3, a hung program fails in 3 minutes and a hung compiler in
-30. An explicit `timeoutMs` is used as given, and a process that may not read
-the variable runs at 1. `mustSucceed` returns stdout and fails with the exit
-status and stderr.
+a plain decimal from 1 to 100) multiplies both, so a slow host widens them
+without losing hang detection: at 3, a hung program fails in 3 minutes and a
+hung compiler in 30. An explicit `timeoutMs` is used as given, a process that
+may not read the variable runs at 1, and when the factor is not 1 the first
+`run()` in a process prints it with both timeouts. `mustSucceed` returns stdout
+and fails with the exit status and stderr.
 
 Children receive only the variables in `ENV_PASSTHROUGH` plus the explicit `env`
 additions. The list must equal `[vars].suite_env` in `mise.toml`, which the

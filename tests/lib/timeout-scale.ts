@@ -1,23 +1,37 @@
 // One factor for the test timeouts that measure how fast the host is rather
 // than what the code does (ledger row 143). CAPNP_TEST_TIMEOUT_SCALE (1 unless
-// set; any positive number) multiplies run()'s default and build timeouts in
-// process.ts and the browser and Studio drivers' Playwright timeouts, step
-// deadlines, and engine deadline, so every bound keeps its order with the
-// others. The nightly sets it on its slowest runners. Bounds that assert what
-// the product does (a termination bound, a limit) and the calibrated SDK
-// timeouts inside the browser pages, whose misses the stall rule budgets, do
-// not scale. This module has no imports, so the browser drivers can use it.
+// set; a plain decimal from 1 to 100) multiplies run()'s default and build
+// timeouts in process.ts and the browser and Studio drivers' Playwright
+// timeouts, step deadlines, close steps, and kill grace, so those bounds keep
+// their order. The browser engine deadline stays 20 minutes: it still
+// outlasts one failing step at the largest factor the nightly uses, and
+// unscaled it bounds what one regression can cost a job. The nightly sets the
+// factor on its slowest runners. Explicit timeouts, bounds that assert what
+// the product does (a termination bound, a limit), and the other SDK bounds
+// inside the browser pages (some budgeted by the stall rule) do not scale.
+// This module has no imports, so the browser drivers can use it.
 
 /** The variable that sets the factor. */
 export const timeoutScaleVariable = "CAPNP_TEST_TIMEOUT_SCALE";
 
-/** The factor a value sets: 1 when unset or empty, else a positive number. */
+/** The largest factor: 100 keeps every scaled timer far below 2^31 ms. */
+export const maxTimeoutScale = 100;
+
+/**
+ * The factor a value sets: 1 when unset or empty, else a plain decimal
+ * (digits, optionally a point and more digits) from 1 to 100. Hexadecimal,
+ * binary, exponents, and factors below 1, which would shrink the hang guards,
+ * are refused.
+ */
 export function parseTimeoutScale(value: string | undefined): number {
   if (value === undefined || value.trim() === "") return 1;
-  const factor = Number(value);
-  if (!Number.isFinite(factor) || factor <= 0) {
+  const text = value.trim();
+  const factor = Number(text);
+  if (
+    !/^\d+(\.\d+)?$/.test(text) || factor < 1 || factor > maxTimeoutScale
+  ) {
     throw new TypeError(
-      `${timeoutScaleVariable} must be a positive number, not ${
+      `${timeoutScaleVariable} must be a positive number from 1 to ${maxTimeoutScale} in plain decimal, not ${
         JSON.stringify(value)
       }`,
     );
