@@ -343,7 +343,9 @@ suite.test(
     await Promise.all(
       hosts.filter((host) => host.name !== "native").map(async (host) => {
         const started = performance.now();
+        let ran = 0;
         for (const [index, item] of cases.entries()) {
+          ran++;
           const label = `${host.name}: ${item.label}`;
           let result: RunResult | undefined;
           try {
@@ -366,9 +368,7 @@ suite.test(
           }
         }
         console.log(
-          `${cases.length} conversions and evals on ${host.name}: ${
-            seconds(started)
-          }`,
+          `${ran} conversions and evals on ${host.name}: ${seconds(started)}`,
         );
       }),
     );
