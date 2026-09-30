@@ -255,11 +255,23 @@ export async function teardownConformance(
 }
 
 /**
+ * Runs one row step under the stall rule (stall-rule.ts), which `classify`
+ * tells when the row's result shows a stall.
+ */
+export type RowRule = <T>(
+  label: string,
+  attempt: () => Promise<T>,
+  classify: (result: T) => string | null,
+) => Promise<T>;
+
+/**
  * Run every case the surface expresses, one page step each in the shared
  * orderCases() order (deadline rows last: in WebKit each leaves its guest
  * spinning until the browser closes), and check the page's summary against
  * expected.json. Throws after the whole surface ran when any row mismatched,
- * naming each one; returns the rows in corpus order.
+ * naming each one; returns the rows in corpus order. With `rule`, each row
+ * runs under the stall rule, and a timeout its expectation does not accept
+ * counts as a stall.
  */
 export async function runBrowserSurface(
   engine: Engine,
@@ -267,6 +279,7 @@ export async function runBrowserSurface(
   corpus: BrowserCorpus,
   valid: Uint8Array,
   evaluate: Evaluate,
+  rule?: RowRule,
 ): Promise<BrowserRow[]> {
   const rows: BrowserRow[] = [];
   for (const spec of orderCases(corpus.cases)) {
@@ -292,43 +305,61 @@ export async function runBrowserSurface(
       ...workspace,
       request: spec.request ? requestVariant(spec.request, valid) : undefined,
     };
-    const { phase, summary } = await evaluate(
-      async ({ surface, spec, inputs }) => {
-        const state = (globalThis as unknown as {
-          capnpConformance: {
-            runner: {
-              runCase(...args: unknown[]): Promise<{ summary: unknown }>;
-              runStudioCase(...args: unknown[]): Promise<{ summary: unknown }>;
+    const label = `${engine} ${surface} conformance ${spec.name}`;
+    const accepted = Array.isArray(expectation.expect)
+      ? expectation.expect
+      : [expectation.expect];
+    const run = () =>
+      evaluate(
+        async ({ surface, spec, inputs }) => {
+          const state = (globalThis as unknown as {
+            capnpConformance: {
+              runner: {
+                runCase(...args: unknown[]): Promise<{ summary: unknown }>;
+                runStudioCase(
+                  ...args: unknown[]
+                ): Promise<{ summary: unknown }>;
+              };
+              studio: unknown;
+              studioCompileError: unknown;
+              hosts: Record<string, unknown>;
+              guests: unknown;
+              modules: unknown;
             };
-            studio: unknown;
-            studioCompileError: unknown;
-            hosts: Record<string, unknown>;
-            guests: unknown;
-            modules: unknown;
+          }).capnpConformance;
+          const result = surface === "studio"
+            ? await state.runner.runStudioCase(
+              spec,
+              inputs,
+              state.studio,
+              state.studioCompileError,
+            )
+            : await state.runner.runCase(
+              spec,
+              inputs,
+              state.hosts[surface],
+              state.modules,
+              state.guests,
+            );
+          return {
+            phase: (result as { phase?: "factory" | "job" }).phase ?? "job",
+            summary: result.summary as ErrorSummary | ResultSummary,
           };
-        }).capnpConformance;
-        const result = surface === "studio"
-          ? await state.runner.runStudioCase(
-            spec,
-            inputs,
-            state.studio,
-            state.studioCompileError,
-          )
-          : await state.runner.runCase(
-            spec,
-            inputs,
-            state.hosts[surface],
-            state.modules,
-            state.guests,
-          );
-        return {
-          phase: (result as { phase?: "factory" | "job" }).phase ?? "job",
-          summary: result.summary as ErrorSummary | ResultSummary,
-        };
-      },
-      { surface, spec, inputs },
-      `${engine} ${surface} conformance ${spec.name}`,
-    );
+        },
+        { surface, spec, inputs },
+        label,
+      );
+    const { phase, summary } = rule
+      ? await rule(
+        label,
+        run,
+        (result) =>
+          observe(result.summary, result.phase).outcome === "timeout" &&
+            !accepted.includes("timeout")
+            ? `TimeoutError: ${(result.summary as ErrorSummary).message}`
+            : null,
+      )
+      : await run();
     const observation = observe(summary, phase);
     rows.push({
       name: spec.name,

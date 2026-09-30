@@ -1,15 +1,19 @@
-// Evidence for a stalled worker, in the recovery soak (test.ts) and the
-// termination acceptance (termination.ts), and the one rule both read it by.
+// Evidence for a stalled worker, and the one rule it is read by, for every
+// step of the browser driver (test.ts) that creates or first uses SDK workers
+// (stall-rule.ts), the recovery soak, and the termination acceptance
+// (termination.ts).
 //
-// A traced worker is a module worker script (traceWorkerTemplate) that first
-// imports the trace module (traceModuleSource, a blob URL substituted for
-// __TRACE_URL__) and then the SDK's real worker.js (__REAL_WORKER_URL__).
-// Imports evaluate in order, so the trace reports that the worker started and
-// listens for messages before worker.js runs; it then reports each message
-// the worker receives, each Wasm compile and instantiate, and each reply.
-// Tracing only observes; every call goes through unchanged. The page adds its
-// own events to the same list: each message it posts to the worker and each
-// reply that reaches it. The health script asks whether the engine itself
+// A traced worker is a module worker script that first imports the trace
+// module (traceModuleSource) and then its own script: the SDK's worker.js, or
+// whatever the page started. Imports evaluate in order, so the trace reports
+// that the worker started and listens for messages before that script runs;
+// it then reports each message the worker receives, each Wasm compile and
+// instantiate, and each reply. Tracing only observes; every call goes through
+// unchanged. The page adds its own events to the same list: each message it
+// posts to the worker and each reply that reaches it. On the driver's main
+// page an init script (workerTracerScript) traces every module worker from
+// the start; the termination probes import the module themselves
+// (traceWorkerTemplate). The health script asks whether the engine itself
 // still starts a worker and compiles Wasm, in a worker and on the page.
 
 /** What capnpEngineHealth reports: each check's answer and time. */
@@ -121,6 +125,94 @@ WebAssembly.instantiate = function (source, imports) {
 export const traceWorkerTemplate = `import "__TRACE_URL__";
 import "__REAL_WORKER_URL__";
 `;
+
+/**
+ * Installed as an init script on the driver's main page, before any of its
+ * scripts run: every module worker the page creates, the SDK's and the Studio
+ * adapter's alike, loads the trace module first. `globalThis.capnpTracer`
+ * keeps, per worker, its TracedWorker events, and in order every message the
+ * page posts (`posts`: the worker's index and `<kind>:<id>`); each event also
+ * goes to the driver (capnpTraceSink), so a trace outlives a crashed page.
+ * The driver arms `drill` for CAPNP_BROWSER_WORKER_STALL: the next module
+ * worker then never runs its script (`start`), or never receives a message
+ * after init (`job`), stalls the engine would cause; or it runs a script that
+ * never answers (`silent`), as an SDK fault would.
+ */
+export const workerTracerScript = `(() => {
+  const RealWorker = globalThis.Worker;
+  const blob = (source) =>
+    URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+  const traceURL = blob(${JSON.stringify(traceModuleSource)});
+  const hangURL = blob("await new Promise(() => {});");
+  const silentURL = blob("self.onmessage = () => {};");
+  const dropJobsURL = blob(
+    'self.addEventListener("message", (event) => {' +
+      ' if (!event.data || event.data.kind !== "init") event.stopImmediatePropagation(); });',
+  );
+  const tracer = globalThis.capnpTracer = { workers: [], posts: [], drill: null };
+  const byWorker = new WeakMap();
+  const keep = (traced, event) => {
+    traced.events.push(event);
+    if (traced.events.length > 60) traced.events.splice(0, 20);
+    const sink = globalThis.capnpTraceSink;
+    if (!sink) return;
+    try {
+      const sent = sink(tracer.workers.indexOf(traced), event);
+      if (sent && sent.catch) sent.catch(() => {});
+    } catch {}
+  };
+  globalThis.Worker = class extends RealWorker {
+    constructor(url, options) {
+      let target = url;
+      if (options && options.type === "module") {
+        const script = new URL(url, location.href).href;
+        let source = 'import "' + traceURL + '";\\nimport "' + script + '";\\n';
+        const drill = tracer.drill;
+        if (drill && drill.remaining > 0) {
+          drill.remaining--;
+          source = drill.mode === "silent"
+            ? 'import "' + traceURL + '";\\nimport "' + silentURL + '";\\n'
+            : drill.mode === "job"
+              ? 'import "' + dropJobsURL + '";\\n' + source
+              : 'import "' + hangURL + '";\\n';
+        }
+        target = blob(source);
+      }
+      super(target, options);
+      const traced = { events: [], terminated: false };
+      tracer.workers.push(traced);
+      byWorker.set(this, traced);
+      this.addEventListener("message", (event) => {
+        const data = event.data;
+        if (data && data.kind === "capnpTrace") keep(traced, data.t + ":" + data.event);
+        else if (data && typeof data.id === "number") keep(traced, "page:reply:" + data.id);
+      });
+    }
+    postMessage(message, transfer) {
+      const traced = byWorker.get(this);
+      if (traced && message && typeof message.kind === "string") {
+        const post = message.kind + (message.id !== undefined ? ":" + message.id : "");
+        tracer.posts.push({ worker: tracer.workers.indexOf(traced), post });
+        keep(traced, "page:post:" + post);
+      }
+      return transfer === undefined
+        ? super.postMessage(message)
+        : super.postMessage(message, transfer);
+    }
+    terminate() {
+      const traced = byWorker.get(this);
+      if (traced) traced.terminated = true;
+      super.terminate();
+    }
+  };
+})();`;
+
+/** The page's tracer (workerTracerScript), as the driver's page functions read it. */
+export interface PageTracer {
+  workers: TracedWorker[];
+  posts: { worker: number; post: string }[];
+  drill: { mode: "start" | "job" | "silent"; remaining: number } | null;
+}
 
 /** What the page saw of a worker that did not do what it asked. */
 export interface StallEvidence {

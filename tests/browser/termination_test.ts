@@ -16,15 +16,28 @@ import {
 import {
   type EngineHealth,
   judgeStall,
+  type PageTracer,
   type StallEvidence,
   stallSuspect,
+  workerTracerScript,
 } from "./worker-trace.ts";
 import {
   type SoakStall,
   stallBudget,
   stallJob,
+  stallPlace,
+  stallTitle,
   stallWarning,
 } from "./soak-stalls.ts";
+import {
+  parseWorkerStallDrill,
+  stallErrorText,
+  type StallRuleHost,
+  type StepStallEvidence,
+  stepStallEvidence,
+  underStallRule,
+} from "./stall-rule.ts";
+import { DeadlineError } from "./deadline.ts";
 import {
   closedTargetError,
   crashFailure,
@@ -943,4 +956,376 @@ Deno.test("a crash report is summarized in one line", () => {
     summarizeCrashReport("not a report") === "an unreadable crash report",
     "an unreadable report was summarized",
   );
+});
+
+Deno.test("the worker stall drill parses its entries and refuses others", () => {
+  const drills = parseWorkerStallDrill(
+    "worker resource limits=job*2, Studio adapter ,hostile guests=silent",
+  );
+  assert(
+    JSON.stringify(drills) ===
+      JSON.stringify([
+        { text: "worker resource limits", mode: "job", remaining: 2 },
+        { text: "Studio adapter", mode: "start", remaining: 1 },
+        { text: "hostile guests", mode: "silent", remaining: 1 },
+      ]),
+    JSON.stringify(drills),
+  );
+  assert(
+    parseWorkerStallDrill(undefined).length === 0 &&
+      parseWorkerStallDrill(" ").length === 0,
+    "an unset drill armed something",
+  );
+  for (const bad of ["x=later", "x*0", "=start"]) {
+    let thrown: unknown;
+    try {
+      parseWorkerStallDrill(bad);
+    } catch (error) {
+      thrown = error;
+    }
+    assert(thrown instanceof TypeError, `${bad} was accepted`);
+  }
+});
+
+Deno.test("only an SDK timeout or a step deadline counts as a stall", () => {
+  assert(
+    stallErrorText(
+      new Error("page.evaluate: TimeoutError: compilation timed out\n    at x"),
+    ) === "TimeoutError: compilation timed out",
+    "a page TimeoutError was not a stall",
+  );
+  assert(
+    stallErrorText(new DeadlineError("webkit load SDK", 60_000)) ===
+      "TimeoutError: no progress: webkit load SDK did not finish within 60 seconds",
+    "a step deadline was not a stall",
+  );
+  for (
+    const error of [
+      new Error("page.evaluate: CompileError: cpp exited with status 1"),
+      new Error("expected CompileError, received TimeoutError"),
+      new TypeError("TimeoutError"),
+    ]
+  ) {
+    assert(stallErrorText(error) === null, `${error.message} read as a stall`);
+  }
+});
+
+const healthyPage: EngineHealth = {
+  plainWorker: "up after 1 ms",
+  workerCompile: "compiled after 1 ms",
+  pageCompile: "compiled after 1 ms",
+  healthy: true,
+};
+
+/** Run `fn` with a fake page tracer and health checks on globalThis. */
+async function onFakePage<T>(
+  tracer: PageTracer,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const scope = globalThis as unknown as Record<string, unknown>;
+  scope.capnpTracer = tracer;
+  scope.capnpEngineHealth = () => Promise.resolve(healthyPage);
+  try {
+    return await fn();
+  } finally {
+    delete scope.capnpTracer;
+    delete scope.capnpEngineHealth;
+  }
+}
+
+Deno.test("a stalled step's evidence is its latest unanswered message", async () => {
+  const tracer: PageTracer = {
+    workers: [
+      {
+        events: ["page:post:init:1", "0:started", "page:reply:1"],
+        terminated: false,
+      },
+      {
+        events: [
+          "page:post:init:1",
+          "0:started",
+          "1:message:init:1",
+          "2:reply:1",
+          "page:reply:1",
+          "page:post:compile:2",
+        ],
+        terminated: true,
+      },
+    ],
+    posts: [
+      { worker: 0, post: "init:1" },
+      { worker: 1, post: "init:1" },
+      { worker: 1, post: "compile:2" },
+    ],
+    drill: null,
+  };
+  const evidence = await onFakePage(
+    tracer,
+    () => stepStallEvidence({ since: 1, error: "TimeoutError: x" }),
+  );
+  assert(
+    evidence.expected === "compile:2" && evidence.worker === 1 &&
+      evidence.posted === 2 && evidence.events.length === 6 &&
+      evidence.error === "TimeoutError: x" && evidence.health.healthy &&
+      evidence.count === null,
+    JSON.stringify(evidence),
+  );
+  // Posts before the step, and answered ones, are not the step's stall.
+  const quiet = await onFakePage(
+    tracer,
+    () => stepStallEvidence({ since: 3, error: "TimeoutError: x" }),
+  );
+  assert(
+    quiet.expected === null && quiet.worker === null && quiet.posted === 0,
+    JSON.stringify(quiet),
+  );
+  const answered = await onFakePage({
+    ...tracer,
+    workers: [
+      tracer.workers[0],
+      {
+        ...tracer.workers[1],
+        events: [...tracer.workers[1].events, "page:reply:2"],
+      },
+    ],
+  }, () => stepStallEvidence({ since: 1, error: "TimeoutError: x" }));
+  assert(answered.expected === null, JSON.stringify(answered));
+});
+
+/** A fake StallRuleHost over a fake page, recording what the rule did. */
+function fakeRuleHost(page: { tracer: PageTracer }) {
+  const log: string[] = [];
+  const host: StallRuleHost = {
+    evaluate: <T, A>(fn: (argument: A) => T | Promise<T>, argument: A) =>
+      onFakePage(page.tracer, async () => await fn(argument)),
+    freshPage(label) {
+      log.push(`fresh page for ${label}`);
+      page.tracer = { workers: [], posts: [], drill: null };
+      return Promise.resolve();
+    },
+    tolerate(kind, label, evidence: StepStallEvidence, because) {
+      log.push(`tolerate ${kind} ${label}: ${because} (${evidence.expected})`);
+      return Promise.resolve();
+    },
+    beforeAttempt(label) {
+      log.push(`arm ${label}`);
+      return Promise.resolve();
+    },
+    afterAttempt(label) {
+      log.push(`disarm ${label}`);
+      return Promise.resolve();
+    },
+  };
+  return { host, log };
+}
+
+/** A tracer where the page posted init to a worker whose script never ran. */
+function neverStarted(): PageTracer {
+  return {
+    workers: [{ events: ["page:post:init:1"], terminated: true }],
+    posts: [{ worker: 0, post: "init:1" }],
+    drill: null,
+  };
+}
+
+/** A tracer where the worker received init and never answered it. */
+function neverAnswered(): PageTracer {
+  return {
+    workers: [{
+      events: ["page:post:init:1", "0:started", "1:message:init:1"],
+      terminated: true,
+    }],
+    posts: [{ worker: 0, post: "init:1" }],
+    drill: null,
+  };
+}
+
+const timedOut = () =>
+  Promise.reject(
+    new Error("page.evaluate: TimeoutError: compilation timed out"),
+  );
+
+Deno.test("the stall rule retries an engine stall once, on a fresh page", async () => {
+  // No stall: the result, nothing recorded.
+  const idle = fakeRuleHost({ tracer: neverStarted() });
+  assert(
+    await underStallRule(
+          idle.host,
+          "resource-limits",
+          "step",
+          () => Promise.resolve(7),
+        ) === 7 &&
+      idle.log.join() === "arm step,disarm step",
+    idle.log.join(),
+  );
+  // An engine stall: recorded, then retried on a fresh page.
+  const page = {
+    tracer: { workers: [], posts: [], drill: null } as PageTracer,
+  };
+  const engine = fakeRuleHost(page);
+  let attempts = 0;
+  const result = await underStallRule(
+    engine.host,
+    "resource-limits",
+    "step",
+    () => {
+      attempts++;
+      if (attempts === 1) {
+        page.tracer = neverStarted();
+        return timedOut();
+      }
+      return Promise.resolve("recovered");
+    },
+  );
+  assert(
+    result === "recovered" &&
+      engine.log.join("; ") ===
+        "arm step; disarm step; tolerate resource-limits step: the engine never ran the worker's script (init:1); fresh page for step; arm step; disarm step",
+    engine.log.join("; "),
+  );
+});
+
+Deno.test("the stall rule fails an SDK stall, a second stall, and a stall it cannot judge", async () => {
+  // The worker received init and never answered: the SDK.
+  const sdkPage = {
+    tracer: { workers: [], posts: [], drill: null } as PageTracer,
+  };
+  const sdk = fakeRuleHost(sdkPage);
+  const sdkFailure = await rejection(() =>
+    underStallRule(sdk.host, "sdk-client", "load SDK", () => {
+      sdkPage.tracer = neverAnswered();
+      return timedOut();
+    })
+  );
+  assert(
+    sdkFailure.startsWith(
+      "load SDK: the step stalled (TimeoutError: compilation timed out), and the evidence points at the SDK: the engine did its part and stayed healthy, yet the worker never answered init:1",
+    ) && !sdk.log.some((entry) => entry.startsWith("tolerate")),
+    `${sdkFailure} / ${sdk.log.join("; ")}`,
+  );
+  // An engine stall whose retry stalls too.
+  const twicePage = {
+    tracer: { workers: [], posts: [], drill: null } as PageTracer,
+  };
+  const twice = fakeRuleHost(twicePage);
+  const twiceFailure = await rejection(() =>
+    underStallRule(twice.host, "conformance-setup", "setup", () => {
+      twicePage.tracer = neverStarted();
+      return timedOut();
+    })
+  );
+  assert(
+    twiceFailure.startsWith(
+      "setup: the step stalled again on a fresh page (TimeoutError: compilation timed out), after a stall that pointed at the engine (the engine never ran the worker's script)",
+    ),
+    twiceFailure,
+  );
+  // The budget: tolerate refuses, so the step fails without a retry.
+  const budgetPage = {
+    tracer: { workers: [], posts: [], drill: null } as PageTracer,
+  };
+  const budget = fakeRuleHost(budgetPage);
+  budget.host.tolerate = () =>
+    Promise.reject(new Error("stall 2 of this job exceeds its budget of 1"));
+  const budgetFailure = await rejection(() =>
+    underStallRule(budget.host, "hostile-guests", "hostile", () => {
+      budgetPage.tracer = neverStarted();
+      return timedOut();
+    })
+  );
+  assert(
+    budgetFailure === "stall 2 of this job exceeds its budget of 1" &&
+      !budget.log.some((entry) => entry.startsWith("fresh page")),
+    `${budgetFailure} / ${budget.log.join("; ")}`,
+  );
+  // A page that cannot report its evidence.
+  const lost = fakeRuleHost({ tracer: neverStarted() });
+  const evaluate = lost.host.evaluate;
+  lost.host.evaluate = (fn, argument, label, ms) =>
+    label.endsWith("gather stall evidence")
+      ? Promise.reject(
+        new Error("Target page, context or browser has been closed"),
+      )
+      : evaluate(fn, argument, label, ms);
+  const lostFailure = await rejection(() =>
+    underStallRule(lost.host, "feature-rows", "row", timedOut)
+  );
+  assert(
+    lostFailure ===
+      "row: the step stalled (TimeoutError: compilation timed out), and the page did not report its evidence: Target page, context or browser has been closed",
+    lostFailure,
+  );
+  // Any other failure is the step's own.
+  const other = fakeRuleHost({ tracer: neverStarted() });
+  const otherFailure = await rejection(() =>
+    underStallRule(
+      other.host,
+      "feature-rows",
+      "row",
+      () =>
+        Promise.reject(new Error("page.evaluate: CompileError: cpp trapped")),
+    )
+  );
+  assert(
+    otherFailure === "page.evaluate: CompileError: cpp trapped",
+    otherFailure,
+  );
+});
+
+Deno.test("a result that shows a timeout its expectation refuses is a stall", async () => {
+  const page = {
+    tracer: { workers: [], posts: [], drill: null } as PageTracer,
+  };
+  const rows = fakeRuleHost(page);
+  let attempts = 0;
+  const result = await underStallRule(
+    rows.host,
+    "conformance-rows",
+    "row",
+    () => {
+      attempts++;
+      if (attempts === 1) page.tracer = neverStarted();
+      return Promise.resolve(attempts === 1 ? "timeout" : "ok");
+    },
+    (outcome) =>
+      outcome === "timeout" ? "TimeoutError: the row timed out" : null,
+  );
+  assert(
+    result === "ok" &&
+      rows.log.some((entry) =>
+        entry.startsWith("tolerate conformance-rows row:")
+      ),
+    `${result} / ${rows.log.join("; ")}`,
+  );
+});
+
+Deno.test("a stalled step's ledger entry names the step, and warns in one line", () => {
+  const stall: SoakStall = {
+    job: "local",
+    engine: "webkit",
+    os: "linux",
+    kind: "conformance-setup",
+    mode: "webkit load the conformance runner and the Studio adapter",
+    at: new Date(0).toISOString(),
+    summary:
+      "TimeoutError: compilation timed out; the engine never ran the worker's script",
+    detail: null,
+  };
+  assert(
+    stallTitle(stall) === "Worker stall" &&
+      stallPlace(stall) ===
+        "webkit load the conformance runner and the Studio adapter (conformance-setup)",
+    `${stallTitle(stall)} / ${stallPlace(stall)}`,
+  );
+  const warning = stallWarning(stall);
+  assert(
+    warning ===
+      "::warning title=Worker stall (webkit)::webkit load the conformance runner and the Studio adapter (conformance-setup): TimeoutError: compilation timed out; the engine never ran the worker's script",
+    warning,
+  );
+});
+
+Deno.test("the worker tracer is a script the page can run", () => {
+  // Parsing only: running it needs a page's Worker and location.
+  new Function(workerTracerScript);
 });
