@@ -115,7 +115,11 @@ a local cold build is comparable. For quick iteration, run one suite task, or
 and the conformance rows on the direct, worker, and Studio surfaces. Set
 `CAPNP_BROWSER_JOBS=1` to run the engines in turn, and
 `CAPNP_BROWSER_DEADLINE_MS` or `CAPNP_BROWSER_ENGINE_TIMEOUT_MS` to change the
-step or per-engine deadline.
+step or per-engine deadline. On a slow host, `CAPNP_TEST_TIMEOUT_SCALE` (a plain
+decimal from 1 to 100, default 1) multiplies the suites' and browser drivers'
+load timeouts (`run()`'s default and build timeouts, step deadlines, and
+Playwright timeouts); explicit timeouts, the 20-minute engine deadline, and the
+SDK bounds inside the pages keep their values.
 
 - C++ port, Wasm feature profile, or `scripts/check-wasm-artifacts.ts`:
   `mise run test` (includes `check:wasm-artifacts`).
