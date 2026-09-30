@@ -80,6 +80,7 @@ seconds. Environment variables adjust this:
 | `CAPNP_BROWSER_ENGINE_TIMEOUT_MS` | Each driver's overall deadline (default 1200000)                                                                                 |
 | `CAPNP_BROWSER_JOBS`              | Drivers that run at once (default 3; 1 runs the engines in turn)                                                                 |
 | `CAPNP_BROWSER_STALL`             | Hangs the first step whose label contains the text, as a drill                                                                   |
+| `CAPNP_BROWSER_WORKER_STALL`      | Stalls the next SDK worker of a matching step, as a drill (`<label text>[=start                                                  |
 | `CAPNP_TEST_TIMEOUT_SCALE`        | Multiplies the default step deadline, the kill grace, and the Playwright timeouts, not the engine deadline (1 to 100; default 1) |
 
 For example,
@@ -97,9 +98,8 @@ steps then costs each engine at most 21.5 minutes (the deadline plus the
 90-second kill grace), so with the engines in turn the job ends by about 3.8 + 3
 × 21.5 = 68 of its 150 minutes. An explicit `CAPNP_BROWSER_*` value is used as
 given, and the SDK bounds inside the pages keep their values: the termination
-bound asserts behaviour, the probe start and soak recovery bounds are budgeted
-by the stall rule, and the resource-limits bounds already allow 60 and 30
-seconds.
+bound asserts behaviour, and the probe start, the soak recovery, and the SDK's
+own timeouts in every other worker step are budgeted by the stall rule.
 
 Before compiling, the driver blocks network requests and WebSocket connections,
 closes its asset server, and revokes its own Deno network and process-spawning
@@ -138,26 +138,26 @@ without returning partial output, then successfully execute another permitted
 job. A small Wasm command attempts two memory grows from one page; its observed
 memory size must remain at the configured two-page ceiling in every engine. A
 second command writes seven single-byte chunks under a six-byte stdout limit,
-catching quota bypasses when the shim grows a resizable ArrayBuffer in place.
-This step gives each worker init 60 seconds and each job 30 seconds explicitly,
-since a WebKit worker's init once ran out of the SDK's implicit 30-second
-default under load (nightly 36141746707), although it measures about 0.15 s with
-every core busy. An init or job that runs out names itself and its duration, and
-`OBSERVED <engine> <host> resource limits: ...` prints every duration. These
-workers are not traced, so the one stall rule (`judgeStall`) cannot read them: a
-stalled init here fails the run rather than counting against the stall budget.
+catching quota bypasses when the shim grows a resizable ArrayBuffer in place. A
+WebKit worker's init once ran out of the SDK's 30-second default here under load
+(nightly 36141746707), although it measures about 0.15 s with every core busy;
+the worker step now runs under the stall rule (see
+[Recovery soak](#recovery-soak)) with the SDK's own init and job defaults, in
+place of the longer bounds it had. An init or job that runs out names itself and
+its duration, and `OBSERVED <engine> <host> resource limits: ...` prints every
+duration.
 
 The hostile guests under `guests/` run in both modes as well. Each one-page
 command asks the host for more than the guest owns (oversized read iovec arrays,
 a 2 GiB random fill, a descriptor flood, writes at pointers outside memory),
 mutates the read-only compiler workspace, or publishes output names such as
-`__proto__` and `a\b`. Every call must finish in under a second with the
-expected errno bytes, a plain-object result, or a `CompileError`, without a host
-allocation proportional to the request. The driver assembles every
-`guests/*.wat` with the pinned `wasm-tools` (`parse`, then `strip --all`) and
-refuses to run if the bytes differ from the copies embedded in
-`sdk/typescript/testdata/hostile_guests.ts`, which the permission-restricted SDK
-tests use.
+`__proto__` and `a\b`. Every call must finish in under a second, once its
+compiler exists, with the expected errno bytes, a plain-object result, or a
+`CompileError`, without a host allocation proportional to the request. The
+driver assembles every `guests/*.wat` with the pinned `wasm-tools` (`parse`,
+then `strip --all`) and refuses to run if the bytes differ from the copies
+embedded in `sdk/typescript/testdata/hostile_guests.ts`, which the
+permission-restricted SDK tests use.
 
 ## Recovery soak
 
@@ -169,8 +169,9 @@ the C++, Rust, and Go generators, whose files are checked against the native
 oracle. On this page, which is not cross-origin isolated, each abort replaces
 the worker and each timeout keeps it.
 
-Every soak worker is traced (`worker-trace.ts`): a module that loads before the
-SDK's `worker.js` reports the worker's start, each message it receives, each
+Every SDK worker the main page creates is traced from the start
+(`worker-trace.ts`, installed as an init script): a module that loads before the
+worker's own script reports the worker's start, each message it receives, each
 Wasm compile and instantiate, and each reply, and the page adds each message it
 posts to the worker and each reply that reaches it. A recovery gets 20 seconds,
 over six times the slowest one measured in CI. One that does not finish in time
@@ -190,10 +191,11 @@ anything for the recovery.
   both workers' traces.
 - Otherwise the engine is the suspect, and the stall is tolerated within a
   budget per CI job. `CAPNP_SOAK_STALL_BUDGET` (1 by default, 0 for none) bounds
-  these stalls and the termination check's start stalls (see below) together, as
-  every driver of the job records them in `build/test/soak-stalls.jsonl`: all
-  engines, the suite run, and each soak round. CI jobs start from a clean
-  checkout; locally the ledger lasts until `mise run clean:test`.
+  these stalls, the termination check's start stalls (see below), and the stalls
+  of every other step under the rule together, as every driver of the job
+  records them in `build/test/soak-stalls.jsonl`: all engines, the suite run,
+  and each soak round. CI jobs start from a clean checkout; locally the ledger
+  lasts until `mise run clean:test`.
 
 Until the rule was shared, the soak read two cases the other way. A worker whose
 trace showed no job was blamed on the engine; the page's posts now show whether
@@ -206,6 +208,25 @@ A tolerated stall prints an `OBSERVED <engine> soak recovery stall` line with
 both traces and the health checks, goes into the engine's receipt and the run
 summary, and on GitHub Actions becomes a warning annotation. A retry that fails
 too, or a stall beyond the budget, fails the run.
+
+Every other step that creates, initializes, or first uses SDK workers runs under
+the same rule (`stall-rule.ts`): loading the SDK clients, preparing the
+conformance runner and priming the Studio adapter, the feature-corpus worker
+rows, the worker resource limits and hostile guests, the soak's client, and the
+worker and Studio conformance rows. Such a step stalls when it fails with an SDK
+`TimeoutError`, when its step deadline passes, or when a conformance row shows a
+timeout its expectation does not accept. The page then reports the latest
+message it posted during the step that its worker never answered, that worker's
+trace, and the health checks. A stall that points at the engine prints
+`OBSERVED <engine> worker stall in <step>`, counts against the same budget under
+the step's kind, and the step runs once more on a fresh main page, which replays
+the steps later ones depend on and, once the driver has gone offline, loads the
+page and its assets from memory. A stall that points at the SDK, a page that
+cannot report its evidence, a second stall, or a stall beyond the budget fails
+the run. `CAPNP_BROWSER_WORKER_STALL` drills the rule: the next SDK worker of a
+matching step never runs its script (`start`) or never receives a message after
+init (`job`), as an engine stall would, or never answers (`silent`), as an SDK
+fault would.
 
 One recovery stall has been seen. In the nightly run
 [36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524),
