@@ -149,6 +149,17 @@ export const buildTimeoutMs = scaled(10 * 60_000);
 /** run()'s timeout when the caller passes none: 60 s, scaled. */
 export const defaultTimeoutMs = scaled(60_000);
 
+let timeouts = 0;
+
+/**
+ * How many run() calls in this process have timed out. A suite that runs
+ * many cases for one host can compare it before and after each case and stop
+ * that host's cases after the first timeout (ledger row 143).
+ */
+export function runTimeouts(): number {
+  return timeouts;
+}
+
 /** A command's output; `timedOut` marks a run that hit `timeoutMs`. */
 export interface RunResult extends Deno.CommandOutput {
   timedOut: boolean;
@@ -180,6 +191,7 @@ export async function run(
   const stop = new Promise<void>((resolve) => stopReading = resolve);
   const timer = setTimeout(() => {
     timedOut = true;
+    timeouts++;
     controller.abort();
     // The child may have exited already while a grandchild holds the pipes.
     if (exited) stopReading();

@@ -32,6 +32,7 @@ import {
   expectSuccess,
   mustSucceed,
   run,
+  runTimeouts,
 } from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
 import { checkModule, modules } from "../scripts/check-wasm-artifacts.ts";
@@ -377,6 +378,35 @@ for (const host of wasmHosts) {
       args: string[] = [],
       options: GuestOptions = {},
     ) => guestCommand(host, tool, directory, args, options);
+    // Every step below runs this host's guest, most under run()'s default
+    // timeout, about 45 of them in sequence. A host that timed out once would
+    // likely spend the timeout again on every later step, which on a scaled
+    // nightly runner outlasts the job (ledger row 143). So after the first
+    // step in which a command timed out, the log says so at once, the host's
+    // remaining steps are skipped (reported as ignored), and the end of the
+    // test names how many.
+    const timeoutsBefore = runTimeouts();
+    let stoppedAt: string | undefined;
+    let skipped = 0;
+    const step = async (
+      name: string,
+      fn: () => Promise<void>,
+    ): Promise<boolean> => {
+      if (stoppedAt !== undefined) {
+        skipped++;
+        return await t.step({ name, ignore: true, fn });
+      }
+      try {
+        return await t.step(name, fn);
+      } finally {
+        if (runTimeouts() > timeoutsBefore) {
+          stoppedAt = name;
+          console.error(
+            `${host.name}: ${name} timed out; its remaining steps on this host are skipped`,
+          );
+        }
+      }
+    };
     const nativeOutput = (language: string) =>
       language === "c++" ? data.expected : `${data.work}/native-${language}`;
     /**
@@ -405,7 +435,7 @@ for (const host of wasmHosts) {
     };
     let compiled: Uint8Array = new Uint8Array();
 
-    await t.step(
+    await step(
       "compiler preserves the standard request semantics",
       async () => {
         compiled = await mustSucceed(
@@ -445,7 +475,7 @@ for (const host of wasmHosts) {
         compiled,
       ]] as const
     ) {
-      await t.step(
+      await step(
         `${source} request produces byte-identical C++`,
         async () => {
           assert(request.length > 0, "compiler produced no request");
@@ -478,7 +508,7 @@ for (const host of wasmHosts) {
           compiled,
         ]] as const
       ) {
-        await t.step(
+        await step(
           `${source} request produces byte-identical ${language}`,
           async () => {
             assert(request.length > 0, "compiler produced no request");
@@ -501,7 +531,7 @@ for (const host of wasmHosts) {
         );
       }
       if (language === "zig") {
-        await t.step(
+        await step(
           "Zig without reflection remains byte-identical to native",
           async () => {
             const output = `${data.work}/${host.name}-zig-without-reflection`;
@@ -521,7 +551,7 @@ for (const host of wasmHosts) {
           },
         );
       }
-      await t.step(
+      await step(
         `generated ${language} compiles and roundtrips with its pinned runtime`,
         async () => {
           const output = `${data.work}/${host.name}-wasm-${language}`;
@@ -603,7 +633,7 @@ for (const host of wasmHosts) {
       );
     }
 
-    await t.step(
+    await step(
       "Rust output-directory option stages all files beneath the requested path",
       async () => {
         const output = `${data.work}/${host.name}-rust-output-option`;
@@ -620,7 +650,7 @@ for (const host of wasmHosts) {
       },
     );
 
-    await t.step("Go generator options match native", async () => {
+    await step("Go generator options match native", async () => {
       const output = `${data.work}/${host.name}-go-options`;
       await Deno.mkdir(output);
       await mustSucceed(guest("capnpc-go", output, goOptionArgs), {
@@ -650,7 +680,7 @@ for (const host of wasmHosts) {
       );
     });
 
-    await t.step("schema inspection matches native output", async () => {
+    await step("schema inspection matches native output", async () => {
       for (
         const [source, request] of [["native", data.request], [
           "wasm",
@@ -670,7 +700,7 @@ for (const host of wasmHosts) {
       }
     });
 
-    await t.step(
+    await step(
       "generators read a regular-file stdin like a pipe",
       async () => {
         const stdinFile = `${data.work}/native-request.bin`;
@@ -698,7 +728,7 @@ for (const host of wasmHosts) {
       },
     );
 
-    await t.step(
+    await step(
       "UTF-8 entrypoint paths survive WASI argument encoding",
       async () => {
         const request = await mustSucceed(
@@ -727,7 +757,7 @@ for (const host of wasmHosts) {
       },
     );
 
-    await t.step(
+    await step(
       "a trapping guest reports the host's trap status, not a diagnostic",
       async () => {
         const result = await run(
@@ -758,7 +788,7 @@ for (const host of wasmHosts) {
       },
     );
 
-    await t.step(
+    await step(
       "usage errors name the tool, not the host module path",
       async () => {
         const result = await run(
@@ -775,7 +805,7 @@ for (const host of wasmHosts) {
     );
 
     for (const name of invalidSchemas) {
-      await t.step(`${name} fails with the native diagnostic`, async () => {
+      await step(`${name} fails with the native diagnostic`, async () => {
         const result = await run(guest("capnp", data.compilerRoot, [
           "compile",
           "--no-standard-import",
@@ -789,7 +819,7 @@ for (const host of wasmHosts) {
 
     for (const [name, input] of data.malformedInputs) {
       for (const language of generators) {
-        await t.step(
+        await step(
           `${name} ${language} generator input fails with the native diagnostic and no output files`,
           async () => {
             const output = `${data.work}/${host.name}-${language}-${name}`;
@@ -815,7 +845,7 @@ for (const host of wasmHosts) {
     }
 
     for (const language of generators) {
-      await t.step(
+      await step(
         `${language} generator confines a traversal request to the output root`,
         async () => {
           const parent = `${data.work}/${host.name}-${language}-traversal`;
@@ -884,7 +914,7 @@ for (const host of wasmHosts) {
       );
     }
 
-    await t.step("guest generator launching fails explicitly", async () => {
+    await step("guest generator launching fails explicitly", async () => {
       const result = await run(guest("capnp", data.compilerRoot, [
         "compile",
         "--no-standard-import",
@@ -900,7 +930,7 @@ for (const host of wasmHosts) {
       );
     });
 
-    await t.step("id uses host randomness", async () => {
+    await step("id uses host randomness", async () => {
       const ids: string[] = [];
       for (let attempt = 0; attempt < 2; attempt++) {
         const output = decodeText(
@@ -919,7 +949,7 @@ for (const host of wasmHosts) {
       );
     });
 
-    await t.step(
+    await step(
       "commands without a directory preopened at / fail with a clear diagnostic",
       async () => {
         // The compiler and the C++ generator open "/" while their main objects
@@ -944,6 +974,11 @@ for (const host of wasmHosts) {
         }
       },
     );
+    if (stoppedAt !== undefined) {
+      console.error(
+        `${host.name}: ${stoppedAt} timed out; ${skipped} remaining steps skipped`,
+      );
+    }
   });
 }
 

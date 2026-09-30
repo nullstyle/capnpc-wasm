@@ -15,6 +15,7 @@ import {
   mustSucceed,
   run,
   type RunOptions,
+  type RunResult,
 } from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
 
@@ -329,21 +330,39 @@ suite.test(
         }),
       );
     }
+    // Each failure is printed where it is caught, so a job that times out
+    // still leaves it in the log. A case that times out stops its host's
+    // loop: a host that hung once would spend run()'s timeout on every later
+    // case, 41 of them, which on a scaled nightly runner outlasts the job
+    // (ledger row 143).
     const failures: string[] = [];
+    const fail = (message: string) => {
+      failures.push(message);
+      console.error(message);
+    };
     await Promise.all(
       hosts.filter((host) => host.name !== "native").map(async (host) => {
         const started = performance.now();
         for (const [index, item] of cases.entries()) {
           const label = `${host.name}: ${item.label}`;
+          let result: RunResult | undefined;
           try {
-            const result = await run(
+            result = await run(
               [wrappers.get(host.name)!, ...item.args],
               stdinOf(item),
             );
             expectSuccess(result, label);
             assertBytesEqual(result.stdout, expected[index], label);
           } catch (error) {
-            failures.push(error instanceof Error ? error.message : `${error}`);
+            fail(error instanceof Error ? error.message : `${error}`);
+          }
+          if (result?.timedOut) {
+            fail(
+              `${label} timed out; ${
+                cases.length - index - 1
+              } remaining cases skipped`,
+            );
+            break;
           }
         }
         console.log(
