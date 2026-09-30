@@ -11,6 +11,7 @@ import {
 } from "./mod.ts";
 import { Cancelled, countdownExport, JobControl } from "./interrupt.ts";
 import { CommandError, runCommand } from "./runtime.ts";
+import process from "node:process";
 import { compileBounded, instrument } from "./wasm.ts";
 import {
   bulkChargesModule,
@@ -43,22 +44,87 @@ import {
 } from "./testdata/support.ts";
 
 // Stopping takes well under a millisecond on an idle host (see the SDK
-// README); the bound leaves 5x headroom over a 100 ms target for loaded CI.
+// README). A direct job runs its guest on this thread until the deadline, so
+// a loaded host stretches the job's wall time without making the guest do
+// more work. The upper bounds are therefore on the CPU the process spent
+// during the job (every thread): a guest that ran on past its deadline would
+// spend it, and a descheduled one does not. `lateMs` leaves 5x headroom over
+// a 100 ms target; `hangMs` only catches a job that never ends in reasonable
+// time.
 const timeoutMs = 200;
 const lateMs = 500;
+const hangMs = 30_000;
 
-async function elapsed<T>(run: () => Promise<T>): Promise<number> {
-  const started = performance.now();
-  await run();
-  return performance.now() - started;
+/** The wall time of a call, and the CPU the whole process spent during it. */
+interface Took {
+  wall: number;
+  cpu: number;
 }
 
-function stoppedInTime(took: number, what: string): void {
-  assert(took >= timeoutMs, `${what} stopped before its deadline: ${took} ms`);
+function cpuMs(): number {
+  const { user, system } = process.cpuUsage();
+  return (user + system) / 1000;
+}
+
+async function measured<T>(run: () => Promise<T>): Promise<Took> {
+  const started = performance.now();
+  const spent = cpuMs();
+  await run();
+  return { wall: performance.now() - started, cpu: cpuMs() - spent };
+}
+
+/**
+ * How late this thread wakes from a blocking wait right now: the most that
+ * three waits of `timeoutMs`, the kind a sleeping guest's host makes, ran
+ * past their timeout. A loaded host wakes every sleeper late.
+ */
+function wakeLateness(): number {
+  const cell = new Int32Array(new SharedArrayBuffer(4));
+  let late = 0;
+  for (let i = 0; i < 3; i++) {
+    const started = performance.now();
+    Atomics.wait(cell, 0, 0, timeoutMs);
+    late = Math.max(late, performance.now() - started - timeoutMs);
+  }
+  return late;
+}
+
+/**
+ * A guest stopped at its deadline: not before it, by wall time, and not
+ * after it. A `busy` guest that ran on would spend CPU, so its job's CPU is
+ * bounded. A `waiting` guest (a sleep) that ran on would spend none, so its
+ * wall time is judged against this thread's own clock: it may run past its
+ * deadline by `lateMs` plus however late a plain wait of the same kind wakes
+ * right now. The wall-clock bound catches only a hang.
+ */
+function stoppedInTime(
+  took: Took,
+  what: string,
+  runaway: "busy" | "waiting" = "busy",
+): void {
   assert(
-    took < timeoutMs + lateMs,
-    `${what} ran ${took - timeoutMs} ms past its deadline`,
+    took.wall >= timeoutMs,
+    `${what} stopped before its deadline: ${took.wall} ms`,
   );
+  assert(
+    took.cpu < timeoutMs + lateMs,
+    `${what} ran past its deadline: the process spent ${
+      took.cpu.toFixed(0)
+    } ms of CPU during a ${timeoutMs} ms job`,
+  );
+  assert(took.wall < hangMs, `${what} took ${took.wall} ms`);
+  const overran = took.wall - timeoutMs;
+  if (runaway === "waiting" && overran >= lateMs) {
+    const late = wakeLateness();
+    assert(
+      overran < lateMs + late,
+      `${what} slept ${
+        overran.toFixed(0)
+      } ms past its deadline, while ${timeoutMs} ms waits on this thread now run at most ${
+        late.toFixed(0)
+      } ms past theirs`,
+    );
+  }
 }
 
 /** Instantiate `bytes` (instrumented or not) with the coverage imports. */
@@ -605,7 +671,7 @@ Deno.test("SDK direct jobs stop running guests at their deadline", async () => {
     ]
   ) {
     let failure: unknown;
-    const took = await elapsed(async () => {
+    const took = await measured(async () => {
       try {
         await run(mode);
       } catch (error) {
@@ -616,7 +682,11 @@ Deno.test("SDK direct jobs stop running guests at their deadline", async () => {
       failure instanceof DOMException && failure.name === "TimeoutError",
       `mode ${mode}: ${failure}`,
     );
-    stoppedInTime(took, `mode ${mode}`);
+    stoppedInTime(
+      took,
+      `mode ${mode}`,
+      mode === catchRetryMode.sleep ? "waiting" : "busy",
+    );
   }
   // A compiler that timed out keeps producing the native bytes.
   const { modules, request } = await fixture();
@@ -628,7 +698,7 @@ Deno.test("SDK direct jobs stop running guests at their deadline", async () => {
     ...request,
     generators: ["rust"],
   });
-  const took = await elapsed(() =>
+  const took = await measured(() =>
     rejects(
       () =>
         compiler.compile({ ...request, generators: ["cpp"] }, { timeoutMs }),
@@ -652,7 +722,7 @@ Deno.test("SDK direct jobs stop bulk operations and costly imports at their dead
   // minutes after the deadline; charges and import polls stop each in time.
   for (const [step, mode] of Object.entries(costlyStep)) {
     let failure: unknown;
-    const took = await elapsed(async () => {
+    const took = await measured(async () => {
       try {
         await compiler.generate({
           request: Uint8Array.of(mode),
@@ -757,7 +827,7 @@ Deno.test("SDK direct jobs observe their abort signal", async () => {
     reason: { value: reason },
   });
   seen = undefined;
-  const took = await elapsed(async () => {
+  const took = await measured(async () => {
     try {
       await compiler.generate({
         request: Uint8Array.of(catchRetryMode.spin),
@@ -768,7 +838,13 @@ Deno.test("SDK direct jobs observe their abort signal", async () => {
     }
   });
   assert(seen === reason, `running job rejected with ${seen}`);
-  assert(took < lateMs, `abort took ${took} ms`);
+  // The spinning guest stops at its fourth read, a few checks in: bounded by
+  // the CPU it spent, since a loaded host only stretches the wall time.
+  assert(
+    took.cpu < lateMs,
+    `abort took ${took.cpu.toFixed(0)} ms of CPU (${took.wall} ms)`,
+  );
+  assert(took.wall < hangMs, `abort took ${took.wall} ms`);
 });
 
 Deno.test("SDK validates direct job options before running a guest", async () => {
