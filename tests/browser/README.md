@@ -202,9 +202,9 @@ answer is the page's latest post for the recovery that no reply answered.
   worker's script, never delivered the message to the idle worker, never
   finished a Wasm compile or instantiation, or never delivered a reply the
   worker sent, each for at least 5 seconds (`stallFloorMs`) since the item began
-  and since the worker's latest event. With less quiet than that, the stall
-  shows slowness, not a stall, and fails the run as well, whether an SDK timeout
-  or a step deadline ended the wait.
+  and since the worker's latest event. With less quiet than that, the evidence
+  shows slowness rather than a stall, which fails the run as well, whether an
+  SDK timeout or a step deadline ended the wait.
 - A stall that points at the engine is tolerated within a budget per CI job.
   `CAPNP_SOAK_STALL_BUDGET` (1 by default, 0 for none) bounds these stalls, the
   termination check's start stalls (see below), and the stalls of every other
