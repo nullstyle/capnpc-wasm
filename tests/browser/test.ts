@@ -161,7 +161,9 @@ function assert(condition: unknown, message: string): asserts condition {
 // the pages' Playwright timeouts, and the close steps scale together by
 // CAPNP_TEST_TIMEOUT_SCALE (tests/lib/timeout-scale.ts); an explicit
 // CAPNP_BROWSER_DEADLINE_MS is used as given, and the SDK bounds inside the
-// page (termination, soak, resource limits) keep their calibrated values.
+// page keep their values: the termination bound, and the probe start, soak
+// recovery, and other worker steps' SDK timeouts, whose misses the stall rule
+// judges and budgets (stall-rule.ts).
 // CAPNP_BROWSER_STALL=<text> makes the first step whose label contains the
 // text hang, which demonstrates the deadline. The running step's label is kept
 // next to the receipt for run.ts, which reports it if it has to stop a driver.
@@ -716,8 +718,9 @@ try {
   const opened = browser;
   // The main page, where every step but the termination acceptance runs.
   // The stall rule (stall-rule.ts) may replace it with a fresh page, which
-  // replays the steps later ones depend on (prerequisites) and, once the
-  // driver has gone offline, loads the page and its assets from memory.
+  // loads the page and its assets from the driver's memory, replays the steps
+  // later ones depend on (prerequisites), and once the driver has gone
+  // offline is taken offline too.
   // Every module worker a main page creates is traced from the start
   // (worker-trace.ts workerTracerScript), and the page has the engine health
   // checks.
