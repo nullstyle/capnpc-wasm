@@ -83,14 +83,24 @@ jobs:
       # 78 to 94 minutes, so two at once finish within half that plus half the
       # longest dependency chain, about 56 minutes, inside the job's 90; the
       # whole job took 26.5 minutes in nightly 36149851301.
-      # Its test timeouts also run at three times their length
+      # The check's test timeouts also run at three times their length
       # (CAPNP_TEST_TIMEOUT_SCALE, tests/lib/timeout-scale.ts): a wazero
       # conversion in test:cli-parity outlasted run()'s 60-second default
-      # there (nightly 36168208228; ledger row 143). At 3 a hung program still
-      # fails in 3 minutes and a hung compiler in 30, so one hang ends the job
-      # by about 57 of its 90 minutes. The other hosts, whose logs show no
-      # near-miss (41 wazero conversions take 77 to 155 s against Intel's 141
-      # to 281), keep the scale at 1, as per-push CI does.
+      # there (nightly 36168208228; ledger row 143). test:package's own helpers
+      # keep their unscaled bounds. At 3 a hung program fails in 3 minutes
+      # and a hung compiler in 30. With two tasks at once the job took 22.7 to
+      # 26.4 minutes, and up to about 34.5 when test:cli-parity started 18.5
+      # minutes in. One regression that hangs one Wasm host's commands adds
+      # about 12.5: its capnp-test.sh run reaches that test's explicit
+      # 10-minute bound (about 6.5 more than usual), then test:cli-parity's
+      # conversions and test:toolchain each spend one 3-minute case before
+      # they stop that host, so the job ends by about 47 of its 90 minutes. A
+      # regression that hangs every run of one tool across a suite's steps
+      # (every wasmtime run in the Zig suites' fixture steps, or every Zig
+      # build) is not stopped early and outlasts this job at any scale; the
+      # job timeout ends it. The other hosts, whose logs show no near-miss
+      # (41 wazero conversions take 77 to 155 s against Intel's 141 to 281),
+      # keep the scale at 1, as per-push CI does.
       - name: Pace the Intel runner (two mise tasks, test timeouts x3)
         if: matrix.os == 'macos-15-intel'
         run: |
@@ -140,14 +150,19 @@ jobs:
     # on Linux). With five soak rounds the job took 31.4 minutes on
     # ubuntu-24.04 and 34.1 on macos-15 (nightly 36149851301).
     # On macos-15 the test timeouts also run at three times their length
-    # (CAPNP_TEST_TIMEOUT_SCALE, tests/lib/timeout-scale.ts): a Studio folder
-    # upload there outlasted Playwright's 30-second action timeout (nightly
-    # 36168208228; ledger row 143). At 3 a hung browser step fails in 3
-    # minutes and closes within 90 s, a Studio action in 90 s and a navigation
-    # in 6 minutes, and a driver that never trips a step deadline is stopped
-    # at its 60-minute engine deadline, so one hang ends the job by about 95
-    # of its 150 minutes. ubuntu-24.04 keeps the scale at 1, as per-push CI
-    # does.
+    # (CAPNP_TEST_TIMEOUT_SCALE, tests/lib/timeout-scale.ts). In nightly
+    # 36168208228 a single WebKit folder upload in test:studio stalled past
+    # Playwright's 30-second action timeout there: its locator resolved at
+    # once and every other step ran at normal speed, a WebKit stall rather
+    # than a slow runner, which 90 seconds tolerates once (ledger row 143).
+    # At 3 a hung browser step fails in 3 minutes and closes within 90 s, a
+    # Studio action in 90 s and a navigation in 6 minutes. The 20-minute
+    # engine deadline does not scale, so a regression that stalls every
+    # driver outside its steps costs each engine at most 21.5 minutes (the
+    # deadline plus the 90-second kill grace); with the engines in turn, the
+    # first starting about 3.8 minutes into the job, it ends by about 3.8 +
+    # 3 x 21.5 = 68 of its 150 minutes. ubuntu-24.04 keeps the scale at 1,
+    # as per-push CI does.
     env:
       CAPNP_BROWSER_JOBS: "1"
       CAPNP_TEST_TIMEOUT_SCALE: ${{ matrix.os == 'macos-15' && '3' || '1' }}
