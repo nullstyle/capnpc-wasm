@@ -816,13 +816,14 @@ try {
     soakStalls.push(stall);
     const total = await recordStall(stall);
     const what = `${stallTitle(stall).toLowerCase()} in ${stallPlace(stall)}`;
+    const over = total > soakStallBudget;
     console.log(
-      `OBSERVED ${engine} ${what}, attributed to the engine and ${then}: ${
-        JSON.stringify(stall.detail)
-      }`,
+      `OBSERVED ${engine} ${what}, attributed to the engine and ${
+        over ? `beyond the job's stall budget of ${soakStallBudget}` : then
+      }: ${JSON.stringify(stall.detail)}`,
     );
     assert(
-      total <= soakStallBudget,
+      !over,
       `${engine}: stall ${total} of this job, a ${what}, exceeds its budget of ${soakStallBudget} (CAPNP_SOAK_STALL_BUDGET; the ledger ${stallLedgerPath} is cleared by mise run clean:test): ${stall.summary}`,
     );
   };
@@ -1953,6 +1954,16 @@ try {
     },
     undefined,
     `${engine} dispose`,
+  );
+  // A drill entry with attempts left armed no step it named.
+  const unused = drills.filter((drill) => drill.remaining > 0);
+  assert(
+    unused.length === 0,
+    `CAPNP_BROWSER_WORKER_STALL: ${
+      unused.map((drill) => `"${drill.text}" (${drill.remaining} left)`).join(
+        ", ",
+      )
+    } armed no step attempt; check the label text`,
   );
   const receipt = receiptPath ?? `${data.work}/requests.json`;
   await Deno.writeTextFile(

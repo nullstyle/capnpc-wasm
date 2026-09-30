@@ -270,8 +270,8 @@ export type RowRule = <T>(
  * spinning until the browser closes), and check the page's summary against
  * expected.json. Throws after the whole surface ran when any row mismatched,
  * naming each one; returns the rows in corpus order. With `rule`, each row
- * runs under the stall rule, and a timeout its expectation does not accept
- * counts as a stall.
+ * runs under the stall rule, and a timeout counts as a stall when its
+ * expectation does not accept one or when it came from the factory.
  */
 export async function runBrowserSurface(
   engine: Engine,
@@ -353,9 +353,11 @@ export async function runBrowserSurface(
       ? await rule(
         label,
         run,
+        // A timeout is a stall where the row accepts none, and in the
+        // factory phase (a worker that never initialized) for every row.
         (result) =>
           observe(result.summary, result.phase).outcome === "timeout" &&
-            !accepted.includes("timeout")
+            (result.phase === "factory" || !accepted.includes("timeout"))
             ? `TimeoutError: ${(result.summary as ErrorSummary).message}`
             : null,
       )
