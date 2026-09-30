@@ -8,22 +8,34 @@
 // A step stalls when it fails with an SDK TimeoutError, when the driver's
 // step deadline passes (no progress within its bound), or when a step whose
 // result can show a timeout (a conformance row) shows one its expectation
-// does not accept. The page then reports the evidence (stepStallEvidence):
-// the latest message it posted during the step that its worker never
-// answered, that worker's trace (worker-trace.ts), and the engine health
-// checks. judgeStall() reads it. A stall that points at the engine is
-// recorded (an OBSERVED line and a ledger entry, soak-stalls.ts, against the
-// same budget per CI job as the soak and the termination acceptance) and the
-// step runs once more on a fresh page. A stall that points at the SDK, a page
-// that cannot report its evidence, a second stall, or a stall beyond the
-// budget fails the step with the evidence. Every assertion about what the SDK
-// does stays with the step: the rule only excuses a stall the evidence
-// attributes to the engine.
+// does not accept, or one from a worker that never initialized. The page
+// then reports the evidence (stepStallEvidence): the latest message it posted
+// during the step that no reply answered, that worker's facts and trace
+// (worker-trace.ts), and the engine health checks. judgeStall() reads it. A
+// stall that points at the engine is recorded (an OBSERVED line and a ledger
+// entry, soak-stalls.ts, against the same budget per CI job as the soak and
+// the termination acceptance) and the step runs once more on a fresh page. A
+// stall that points at the SDK or shows only slowness, a page that cannot
+// report its evidence, a second stall, or a stall beyond the budget fails the
+// step with the evidence. Every assertion about what the SDK does stays with
+// the step: the rule only excuses a stall the evidence attributes to the
+// engine.
+//
+// The retry reruns only the stalled attempt, on a fresh client with none of
+// the stalled client's history. That is sound because an engine verdict
+// rests only on what the engine failed to do for the stalled message (run a
+// worker's script, deliver a message to an idle worker or a reply to the
+// page, finish a Wasm compile or instantiation), each stalled for
+// stallFloorMs with nothing since. A fault that the client's history causes
+// shows in the facts as the SDK's: a thread its own code held, a post to a
+// busy or terminated worker, an unanswered message, a reply the client did
+// not use.
 import {
   type EngineHealth,
   judgeStall,
   type PageTracer,
   type StallEvidence,
+  verdictWords,
 } from "./worker-trace.ts";
 
 type Evaluate = <T, A>(
@@ -44,8 +56,10 @@ export interface StepStallEvidence extends StallEvidence {
 /**
  * A page function: the evidence for a step that stalled. The worker is the
  * one the page posted its latest unanswered message to during the step (a
- * reply that reached the page answers a message); its events are copied
- * before the health checks run, since those start workers of their own.
+ * reply that reached the page answers a message, by the worker's facts). Its
+ * facts and events are copied, and the time taken, before the health checks
+ * run, since those start workers of their own. With nothing unanswered, the
+ * events are those of the last worker the step posted to.
  */
 export async function stepStallEvidence(
   { since, error }: { since: number; error: string },
@@ -58,14 +72,20 @@ export async function stepStallEvidence(
   if (!tracer || !scope.capnpEngineHealth) {
     throw new Error("the page has no worker tracer or health checks");
   }
+  const posts = tracer.posts.slice(since);
   let stalled: { worker: number; post: string } | undefined;
-  for (const entry of tracer.posts.slice(since)) {
+  for (const entry of posts) {
     const id = entry.post.slice(entry.post.indexOf(":") + 1);
-    const events = tracer.workers[entry.worker]?.events ?? [];
-    if (!events.includes(`page:reply:${id}`)) stalled = entry;
+    const facts = tracer.workers[entry.worker]?.facts;
+    if (!facts || facts.pageReplies[id] === undefined) stalled = entry;
   }
-  const events = stalled ? [...tracer.workers[stalled.worker].events] : [];
-  const posted = tracer.posts.length - since;
+  const shown = stalled ?? posts.at(-1);
+  const worker = shown ? tracer.workers[shown.worker] : undefined;
+  const at = performance.now();
+  const facts = stalled && worker
+    ? JSON.parse(JSON.stringify(worker.facts))
+    : null;
+  const events = worker ? [...worker.events] : [];
   const health = await scope.capnpEngineHealth();
   return {
     expected: stalled ? stalled.post : null,
@@ -73,8 +93,11 @@ export async function stepStallEvidence(
     events,
     health,
     count: null,
+    facts,
+    at,
+    answered: stalled === undefined && posts.length > 0,
     worker: stalled ? stalled.worker : null,
-    posted,
+    posted: posts.length,
   };
 }
 
@@ -172,9 +195,9 @@ export async function underStallRule<T>(
   const { suspect, because } = judgeStall(evidence);
   if (suspect !== "engine") {
     throw new Error(
-      `${label}: the step stalled (${first.stall}), and the evidence points at the SDK: ${because}: ${
-        JSON.stringify(evidence)
-      }`,
+      `${label}: the step stalled (${first.stall}), and the evidence ${
+        verdictWords(suspect)
+      }: ${because}: ${JSON.stringify(evidence)}`,
     );
   }
   await host.tolerate(kind, label, evidence, because);

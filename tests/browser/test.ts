@@ -24,6 +24,7 @@ import {
   judgeStall,
   type PageTracer,
   type StallEvidence,
+  verdictWords,
   workerTracerScript,
 } from "./worker-trace.ts";
 import {
@@ -1633,8 +1634,9 @@ try {
   // worker and Wasm compilation still respond, then retried once on the same
   // client, which replaces the stalled worker as it would for an application.
   // judgeStall() decides who the stall points at: a stall that points at the
-  // SDK, or a retry that fails too, fails the run, and one that points at the
-  // engine counts against the job's stall budget (soak-stalls.ts).
+  // SDK or shows only slowness, or a retry that fails too, fails the run, and
+  // one that points at the engine counts against the job's stall budget
+  // (soak-stalls.ts).
   const soakLanguages = ["cpp", "rust", "go"] as const;
   const soakRecoveryMs = 20_000;
   const soakLabel = `${engine} create the recovery soak client`;
@@ -1710,15 +1712,28 @@ try {
         let recovery = await recover();
         let stall: SoakStallRecord | undefined;
         if (!recovery.ok) {
-          // The message the stalled worker had to answer: the page's last
-          // post for the recovery, if it posted anything for it at all.
-          const post = tracer.posts.slice(postsBefore).at(-1);
-          const stalled = post
-            ? tracer.workers[post.worker]
+          // The message the stalled worker had to answer: the page's latest
+          // post for the recovery that no reply answered, by the worker's
+          // facts; with none, the evidence shows the last worker posted to.
+          const posts = tracer.posts.slice(postsBefore);
+          let post: typeof posts[number] | undefined;
+          for (const entry of posts) {
+            const id = entry.post.slice(entry.post.indexOf(":") + 1);
+            if (
+              tracer.workers[entry.worker].facts.pageReplies[id] === undefined
+            ) post = entry;
+          }
+          const shown = post ?? posts.at(-1);
+          const stalled = shown
+            ? tracer.workers[shown.worker]
             : tracer.workers.at(-1);
-          // Counted before the health checks, whose workers are traced too.
+          // Counted and copied before the health checks, whose workers are
+          // traced too; the retry below may add to the same worker's events.
           const workersStarted = tracer.workers.length;
-          // A copy: the retry below may add to the same worker's events.
+          const at = performance.now();
+          const facts = post && stalled
+            ? JSON.parse(JSON.stringify(stalled.facts))
+            : null;
           const events = [...(stalled?.events ?? [])];
           // Does the engine itself still start workers and compile Wasm?
           const health = await (globalThis as unknown as {
@@ -1731,10 +1746,13 @@ try {
           stall = {
             expected: post === undefined ? null : post.post,
             error: recovery.error,
-            // The whole list: the page keeps at most 60 events per worker.
+            // For display: the page shows at most 60 events per worker.
             events,
             health,
             count: null,
+            facts,
+            at,
+            answered: post === undefined && posts.length > 0,
             afterMs: recovery.afterMs,
             terminated: stalled ? stalled.terminated : null,
             workersStarted,
@@ -1793,7 +1811,7 @@ try {
         suspect === "engine",
         `${engine}: soak recovery after ${mode} in cycle ${
           iteration + 1
-        } stalled, and the evidence points at the SDK: ${because}; ${
+        } stalled, and the evidence ${verdictWords(suspect)}: ${because}; ${
           JSON.stringify(stall)
         }`,
       );
