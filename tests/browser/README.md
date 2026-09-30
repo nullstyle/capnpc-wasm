@@ -226,8 +226,8 @@ dropped as never started.
 A tolerated stall prints an `OBSERVED <engine> soak recovery stall` line with
 both traces and the health checks, goes into the engine's receipt and the run
 summary, and on GitHub Actions becomes a warning annotation. A retry that fails
-too, or a stall beyond the budget, fails the run; the OBSERVED line of a stall
-beyond the budget says so.
+too, or a stall beyond the budget, fails the run; the OBSERVED line and the run
+summary of a stall beyond the budget say so.
 
 Every other step that creates, initializes, or first uses SDK workers runs under
 the same rule (`stall-rule.ts`): loading the SDK clients, preparing the

@@ -9,6 +9,7 @@ import {
 import {
   readStalls,
   type SoakStall,
+  stallBudget,
   stallJob,
   stallPlace,
   stallTitle,
@@ -141,10 +142,13 @@ function lastStep(receiptPath: string): string {
   }
 }
 
-function stallLine(stall: SoakStall): string {
-  return `tolerated ${stallTitle(stall).toLowerCase()} in ${
-    stallPlace(stall)
-  }, attributed to the engine: ${stall.summary}`;
+/** A stall's summary line; one beyond the job's budget failed its driver. */
+function stallLine(stall: SoakStall, beyondBudget = false): string {
+  return `${beyondBudget ? "recorded" : "tolerated"} ${
+    stallTitle(stall).toLowerCase()
+  } in ${stallPlace(stall)}, attributed to the engine${
+    beyondBudget ? " and beyond the job's stall budget" : ""
+  }: ${stall.summary}`;
 }
 
 interface Outcome {
@@ -290,9 +294,19 @@ await Promise.all(
     }
   }),
 );
-const stalls = (await readStalls()).filter((stall) =>
-  stall.job === stallJob() && stall.at >= runStarted
+const jobStalls = (await readStalls()).filter((stall) =>
+  stall.job === stallJob()
 );
+// The budget covers the job's first stalls, in ledger order, whichever run of
+// the job recorded them. An invalid budget failed every driver already.
+let budget = Infinity;
+try {
+  budget = stallBudget();
+} catch {
+  // Reported by the drivers.
+}
+const beyondBudget = new Set(jobStalls.slice(budget));
+const stalls = jobStalls.filter((stall) => stall.at >= runStarted);
 console.log(`Browser verification (receipts in ${receipts}):`);
 for (const outcome of outcomes) {
   console.log(
@@ -304,7 +318,9 @@ for (const outcome of outcomes) {
   // A failed driver wrote no receipt; its recorded stalls come from the ledger.
   if (!outcome.passed) {
     for (const stall of stalls) {
-      if (stall.engine === outcome.engine) console.log(`  ${stallLine(stall)}`);
+      if (stall.engine === outcome.engine) {
+        console.log(`  ${stallLine(stall, beyondBudget.has(stall))}`);
+      }
     }
   }
 }
