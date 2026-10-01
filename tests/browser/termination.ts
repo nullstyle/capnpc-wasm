@@ -28,22 +28,29 @@
 // A sample measures a cancellation only once its worker started and its guest
 // ran. A probe worker whose initialization times out after startBoundMs, or a
 // guest that does not run within that bound (or, in a timeout job, before its
-// deadline), is a start stall: the sample returns the worker's trace, the
-// page's posts to it and the replies that reached the page (worker-trace.ts),
-// and whether the engine still starts workers and compiles Wasm. Any other
-// failure is the check's own. judgeStall() in worker-trace.ts, the rule the
-// recovery soak uses too, reads the evidence; a stall that points at the
-// engine is retried once and then handed to the caller's stall budget
-// (soak-stalls.ts), and any other fails the check.
+// deadline), is a start stall: the sample returns the worker's facts and
+// trace, with the page's posts to it, its terminate() and the replies that
+// reached the page (worker-trace.ts), and whether the engine still starts
+// workers and compiles Wasm. Any other failure is the check's own.
+// judgeStall() in worker-trace.ts, the rule every driver step uses too, reads
+// the evidence; a stall that points at the engine is retried once and then
+// handed to the caller's stall budget (soak-stalls.ts), and one that points
+// at the SDK or shows only slowness fails the check.
 import type { Engine } from "./engines.ts";
 import { settleGraceMs } from "../../sdk/typescript/interrupt.ts";
 import {
+  describePage,
   type EngineHealth,
   judgeStall,
+  type PageWorkers,
   type StallEvidence,
+  stallFloorFor,
   stallSuspect,
+  traceFactsSource,
   traceModuleSource,
   traceWorkerTemplate,
+  verdictWords,
+  type WorkerFacts,
 } from "./worker-trace.ts";
 
 /**
@@ -107,40 +114,49 @@ export type TerminationMode = "timeout" | "abort" | "dispose";
  * `page:reply:<id>`.
  */
 export const workerAuditScript = `(() => {
+  ${traceFactsSource}
   const RealWorker = globalThis.Worker;
   const audit = globalThis.capnpWorkerAudit = {
     created: 0,
     terminated: 0,
     probes: [],
     traces: [],
+    facts: [],
   };
-  // Each event also goes to the driver (capnpTraceSink), which keeps the
-  // trace should the page crash.
-  const keep = (events, event) => {
+  globalThis.capnpPageWorkers = () => capnpPageWorkers(audit.facts);
+  // Every event is folded into the worker's facts (worker-trace.ts), kept
+  // whole, and shown in its events, the latest 60; each also goes to the
+  // driver (capnpTraceSink), which keeps the trace should the page crash.
+  const keep = (index, event) => {
+    capnpFold(audit.facts[index], event, performance.now());
+    const events = audit.traces[index];
     events.push(event);
     if (events.length > 60) events.splice(0, 20);
     const sink = globalThis.capnpTraceSink;
-    if (sink) sink(audit.traces.indexOf(events), event)?.catch?.(() => {});
+    if (sink) sink(index, event)?.catch?.(() => {});
   };
   globalThis.Worker = class extends RealWorker {
     constructor(...args) {
       super(...args);
       audit.created++;
-      const events = [];
-      audit.traces.push(events);
-      this.capnpEvents = events;
+      const index = audit.traces.length;
+      audit.traces.push([]);
+      audit.facts.push(capnpNewFacts());
+      this.capnpIndex = index;
       this.addEventListener("message", (event) => {
         const data = event.data;
         if (data && data.kind === "capnpProbe") {
           audit.probes.push(data.counter ? new Int32Array(data.counter) : null);
         }
-        if (data && data.kind === "capnpTrace") keep(events, data.t + ":" + data.event);
-        else if (data && typeof data.id === "number") keep(events, "page:reply:" + data.id);
+        if (data && data.kind === "capnpTrace") keep(index, data.t + ":" + data.event);
+        else if (data && data.id !== undefined && data.id !== null) {
+          keep(index, "page:reply:" + String(data.id));
+        }
       });
     }
     postMessage(message, transfer) {
       if (message && message.kind) {
-        keep(this.capnpEvents, "page:post:" + message.kind +
+        keep(this.capnpIndex, "page:post:" + message.kind +
           (message.id !== undefined ? ":" + message.id : ""));
       }
       return transfer === undefined
@@ -149,6 +165,7 @@ export const workerAuditScript = `(() => {
     }
     terminate() {
       audit.terminated++;
+      keep(this.capnpIndex, "page:terminate");
       super.terminate();
     }
   };
@@ -374,6 +391,7 @@ export async function measureTermination(
           terminated: number;
           probes: (Int32Array | null)[];
           traces: string[][];
+          facts: WorkerFacts[];
         };
       }).capnpWorkerAudit;
       const engineHealth = (globalThis as unknown as {
@@ -411,15 +429,25 @@ export async function measureTermination(
         error: string | null,
         count: number | null,
       ): Promise<TerminationSample> => {
-        const afterMs = Math.round(performance.now() - since);
+        const at = performance.now();
+        const afterMs = Math.round(at - since);
         const trace = [...(audit.traces[createdBefore] ?? [])];
+        const kept = audit.facts[createdBefore];
+        const facts: WorkerFacts | null = kept
+          ? JSON.parse(JSON.stringify(kept))
+          : null;
+        // The message the worker had to answer: the page's latest post of
+        // the stage's kind, by the facts, which keep every post.
         const kind = stage === "init" ? "init" : "compile";
-        const post = trace.filter((event) =>
-          event.startsWith(`page:post:${kind}:`)
-        ).at(-1);
-        const expected = post === undefined
-          ? null
-          : post.slice("page:post:".length);
+        const expected = facts
+          ? Object.keys(facts.posts).filter((post) =>
+            post.startsWith(`${kind}:`)
+          ).sort((a, b) => facts.posts[a] - facts.posts[b]).at(-1) ?? null
+          : null;
+        // Counted before the health checks start workers of their own.
+        const page = (globalThis as unknown as {
+          capnpPageWorkers?: () => PageWorkers;
+        }).capnpPageWorkers?.();
         const health = await engineHealth();
         return {
           ...sample,
@@ -430,10 +458,13 @@ export async function measureTermination(
             afterMs,
             expected,
             error,
-            // The whole trace: the audit keeps at most 60 events per worker.
+            // For display: the audit shows at most 60 events per worker.
             events: trace,
             count,
             health,
+            facts,
+            at,
+            page,
           },
         };
       };
@@ -643,7 +674,9 @@ export function describeStall(stall: StartStall): string {
       : last === undefined
       ? "the worker reported no event"
       : `the last event: ${last}`
-  }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}`;
+  }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}; ${
+    describePage(stall.page)
+  }`;
 }
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -665,14 +698,16 @@ async function measureOrRetry(
 ): Promise<TerminationSample> {
   const first = await measureTermination(evaluate, guest, mode, label, bounds);
   if (!first.stall) return first;
-  const { suspect, because } = judgeStall(first.stall);
+  // The floor scales with the wait that caught the stall: a 2 s timeout
+  // sample's is 1.5 s (stallFloorFor).
+  const { suspect, because } = judgeStall(first.stall, {
+    floorMs: stallFloorFor(first.stall.afterMs),
+  });
   assert(
     suspect === "engine",
-    `${label}: ${
-      describeStall(first.stall)
-    }; the evidence points at the SDK: ${because}: ${
-      JSON.stringify(first.stall)
-    }`,
+    `${label}: ${describeStall(first.stall)}; the evidence ${
+      verdictWords(suspect)
+    }: ${because}: ${JSON.stringify(first.stall)}`,
   );
   const retried = await measureTermination(
     evaluate,
