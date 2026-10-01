@@ -39,9 +39,12 @@
 import type { Engine } from "./engines.ts";
 import { settleGraceMs } from "../../sdk/typescript/interrupt.ts";
 import {
+  describePage,
   type EngineHealth,
   judgeStall,
+  type PageWorkers,
   type StallEvidence,
+  stallFloorFor,
   stallSuspect,
   traceFactsSource,
   traceModuleSource,
@@ -120,6 +123,7 @@ export const workerAuditScript = `(() => {
     traces: [],
     facts: [],
   };
+  globalThis.capnpPageWorkers = () => capnpPageWorkers(audit.facts);
   // Every event is folded into the worker's facts (worker-trace.ts), kept
   // whole, and shown in its events, the latest 60; each also goes to the
   // driver (capnpTraceSink), which keeps the trace should the page crash.
@@ -145,7 +149,9 @@ export const workerAuditScript = `(() => {
           audit.probes.push(data.counter ? new Int32Array(data.counter) : null);
         }
         if (data && data.kind === "capnpTrace") keep(index, data.t + ":" + data.event);
-        else if (data && typeof data.id === "number") keep(index, "page:reply:" + data.id);
+        else if (data && data.id !== undefined && data.id !== null) {
+          keep(index, "page:reply:" + String(data.id));
+        }
       });
     }
     postMessage(message, transfer) {
@@ -438,6 +444,10 @@ export async function measureTermination(
             post.startsWith(`${kind}:`)
           ).sort((a, b) => facts.posts[a] - facts.posts[b]).at(-1) ?? null
           : null;
+        // Counted before the health checks start workers of their own.
+        const page = (globalThis as unknown as {
+          capnpPageWorkers?: () => PageWorkers;
+        }).capnpPageWorkers?.();
         const health = await engineHealth();
         return {
           ...sample,
@@ -454,6 +464,7 @@ export async function measureTermination(
             health,
             facts,
             at,
+            page,
           },
         };
       };
@@ -663,7 +674,9 @@ export function describeStall(stall: StartStall): string {
       : last === undefined
       ? "the worker reported no event"
       : `the last event: ${last}`
-  }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}`;
+  }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}; ${
+    describePage(stall.page)
+  }`;
 }
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -685,7 +698,11 @@ async function measureOrRetry(
 ): Promise<TerminationSample> {
   const first = await measureTermination(evaluate, guest, mode, label, bounds);
   if (!first.stall) return first;
-  const { suspect, because } = judgeStall(first.stall);
+  // The floor scales with the wait that caught the stall: a 2 s timeout
+  // sample's is 1.5 s (stallFloorFor).
+  const { suspect, because } = judgeStall(first.stall, {
+    floorMs: stallFloorFor(first.stall.afterMs),
+  });
   assert(
     suspect === "engine",
     `${label}: ${describeStall(first.stall)}; the evidence ${

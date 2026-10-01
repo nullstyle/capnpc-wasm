@@ -12,12 +12,14 @@ import {
   type TerminationGuest,
   type TerminationMode,
   type TerminationSample,
+  workerAuditScript,
 } from "./termination.ts";
 import {
   type EngineHealth,
   judgeStall,
   type PageTracer,
   type StallEvidence,
+  stallFloorFor,
   stallFloorMs,
   stallSuspect,
   type TracedWorker,
@@ -37,12 +39,14 @@ import {
 import {
   parseWorkerStallDrill,
   stallErrorText,
+  stallFloorOf,
   type StallRuleHost,
   type StepStallEvidence,
   stepStallEvidence,
   underStallRule,
 } from "./stall-rule.ts";
 import { DeadlineError } from "./deadline.ts";
+import { clientHistory } from "./conformance.ts";
 import {
   closedTargetError,
   crashFailure,
@@ -782,7 +786,7 @@ Deno.test("A held thread, a busy worker, and a post to a terminated worker point
         factsAgo([...answeredTwelve, [40_000, "page:post:generate:13"]]),
       ),
       "sdk",
-      "the worker's own code held its thread after answering 12, so it never took generate:13",
+      "the worker never returned to its event loop after answering 12: its own code held its thread or kept the trace's idle timer from running, so it never took generate:13",
     ],
     [
       "the same worker, idle after its reply",
@@ -804,7 +808,7 @@ Deno.test("A held thread, a busy worker, and a post to a terminated worker point
         factsAgo([[60_000, "page:post:init:1"], [59_990, "0:started"]]),
       ),
       "sdk",
-      "the worker's own code held its thread after starting, so it never took init:1",
+      "the worker never returned to its event loop after starting: its own code held its thread or kept the trace's idle timer from running, so it never took init:1",
     ],
     [
       "a post to a worker still working on its last message",
@@ -1881,7 +1885,7 @@ Deno.test("the page tracer keeps every fact past its display ring", async () => 
   assert(
     heldEvidence.worker === 1 && heldJudged.suspect === "sdk" &&
       heldJudged.because ===
-        "the worker's own code held its thread after answering 12, so it never took generate:13",
+        "the worker never returned to its event loop after answering 12: its own code held its thread or kept the trace's idle timer from running, so it never took generate:13",
     JSON.stringify(heldJudged),
   );
   // terminate() is an ordered page event, and a later post is the SDK's.
@@ -1899,44 +1903,44 @@ Deno.test("the page tracer keeps every fact past its display ring", async () => 
   );
 });
 
-Deno.test("the trace module reports idle after starting and answering, a start section, and each reply once posted", async () => {
+/**
+ * Run a module worker whose script imports the trace module first and then
+ * runs `body`, post it `messages`, and collect what the page would see: its
+ * trace events as `<ms>:<event>` and each other message with an id as
+ * `page:reply:<id>`, until `done` holds (at most 10 s).
+ */
+async function traceInWorker(
+  body: string,
+  messages: unknown[],
+  done: (seen: string[]) => boolean,
+): Promise<string[]> {
   const blob = (source: string) =>
     URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
   const traceURL = blob(traceModuleSource);
-  const plain = "0061736d01000000010401600000030201000a040102000b";
-  // The same module with a start section (id 8) naming its function.
-  const started = "0061736d0100000001040160000003020100080100" + "0a040102000b";
-  const workerURL = blob(`import "${traceURL}";
-const bytes = (hex) => Uint8Array.from(hex.match(/../g), (b) => parseInt(b, 16));
-self.onmessage = async ({ data }) => {
-  const module = await WebAssembly.compile(bytes("${started}"));
-  await WebAssembly.instantiate(module, {});
-  await WebAssembly.instantiate(bytes("${plain}"), {});
-  self.postMessage({ id: data.id, result: "done" });
-};
-`);
+  const workerURL = blob(`import "${traceURL}";\n${body}`);
   const worker = new Worker(workerURL, { type: "module" });
   const seen: string[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await new Promise<void>((resolve, reject) => {
       timer = setTimeout(
-        () => reject(new Error(`no idle:7 within 10 s: ${seen.join()}`)),
+        () =>
+          reject(new Error(`the trace did not finish in 10 s: ${seen.join()}`)),
         10_000,
       );
       worker.onmessage = ({ data }) => {
-        if (data?.kind !== "capnpTrace") {
-          seen.push(`page:reply:${data.id}`);
-          return;
-        }
-        seen.push(data.event);
-        if (data.event === "idle:7") resolve();
+        seen.push(
+          data?.kind === "capnpTrace"
+            ? `${data.t}:${data.event}`
+            : `page:reply:${String(data?.id)}`,
+        );
+        if (done(seen)) resolve();
       };
       worker.onerror = (event) => {
         event.preventDefault();
         reject(new Error(event.message));
       };
-      worker.postMessage({ kind: "job", id: 7 });
+      for (const message of messages) worker.postMessage(message);
     });
   } finally {
     clearTimeout(timer);
@@ -1944,6 +1948,30 @@ self.onmessage = async ({ data }) => {
     URL.revokeObjectURL(traceURL);
     URL.revokeObjectURL(workerURL);
   }
+  return seen;
+}
+
+/** A trace event's name, without its time. */
+const named = (event: string) =>
+  event.startsWith("page:") ? event : event.slice(event.indexOf(":") + 1);
+
+Deno.test("the trace module reports a start section, each reply once posted, and idle after its activity", async () => {
+  const plain = "0061736d01000000010401600000030201000a040102000b";
+  // The same module with a start section (id 8) naming its function.
+  const started = "0061736d0100000001040160000003020100080100" + "0a040102000b";
+  const seen = (await traceInWorker(
+    `const bytes = (hex) => Uint8Array.from(hex.match(/../g), (b) => parseInt(b, 16));
+self.onmessage = async ({ data }) => {
+  const module = await WebAssembly.compile(bytes("${started}"));
+  await WebAssembly.instantiate(module, {});
+  await WebAssembly.instantiate(bytes("${plain}"), {});
+  self.postMessage({ id: data.id, result: "done" });
+};`,
+    [{ kind: "job", id: 7 }],
+    (seen) =>
+      seen.some((event) => named(event) === "reply:7") &&
+      named(seen.at(-1)!) === "idle",
+  )).map(named);
   const order = [
     "started",
     "message:job:7",
@@ -1955,13 +1983,524 @@ self.onmessage = async ({ data }) => {
     "instantiate2:end",
     "page:reply:7",
     "reply:7",
-    "idle:7",
+    "idle",
   ];
-  const at = order.map((event) => seen.indexOf(event));
+  let from = 0;
+  const at = order.map((event) => (from = seen.indexOf(event, from) + 1) - 1);
   assert(
-    at.every((index, n) => index >= 0 && (n === 0 || index > at[n - 1])) &&
-      seen.indexOf("idle:start") > seen.indexOf("started") &&
-      seen.length === order.length + 1,
+    at.every((index) => index >= 0) &&
+      seen.indexOf("idle") > seen.indexOf("started") &&
+      seen.some((event) => /^task:start:[0-9]+:onmessage handler$/.test(event)),
     `trace: ${seen.join()}`,
+  );
+  // The handler's task ends; every task the trace opened is closed.
+  const begun = seen.filter((event) => event.startsWith("task:start:")).map(
+    (event) => event.split(":")[2],
+  );
+  const ended = seen.filter((event) => event.startsWith("task:end:")).map(
+    (event) => event.split(":")[2],
+  );
+  assert(
+    begun.length > 0 && begun.every((n) => ended.includes(n)),
+    `tasks: ${seen.join()}`,
+  );
+});
+
+Deno.test("the trace shows the worker's own code holding its thread, whatever task source ran it", async () => {
+  const hold = "{ const end = Date.now() + 400; while (Date.now() < end) {} }";
+  const answer = "self.postMessage({ id: data.id });";
+  const cases: [string, string, RegExp][] = [
+    // R3: a timer callback queued after the reply runs after the idle marker.
+    [
+      "a timer callback",
+      `self.onmessage = ({ data }) => { ${answer} setTimeout(() => ${hold}, 0); };`,
+      /^task:start:[0-9]+:timer callback$/,
+    ],
+    [
+      "an interval callback",
+      `self.onmessage = ({ data }) => { ${answer} const n = setInterval(() => { clearInterval(n); ${hold} }, 0); };`,
+      /^task:start:[0-9]+:interval callback$/,
+    ],
+    [
+      "a microtask",
+      `self.onmessage = ({ data }) => { ${answer} queueMicrotask(() => ${hold}); };`,
+      /^task:start:[0-9]+:microtask$/,
+    ],
+    [
+      "a message listener",
+      `self.addEventListener("message", ({ data }) => { ${answer} ${hold} });`,
+      /^task:start:[0-9]+:message listener$/,
+    ],
+  ];
+  for (const [what, body, holding] of cases) {
+    const seen = await traceInWorker(
+      body,
+      [{ kind: "job", id: 1 }],
+      (seen) =>
+        seen.some((event) => holding.test(named(event))) &&
+        named(seen.at(-1)!) === "idle",
+    );
+    // The page's view while the callback held the thread: everything before
+    // its task:end, then a job the worker never took.
+    const start = seen.findIndex((event) => holding.test(named(event)));
+    const task = named(seen[start]).split(":")[2];
+    const end = seen.findIndex((event) => named(event) === `task:end:${task}`);
+    const during = [...seen.slice(0, end), "page:post:job:2"];
+    const judged = judgeStall(evidenceOf("job:2", factsOf(during)));
+    assert(
+      judged.suspect === "sdk" &&
+        judged.because ===
+          `the worker's own code held its thread in its ${
+            named(seen[start]).split(":").slice(3).join(":")
+          } (task ${task}), so it never took job:2`,
+      `${what}: ${JSON.stringify(judged)} from ${during.join()}`,
+    );
+    // The task ends and the worker goes idle again.
+    assert(
+      end > start &&
+        seen.slice(end).some((event) => named(event) === "idle"),
+      `${what}: ${seen.join()}`,
+    );
+  }
+});
+
+Deno.test("the trace shows a worker that closed itself, and keeps its idle marker when the worker's code replaces its timers", async () => {
+  // R5: the worker closes itself in a timer callback after its reply.
+  const closed = await traceInWorker(
+    `self.onmessage = ({ data }) => { self.postMessage({ id: data.id }); setTimeout(() => self.close(), 0); };`,
+    [{ kind: "job", id: 1 }],
+    (seen) => seen.some((event) => named(event) === "close"),
+  );
+  const judged = judgeStall(
+    evidenceOf("job:2", factsOf([...closed, "page:post:job:2"])),
+  );
+  assert(
+    judged.suspect === "sdk" &&
+      judged.because ===
+        "the worker closed itself (self.close()) and never answered job:2",
+    `${JSON.stringify(judged)} from ${closed.join()}`,
+  );
+  // R4: the worker's code replaces its timers after the reply; the trace's
+  // own timer still says idle.
+  const replaced = await traceInWorker(
+    `self.onmessage = ({ data }) => {
+  self.setTimeout = () => 0;
+  self.setInterval = () => 0;
+  self.queueMicrotask = () => {};
+  self.postMessage({ id: data.id });
+};`,
+    [{ kind: "job", id: 1 }],
+    (seen) =>
+      seen.some((event) => named(event) === "reply:1") &&
+      named(seen.at(-1)!) === "idle",
+  );
+  const idle = judgeStall(
+    evidenceOf("job:2", factsOf([...replaced, "page:post:job:2"])),
+  );
+  assert(
+    idle.suspect === "engine" &&
+      idle.because === "the engine never delivered job:2 to the idle worker",
+    `${JSON.stringify(idle)} from ${replaced.join()}`,
+  );
+});
+
+Deno.test("the floor scales with the wait that caught a stall", () => {
+  assert(
+    stallFloorFor(60_000) === stallFloorMs && stallFloorFor(2_018) === 1_513 &&
+      stallFloorFor(5_000) === 3_750,
+    "stallFloorFor",
+  );
+  assert(
+    stallFloorOf(new DeadlineError("webkit row", 5_000)) === 3_750 &&
+      stallFloorOf(new DeadlineError("webkit row", 60_000)) === stallFloorMs &&
+      stallFloorOf(
+          new Error("page.evaluate: TimeoutError: compilation timed out"),
+        ) === undefined,
+    "stallFloorOf",
+  );
+  // The review's probe 5: a worker that never started, its post 3 s before a
+  // 60 s step deadline, is slowness; 4 s before a 5 s deadline, a stall.
+  const deadline = (ms: number) =>
+    `TimeoutError: no progress: webkit load SDK did not finish within ${
+      ms / 1000
+    } seconds`;
+  const late = judgeStall(
+    evidenceOf(
+      "init:1",
+      factsAgo([[3_000, "page:post:init:1"]]),
+      deadline(60_000),
+    ),
+    { floorMs: stallFloorFor(60_000) },
+  );
+  const stuck = judgeStall(
+    evidenceOf(
+      "init:1",
+      factsAgo([[4_000, "page:post:init:1"]]),
+      deadline(5_000),
+    ),
+    { floorMs: stallFloorFor(5_000) },
+  );
+  assert(
+    late.suspect === "slow" && stuck.suspect === "engine" &&
+      stuck.because === "the engine never ran the worker's script",
+    `${JSON.stringify(late)} / ${JSON.stringify(stuck)}`,
+  );
+});
+
+Deno.test("a timeout sample's start stall is judged on its own floor, and a cancelled job's reply does not hide a late guest", () => {
+  // A probe worker that answered init and went idle; its job posted just
+  // after, 2,018 ms before the evidence at the sample's 2 s deadline.
+  const served: [number, string][] = [
+    [2_030, "page:post:init:1"],
+    [2_028, "0:started"],
+    [2_027, "1:message:init:1"],
+    [2_025, "2:compile1:start:145"],
+    [2_024, "2:idle"],
+    [2_023, "3:compile1:end"],
+    [2_021, "page:reply:1"],
+    [2_019, "4:reply:1"],
+    [2_018, "page:post:compile:2"],
+    [2_017, "5:idle"],
+  ];
+  const timedOut = "TimeoutError: the job stopped";
+  // Drill T1: the engine never delivered the job before the deadline.
+  const t1 = evidenceOf("compile:2", factsAgo(served), timedOut);
+  const onFloor = judgeStall(t1, { floorMs: stallFloorFor(2_018) });
+  const unscaled = judgeStall(t1);
+  assert(
+    onFloor.suspect === "engine" &&
+      onFloor.because ===
+        "the engine never delivered compile:2 to the idle worker" &&
+      unscaled.suspect === "slow",
+    `${JSON.stringify(onFloor)} / ${JSON.stringify(unscaled)}`,
+  );
+  // The review's probe 3: the job arrived late, the guest ran a few ms, the
+  // deadline stopped it, and the cancellation reached the page first.
+  const late = factsAgo([
+    ...served,
+    [100, "2000:message:compile:2"],
+    [95, "2005:instantiate1:start"],
+    [93, "2007:instantiate1:end"],
+    [48, "2052:reply:2:error"],
+    [47, "page:reply:2"],
+    [46, "2054:idle"],
+  ]);
+  const ranLate = judgeStall(
+    { ...evidenceOf("compile:2", late, timedOut), count: 3 },
+    { floorMs: stallFloorFor(2_018) },
+  );
+  assert(
+    ranLate.suspect === "engine" &&
+      ranLate.because === "the guest ran, only late",
+    JSON.stringify(ranLate),
+  );
+  // A step's job that ran until the SDK's own timeout cancelled it: the job
+  // did not finish, not the engine.
+  const step = judgeStall(evidenceOf("compile:2", late, timedOut));
+  assert(
+    step.suspect === "sdk" &&
+      step.because ===
+        "compile:2 ran until the SDK's own timeout stopped it, and the worker answered with the cancellation: the job, not the engine, did not finish",
+    JSON.stringify(step),
+  );
+  // A step deadline is no cancellation: the reply reached the page, and the
+  // client did not settle.
+  const deadline = judgeStall(
+    evidenceOf(
+      "compile:2",
+      late,
+      "TimeoutError: no progress: webkit row did not finish within 60 seconds",
+    ),
+  );
+  assert(
+    deadline.suspect === "sdk" &&
+      deadline.because ===
+        "the worker's reply to compile:2 reached the page, yet the SDK's client did not settle",
+    JSON.stringify(deadline),
+  );
+});
+
+Deno.test("both page scripts count a reply with any id, and count the page's workers", () => {
+  class FakeWorker extends EventTarget {
+    constructor(readonly url: string | URL, readonly options?: WorkerOptions) {
+      super();
+    }
+    postMessage(_message: unknown, _transfer?: unknown) {}
+    terminate() {}
+  }
+  const say = (worker: FakeWorker, data: unknown) =>
+    worker.dispatchEvent(new MessageEvent("message", { data }));
+  const trace = (worker: FakeWorker, event: string) =>
+    say(worker, { kind: "capnpTrace", event, t: 0 });
+  for (const script of ["tracer", "audit"] as const) {
+    const page: Record<string, unknown> = { Worker: FakeWorker };
+    if (script === "tracer") {
+      new Function("globalThis", "location", workerTracerScript)(page, {
+        href: "http://driver.test/",
+      });
+    } else new Function("globalThis", workerAuditScript)(page);
+    const PageWorker = page.Worker as new (
+      url: string,
+      options: WorkerOptions,
+    ) => FakeWorker;
+    const factsOfPage = () =>
+      script === "tracer"
+        ? (page.capnpTracer as PageTracer).workers.map((worker) => worker.facts)
+        : (page.capnpWorkerAudit as { facts: WorkerFacts[] }).facts;
+    const compiled = new PageWorker("worker.js", { type: "module" });
+    compiled.postMessage({ kind: "compile", id: "a" });
+    trace(compiled, "started");
+    trace(compiled, "message:compile:a");
+    trace(compiled, "compile1:start:1000");
+    trace(compiled, "compile1:end");
+    say(compiled, { id: "a", result: null });
+    trace(compiled, "reply:a");
+    const ended = new PageWorker("worker.js", { type: "module" });
+    trace(ended, "compile1:start:500");
+    trace(ended, "compile1:end");
+    ended.terminate();
+    const closed = new PageWorker("worker.js", { type: "module" });
+    trace(closed, "compile1:start:700");
+    trace(closed, "compile1:end");
+    trace(closed, "close");
+    const facts = factsOfPage();
+    const counted = (page.capnpPageWorkers as () => unknown)();
+    assert(
+      facts[0].pageReplies["a"] !== undefined &&
+        facts[0].replied["a"] !== undefined && facts[0].compiledBytes === 1000,
+      `${script}: ${JSON.stringify(facts[0])}`,
+    );
+    assert(
+      JSON.stringify(counted) ===
+        JSON.stringify({ created: 3, live: 1, liveWasmBytes: 1000 }),
+      `${script}: ${JSON.stringify(counted)}`,
+    );
+  }
+});
+
+Deno.test("the stall rule's retry replays the step's client history first", async () => {
+  const page = {
+    tracer: { workers: [], posts: [], drill: null } as PageTracer,
+  };
+  const replayed = fakeRuleHost(page);
+  let attempts = 0;
+  const result = await underStallRule(
+    replayed.host,
+    "feature-rows",
+    "row",
+    () => {
+      attempts++;
+      replayed.log.push(`attempt ${attempts}`);
+      if (attempts === 1) {
+        page.tracer = neverStarted();
+        return timedOut();
+      }
+      return Promise.resolve("recovered");
+    },
+    undefined,
+    () => {
+      replayed.log.push("replay the client's history");
+      return Promise.resolve();
+    },
+  );
+  assert(
+    result === "recovered" &&
+      replayed.log.join("; ") ===
+        "arm row; attempt 1; disarm row; tolerate feature-rows row: the engine never ran the worker's script (init:1); fresh page for row; replay the client's history; arm row; attempt 2; disarm row",
+    replayed.log.join("; "),
+  );
+  // A stall while the history replays is a second stall.
+  const againPage = {
+    tracer: { workers: [], posts: [], drill: null } as PageTracer,
+  };
+  const again = fakeRuleHost(againPage);
+  const replayStall = await rejection(() =>
+    underStallRule(
+      again.host,
+      "feature-rows",
+      "row",
+      () => {
+        againPage.tracer = neverStarted();
+        return timedOut();
+      },
+      undefined,
+      () =>
+        Promise.reject(
+          new Error("page.evaluate: TimeoutError: generation timed out"),
+        ),
+    )
+  );
+  assert(
+    replayStall.startsWith(
+      "row: the step stalled again on a fresh page, while it replayed its clients' history (TimeoutError: generation timed out), after a stall that pointed at the engine (the engine never ran the worker's script)",
+    ),
+    replayStall,
+  );
+  // A fault the client's history causes recurs on the retry, whatever the
+  // first stall was judged: its replay gives the client the same history.
+  const poisoned = {
+    tracer: { workers: [], posts: [], drill: null } as PageTracer,
+  };
+  const history = fakeRuleHost(poisoned);
+  let clientHistory: string[] = ["generic-rpc"];
+  history.host.freshPage = (label) => {
+    history.log.push(`fresh page for ${label}`);
+    poisoned.tracer = { workers: [], posts: [], drill: null };
+    clientHistory = [];
+    return Promise.resolve();
+  };
+  const recurs = await rejection(() =>
+    underStallRule(
+      history.host,
+      "feature-rows",
+      "replay generic-rpc",
+      () => {
+        if (!clientHistory.includes("generic-rpc")) {
+          return Promise.resolve("no fault");
+        }
+        // Judged as the engine's on the first attempt: the worker never ran.
+        poisoned.tracer = neverStarted();
+        return timedOut();
+      },
+      undefined,
+      () => {
+        clientHistory.push("generic-rpc");
+        return Promise.resolve();
+      },
+    )
+  );
+  assert(
+    recurs.startsWith(
+      "replay generic-rpc: the step stalled again on a fresh page (TimeoutError: compilation timed out)",
+    ),
+    recurs,
+  );
+  // A step deadline judges with a floor scaled to it: a worker that never
+  // started for 4 s of a 5 s deadline is a stall, not slowness.
+  const shortPage = {
+    tracer: { workers: [], posts: [], drill: null } as PageTracer,
+  };
+  const short = fakeRuleHost(shortPage);
+  let tries = 0;
+  const shortResult = await underStallRule(
+    short.host,
+    "sdk-client",
+    "load SDK",
+    () => {
+      tries++;
+      if (tries > 1) return Promise.resolve("loaded");
+      shortPage.tracer = fakeTracer(
+        [{ events: ["page:post:init:1"] }],
+        [[0, "init:1"]],
+        performance.now() - 4_000,
+      );
+      return Promise.reject(new DeadlineError("load SDK", 5_000));
+    },
+  );
+  assert(
+    shortResult === "loaded" &&
+      short.log.some((entry) =>
+        entry.startsWith(
+          "tolerate sdk-client load SDK: the engine never ran the worker's script",
+        )
+      ),
+    short.log.join("; "),
+  );
+});
+
+Deno.test("a conformance row's history is the rows its client ran before it", async () => {
+  const rows: [string, string][] = [
+    ["a1", "a"],
+    ["a2", "a"],
+    ["b1", "b"],
+    ["a3", "a"],
+  ];
+  /** Which earlier rows each row's replay runs, on one surface. */
+  const replayedBy = async (surface: string) => {
+    const history = clientHistory(surface);
+    const log: string[] = [];
+    const replays: Record<string, () => Promise<void>> = {};
+    for (const [name, compiler] of rows) {
+      replays[name] = history.before(
+        { name, compiler, generators: ["cpp"] } as unknown as Parameters<
+          typeof history.before
+        >[0],
+      );
+      history.ran(() => {
+        log.push(name);
+        return Promise.resolve();
+      });
+    }
+    const replayed: Record<string, string> = {};
+    for (const [name, replay] of Object.entries(replays)) {
+      log.length = 0;
+      await replay();
+      replayed[name] = log.join(",");
+    }
+    return replayed;
+  };
+  // cachingHost keeps one client per configuration: b1 replaces a's client,
+  // and a3 starts a new one.
+  const cached = await replayedBy("browser-worker");
+  assert(
+    JSON.stringify(cached) ===
+      JSON.stringify({ a1: "", a2: "a1", b1: "", a3: "" }),
+    `browser-worker: ${JSON.stringify(cached)}`,
+  );
+  // The Studio surface runs every row on one adapter.
+  const studio = await replayedBy("studio");
+  assert(
+    JSON.stringify(studio) ===
+      JSON.stringify({ a1: "", a2: "a1", b1: "a1,a2", a3: "a1,a2,b1" }),
+    `studio: ${JSON.stringify(studio)}`,
+  );
+});
+
+Deno.test("a 2 s timeout sample whose job the engine never delivered is retried and tolerated (drill T1)", async () => {
+  // The probe worker answered init and went idle; its job was posted just
+  // after, and the page took the evidence at the 2 s deadline.
+  const facts = factsAgo([
+    [2_030, "page:post:init:1"],
+    [2_028, "0:started"],
+    [2_027, "1:message:init:1"],
+    [2_021, "page:reply:1"],
+    [2_019, "4:reply:1"],
+    [2_018, "page:post:compile:2"],
+    [2_017, "5:idle"],
+  ]);
+  const stall: StartStall = {
+    stage: "start",
+    reason:
+      "the guest did not run for a 50 ms window before its 2000 ms deadline",
+    afterMs: 2_018,
+    expected: "compile:2",
+    error: "TimeoutError: the job stopped",
+    events: [],
+    count: 0,
+    health: healthy,
+    facts,
+    at: performance.now(),
+  };
+  let left = 1;
+  const tolerated: string[] = [];
+  const result = await checkIsolatedTermination(
+    "webkit",
+    engineThat(
+      () => 50,
+      (sample) =>
+        sample.guest === "pure" && sample.mode === "timeout" && left-- > 0
+          ? { stall }
+          : {},
+    ),
+    "linux",
+    (label, tolerable) => {
+      tolerated.push(`${label}: ${tolerable.stage}`);
+      return Promise.resolve();
+    },
+  );
+  assert(
+    result.verdict.startsWith("PASS webkit") &&
+      tolerated.join() === "webkit isolated termination pure timeout: start",
+    `tolerated ${tolerated.join()}: ${result.verdict}`,
   );
 });

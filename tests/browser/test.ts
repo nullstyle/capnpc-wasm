@@ -19,10 +19,12 @@ import type {
 import { envMilliseconds, stepClock } from "./deadline.ts";
 import { scaled } from "../lib/timeout-scale.ts";
 import {
+  describePage,
   type EngineHealth,
   engineHealthScript,
   judgeStall,
   type PageTracer,
+  type PageWorkers,
   type StallEvidence,
   verdictWords,
   workerTracerScript,
@@ -859,7 +861,9 @@ try {
         at: new Date().toISOString(),
         summary: `${evidence.error}; ${because}; the last event: ${
           evidence.events.at(-1) ?? "none"
-        }; fresh worker ${evidence.health.plainWorker}, Wasm in a worker ${evidence.health.workerCompile}, Wasm on the page ${evidence.health.pageCompile}`,
+        }; fresh worker ${evidence.health.plainWorker}, Wasm in a worker ${evidence.health.workerCompile}, Wasm on the page ${evidence.health.pageCompile}; ${
+          describePage(evidence.page)
+        }`,
         detail: evidence,
       }, "retried on a fresh page"),
     async beforeAttempt(label) {
@@ -897,7 +901,8 @@ try {
     label: string,
     attempt: () => Promise<T>,
     classify?: (result: T) => string | null,
-  ) => underStallRule(rule, kind, label, attempt, classify);
+    history?: () => Promise<unknown>,
+  ) => underStallRule(rule, kind, label, attempt, classify, history);
 
   const loadSdk = (run: Evaluate) =>
     run(
@@ -1066,14 +1071,28 @@ try {
     "network permission was not revoked",
   );
 
+  // The worker rows run one after another on the page's worker client: a
+  // row's retry replays the rows before it first (the stall rule's history).
+  const workerRows: (() => Promise<unknown>)[] = [];
   for (const host of ["direct", "worker"] as const) {
     for (const scenario of data.scenarios) {
       // A worker row runs a job in the page's worker client, the first of
       // which starts its worker: under the stall rule.
-      const underRule = <T>(label: string, attempt: () => Promise<T>) =>
-        host === "worker"
-          ? stepRule("feature-rows", label, attempt)
-          : attempt();
+      const underRule = async <T>(label: string, attempt: () => Promise<T>) => {
+        if (host !== "worker") return await attempt();
+        const before = [...workerRows];
+        const result = await stepRule(
+          "feature-rows",
+          label,
+          attempt,
+          undefined,
+          async () => {
+            for (const row of before) await row();
+          },
+        );
+        workerRows.push(attempt);
+        return result;
+      };
       const compileLabel = `${engine} ${host} compile ${scenario.name}`;
       const result = await underRule(compileLabel, () =>
         evaluate(
@@ -1739,6 +1758,9 @@ try {
             ? JSON.parse(JSON.stringify(stalled.facts))
             : null;
           const events = [...(stalled?.events ?? [])];
+          const page = (globalThis as unknown as {
+            capnpPageWorkers?: () => PageWorkers;
+          }).capnpPageWorkers?.();
           // Does the engine itself still start workers and compile Wasm?
           const health = await (globalThis as unknown as {
             capnpEngineHealth(): Promise<EngineHealth>;
@@ -1757,6 +1779,7 @@ try {
             facts,
             at,
             answered: post === undefined && posts.length > 0,
+            page,
             afterMs: recovery.afterMs,
             terminated: stalled ? stalled.terminated : null,
             workersStarted,
@@ -1850,7 +1873,9 @@ try {
           judgeStall(stall).because
         }; the last event: ${
           stall.events.at(-1) ?? "none"
-        }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}; the retry recovered in ${stall.retry.ms} ms`,
+        }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}; ${
+          describePage(stall.page)
+        }; the retry recovered in ${stall.retry.ms} ms`,
         detail: stall,
       });
     }
@@ -1885,8 +1910,8 @@ try {
       evaluate,
       surface === "browser-direct"
         ? undefined
-        : (label, attempt, classify) =>
-          stepRule("conformance-rows", label, attempt, classify),
+        : (label, attempt, classify, history) =>
+          stepRule("conformance-rows", label, attempt, classify, history),
     );
     conformanceRows.push(...rows);
     const skipped = rows.filter((row) => row.skipped).length;

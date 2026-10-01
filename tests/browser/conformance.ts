@@ -24,7 +24,7 @@ import {
   type ResultSummary,
   type Surface,
 } from "../conformance/outcome.ts";
-import { orderCases } from "../conformance/page-runner.js";
+import { configurationKey, orderCases } from "../conformance/page-runner.js";
 import type { Engine } from "./engines.ts";
 
 export type BrowserSurface = "browser-direct" | "browser-worker" | "studio";
@@ -258,10 +258,40 @@ export async function teardownConformance(
  * Runs one row step under the stall rule (stall-rule.ts), which `classify`
  * tells when the row's result shows a stall.
  */
+/**
+ * The rows that ran on the client a surface's row runs on, which the row's
+ * stall rule retry replays first, so that the retry faces the same client
+ * history: cachingHost keeps one client, for one configuration key, and the
+ * Studio surface keeps one adapter for all of its rows.
+ */
+export function clientHistory(surface: string) {
+  let key: string | undefined;
+  let rows: (() => Promise<unknown>)[] = [];
+  return {
+    /** Before a row runs: the replay of the rows its client ran so far. */
+    before(spec: Parameters<typeof configurationKey>[0]): () => Promise<void> {
+      const next = surface === "studio" ? "studio" : configurationKey(spec);
+      if (next !== key) {
+        key = next;
+        rows = [];
+      }
+      const earlier = [...rows];
+      return async () => {
+        for (const row of earlier) await row();
+      };
+    },
+    /** After a row ran on that client. */
+    ran(row: () => Promise<unknown>): void {
+      rows.push(row);
+    },
+  };
+}
+
 export type RowRule = <T>(
   label: string,
   attempt: () => Promise<T>,
   classify: (result: T) => string | null,
+  history: () => Promise<unknown>,
 ) => Promise<T>;
 
 /**
@@ -282,6 +312,7 @@ export async function runBrowserSurface(
   rule?: RowRule,
 ): Promise<BrowserRow[]> {
   const rows: BrowserRow[] = [];
+  const history = clientHistory(surface);
   for (const spec of orderCases(corpus.cases)) {
     const expectation = expectationFor(
       corpus.expected,
@@ -306,6 +337,7 @@ export async function runBrowserSurface(
       request: spec.request ? requestVariant(spec.request, valid) : undefined,
     };
     const label = `${engine} ${surface} conformance ${spec.name}`;
+    const replay = history.before(spec);
     const accepted = Array.isArray(expectation.expect)
       ? expectation.expect
       : [expectation.expect];
@@ -360,8 +392,10 @@ export async function runBrowserSurface(
             (result.phase === "factory" || !accepted.includes("timeout"))
             ? `TimeoutError: ${(result.summary as ErrorSummary).message}`
             : null,
+        replay,
       )
       : await run();
+    history.ran(run);
     const observation = observe(summary, phase);
     rows.push({
       name: spec.name,

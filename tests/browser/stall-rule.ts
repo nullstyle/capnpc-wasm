@@ -21,20 +21,29 @@
 // the step: the rule only excuses a stall the evidence attributes to the
 // engine.
 //
-// The retry reruns only the stalled attempt, on a fresh client with none of
-// the stalled client's history. That is sound because an engine verdict
+// The retry faces the same client history as the stalled attempt. A step
+// that creates its own clients is its own unit. A step on a client that
+// earlier steps used (a feature row on the page's worker client, a
+// conformance row on its surface's cached client or the Studio adapter)
+// passes its history, which the fresh page replays first: the rows that ran
+// on that client before it. A fault that history causes, however the first
+// stall was judged, then recurs on the retry and fails it as a second stall.
+// The judgement does not depend on the retry for that: an engine verdict
 // rests only on what the engine failed to do for the stalled message (run a
-// worker's script, deliver a message to an idle worker or a reply to the
-// page, finish a Wasm compile or instantiation), each stalled for
-// stallFloorMs with nothing since. A fault that the client's history causes
-// shows in the facts as the SDK's: a thread its own code held, a post to a
-// busy or terminated worker, an unanswered message, a reply the client did
-// not use.
+// worker's script, deliver a message to a worker idle since its latest
+// activity, deliver a reply, finish a Wasm compile or instantiation), each
+// without progress for the floor; whatever the worker's own code did (a
+// callback still holding its thread, no return to its event loop, closing
+// itself, a post to a busy or terminated worker, an unanswered message, a
+// reply the client did not use) points at the SDK. The floor is stallFloorMs,
+// or three quarters of a shorter step deadline that caught the stall.
 import {
   type EngineHealth,
   judgeStall,
   type PageTracer,
+  type PageWorkers,
   type StallEvidence,
+  stallFloorFor,
   verdictWords,
 } from "./worker-trace.ts";
 
@@ -86,6 +95,10 @@ export async function stepStallEvidence(
     ? JSON.parse(JSON.stringify(worker.facts))
     : null;
   const events = worker ? [...worker.events] : [];
+  // Counted before the health checks start workers of their own.
+  const page = (globalThis as unknown as {
+    capnpPageWorkers?: () => PageWorkers;
+  }).capnpPageWorkers?.();
   const health = await scope.capnpEngineHealth();
   return {
     expected: stalled ? stalled.post : null,
@@ -96,6 +109,7 @@ export async function stepStallEvidence(
     facts,
     at,
     answered: stalled === undefined && posts.length > 0,
+    page,
     worker: stalled ? stalled.worker : null,
     posted: posts.length,
   };
@@ -113,6 +127,17 @@ export function stallErrorText(error: unknown): string | null {
   const message = error instanceof Error ? error.message : String(error);
   const match = /^page\.evaluate: (TimeoutError: [^\n]*)/.exec(message);
   return match ? match[1] : null;
+}
+
+/**
+ * The floor a stall is judged with: one scaled to the step's deadline when
+ * that deadline caught it (stallFloorFor), the default otherwise.
+ */
+export function stallFloorOf(error: unknown): number | undefined {
+  return error instanceof Error && error.name === "DeadlineError" &&
+      typeof (error as { ms?: unknown }).ms === "number"
+    ? stallFloorFor((error as unknown as { ms: number }).ms)
+    : undefined;
 }
 
 /** What the rule needs from the driver. */
@@ -138,11 +163,20 @@ export interface StallRuleHost {
 
 type Attempt<T> =
   | { result: T; stall?: undefined }
-  | { stall: string; since: number };
+  | {
+    stall: string;
+    since: number;
+    floorMs: number | undefined;
+    replaying: boolean;
+  };
 
 /**
  * Run a step under the stall rule. `kind` names the step in the ledger, and
  * `classify` turns a result that shows a stall into its TimeoutError text.
+ * `history` replays what the step's clients did before it, for a step that
+ * uses a client earlier steps used: the retry then faces the same client
+ * history as the stalled attempt, so a fault that history causes recurs and
+ * fails as a second stall. A step that creates its own clients needs none.
  */
 export async function underStallRule<T>(
   host: StallRuleHost,
@@ -150,8 +184,23 @@ export async function underStallRule<T>(
   label: string,
   attempt: () => Promise<T>,
   classify?: (result: T) => string | null,
+  history?: () => Promise<unknown>,
 ): Promise<T> {
-  const run = async (): Promise<Attempt<T>> => {
+  const run = async (replay: boolean): Promise<Attempt<T>> => {
+    if (replay && history) {
+      try {
+        await history();
+      } catch (error) {
+        const stall = stallErrorText(error);
+        if (stall === null) throw error;
+        return {
+          stall,
+          since: 0,
+          floorMs: stallFloorOf(error),
+          replaying: true,
+        };
+      }
+    }
     const since = await host.evaluate(
       () => {
         const tracer = (globalThis as unknown as { capnpTracer?: PageTracer })
@@ -166,16 +215,18 @@ export async function underStallRule<T>(
     try {
       const result = await attempt();
       const stall = classify?.(result) ?? null;
-      return stall === null ? { result } : { stall, since };
+      return stall === null
+        ? { result }
+        : { stall, since, floorMs: undefined, replaying: false };
     } catch (error) {
       const stall = stallErrorText(error);
       if (stall === null) throw error;
-      return { stall, since };
+      return { stall, since, floorMs: stallFloorOf(error), replaying: false };
     } finally {
       await host.afterAttempt?.(label);
     }
   };
-  const first = await run();
+  const first = await run(false);
   if (first.stall === undefined) return first.result;
   let evidence: StepStallEvidence;
   try {
@@ -192,7 +243,9 @@ export async function underStallRule<T>(
       { cause: error },
     );
   }
-  const { suspect, because } = judgeStall(evidence);
+  const { suspect, because } = judgeStall(evidence, {
+    floorMs: first.floorMs,
+  });
   if (suspect !== "engine") {
     throw new Error(
       `${label}: the step stalled (${first.stall}), and the evidence ${
@@ -202,10 +255,12 @@ export async function underStallRule<T>(
   }
   await host.tolerate(kind, label, evidence, because);
   await host.freshPage(label);
-  const second = await run();
+  const second = await run(true);
   if (second.stall !== undefined) {
     throw new Error(
-      `${label}: the step stalled again on a fresh page (${second.stall}), after a stall that pointed at the engine (${because}): ${
+      `${label}: the step stalled again on a fresh page${
+        second.replaying ? ", while it replayed its clients' history" : ""
+      } (${second.stall}), after a stall that pointed at the engine (${because}): ${
         JSON.stringify(evidence)
       }`,
     );
