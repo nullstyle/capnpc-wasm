@@ -46,9 +46,10 @@ import {
 // Stopping takes well under a millisecond on an idle host (see the SDK
 // README). A direct job runs its guest on this thread until the deadline, so
 // a loaded host stretches the job's wall time without making the guest do
-// more work. The upper bounds are therefore on the CPU the process spent
-// during the job (every thread): a guest that ran on past its deadline would
-// spend it, and a descheduled one does not. `lateMs` leaves 5x headroom over
+// more work. The upper bounds are therefore on the CPU this thread spent
+// during the job: a guest that ran on past its deadline would spend it, a
+// descheduled one does not, and the engine's helper threads (collection,
+// compilation) are not the guest. `lateMs` leaves 5x headroom over
 // a 100 ms target; `hangMs` only catches a job that never ends in reasonable
 // time.
 const timeoutMs = 200;
@@ -56,18 +57,35 @@ const lateMs = 500;
 const hangMs = 30_000;
 
 /**
- * The wall time of a call, the CPU the whole process spent during it, and
- * every blocking wait this thread asked for during it: when it asked and for
- * how long.
+ * The wall time of a call, the CPU this thread spent during it (`cpu`) and
+ * the whole process (`processCpu`), and every blocking wait this thread
+ * asked for during it: when it asked and for how long.
  */
 interface Took {
   started: number;
   wall: number;
   cpu: number;
+  processCpu: number;
   waits: { at: number; ms: number }[];
 }
 
+/**
+ * The CPU this thread spent. A direct job runs its guest, and every host call
+ * the guest makes, on the calling thread; the engine's helper threads
+ * (parallel garbage collection, Wasm compilation and tier-up) run elsewhere.
+ * The whole process's CPU counted those too, so an honest stop on a slow
+ * multi-core host could exceed its bound: randomGet's 200 ms job, whose 16 MiB
+ * random fills keep the collector busy, took 880 ms of process CPU on a
+ * macos-15-intel runner. Without process.threadCpuUsage, the process's CPU.
+ */
 function cpuMs(): number {
+  const { user, system } = typeof process.threadCpuUsage === "function"
+    ? process.threadCpuUsage()
+    : process.cpuUsage();
+  return (user + system) / 1000;
+}
+
+function processCpuMs(): number {
   const { user, system } = process.cpuUsage();
   return (user + system) / 1000;
 }
@@ -85,6 +103,7 @@ async function measured<T>(run: () => Promise<T>): Promise<Took> {
   }) as typeof Atomics.wait;
   const started = performance.now();
   const spent = cpuMs();
+  const processSpent = processCpuMs();
   try {
     await run();
   } finally {
@@ -94,6 +113,7 @@ async function measured<T>(run: () => Promise<T>): Promise<Took> {
     started,
     wall: performance.now() - started,
     cpu: cpuMs() - spent,
+    processCpu: processCpuMs() - processSpent,
     waits,
   };
 }
@@ -106,8 +126,9 @@ const waitSlackMs = 20;
 
 /**
  * A guest stopped at its deadline: not before it, by wall time, and not
- * after it. A `busy` guest that ran on would spend CPU, so its job's CPU is
- * bounded by the deadline plus lateMs. A `waiting` guest (a sleep) spends
+ * after it. A `busy` guest that ran on would spend CPU on this thread, which
+ * runs a direct job's guest, so that CPU (cpuMs) is bounded by the deadline
+ * plus lateMs. A `waiting` guest (a sleep) spends
  * almost none, so its CPU is bounded by lateMs alone, which catches CPU spent
  * after its last wait; and since a sleep that ran on would spend none, the
  * test also checks what the SDK asked the host for: it must sleep, and no
@@ -126,9 +147,11 @@ function stoppedInTime(
   const cpuBound = runaway === "waiting" ? lateMs : timeoutMs + lateMs;
   assert(
     took.cpu < cpuBound,
-    `${what} ran past its deadline: the process spent ${
+    `${what} ran past its deadline: its thread spent ${
       took.cpu.toFixed(0)
-    } ms of CPU during a ${timeoutMs} ms job${
+    } ms of CPU (the process ${
+      took.processCpu.toFixed(0)
+    } ms) during a ${timeoutMs} ms job${
       runaway === "waiting"
         ? " that should have slept, beyond its "
         : ", beyond its "
@@ -731,6 +754,50 @@ Deno.test("SDK direct jobs stop running guests at their deadline", async () => {
     await compiler.compile({ ...request, generators: ["rust"] }),
     expected,
   );
+});
+
+Deno.test("A direct job's CPU bound counts its own thread, not the engine's helper threads", async () => {
+  // Another thread spends 600 ms of its own CPU while a guest spins to its
+  // deadline, as the collector and compiler threads can on a slow multi-core
+  // host: the process passes the bound, the job's thread does not. The other
+  // thread counts its own CPU, so a loaded host only makes it take longer.
+  const burner = URL.createObjectURL(
+    new Blob([
+      `import process from "node:process";
+const cpu = () => {
+  const { user, system } = process.threadCpuUsage();
+  return (user + system) / 1000;
+};
+const start = cpu();
+while (cpu() - start < 600) {}
+postMessage("burned");`,
+    ], { type: "text/javascript" }),
+  );
+  const run = await catchRetry();
+  let failure: unknown;
+  const took = await measured(async () => {
+    const worker = new Worker(burner, { type: "module" });
+    const burned = new Promise((resolve) => (worker.onmessage = resolve));
+    try {
+      await run(catchRetryMode.spin);
+    } catch (error) {
+      failure = error;
+    }
+    await burned;
+    worker.terminate();
+  });
+  URL.revokeObjectURL(burner);
+  assert(
+    failure instanceof DOMException && failure.name === "TimeoutError",
+    `the spinning guest: ${failure}`,
+  );
+  assert(
+    took.processCpu >= timeoutMs + lateMs,
+    `the other thread spent too little to matter: the process spent ${
+      took.processCpu.toFixed(0)
+    } ms of CPU`,
+  );
+  stoppedInTime(took, "a guest beside a busy thread");
 });
 
 Deno.test("SDK direct jobs stop bulk operations and costly imports at their deadline", async () => {
