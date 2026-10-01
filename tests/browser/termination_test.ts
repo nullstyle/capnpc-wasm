@@ -79,9 +79,14 @@ function factsOf(events: string[], from = longAgo()): WorkerFacts {
   return facts;
 }
 
-/** Fold each event as having arrived its milliseconds before now. */
-function factsAgo(timed: [number, string][]): WorkerFacts {
-  const now = performance.now();
+/**
+ * Fold each event as having arrived its milliseconds before `now`; pass the
+ * same `now` to evidenceOf for exact ages, whatever the scheduler does.
+ */
+function factsAgo(
+  timed: [number, string][],
+  now = performance.now(),
+): WorkerFacts {
   const facts = capnpNewFacts();
   for (const [ago, event] of timed) capnpFold(facts, event, now - ago);
   return facts;
@@ -745,11 +750,12 @@ Deno.test("A soak recovery stall is read by the same rule", () => {
   }
 });
 
-/** Evidence for `expected` from a worker's facts, taken now. */
+/** Evidence for `expected` from a worker's facts, taken at `at` (now). */
 function evidenceOf(
   expected: string | null,
   facts: WorkerFacts | null,
   error = "TimeoutError: compilation timed out",
+  at = performance.now(),
 ): StallEvidence {
   return {
     expected,
@@ -758,7 +764,7 @@ function evidenceOf(
     health: healthy,
     count: null,
     facts,
-    at: performance.now(),
+    at,
   };
 }
 
@@ -874,6 +880,14 @@ Deno.test("A held thread, a busy worker, and a post to a terminated worker point
 
 Deno.test("The engine is blamed only for an item without progress for the stall floor", () => {
   assert(stallFloorMs === 5_000, `the floor is ${stallFloorMs} ms`);
+  // Every event's age is exact: facts and evidence share one `now`.
+  const now = performance.now();
+  const ago = (timed: [number, string][]) => factsAgo(timed, now);
+  const taken = (
+    expected: string,
+    facts: WorkerFacts,
+    error = "TimeoutError: compilation timed out",
+  ) => evidenceOf(expected, facts, error, now);
   const init: [number, string][] = [
     [30_000, "page:post:init:1"],
     [29_990, "0:started"],
@@ -900,27 +914,27 @@ Deno.test("The engine is blamed only for an item without progress for the stall 
   const cases: [string, StallEvidence, string, RegExp][] = [
     [
       "a compile begun 5 ms before the timeout, after 56 finished",
-      evidenceOf(
+      taken(
         "init:1",
-        factsAgo([...busy, [5, "29000:compile57:start:1000"]]),
+        ago([...busy, [5, "29000:compile57:start:1000"]]),
       ),
       "slow",
-      /^compile57 was still in progress, and the latest progress was only [0-9] ms before the stall$/,
+      /^compile57 was still in progress, and the latest progress was only 5 ms before the stall$/,
     ],
     [
       "a compile begun 20 s before the stall, nothing since",
-      evidenceOf(
+      taken(
         "init:1",
-        factsAgo([...init, [20_000, "9990:compile1:start:1000"]]),
+        ago([...init, [20_000, "9990:compile1:start:1000"]]),
       ),
       "engine",
       /^the engine never finished compile1$/,
     ],
     [
       "a compile begun 20 s before the stall, while another finished 2 s before",
-      evidenceOf(
+      taken(
         "init:1",
-        factsAgo([
+        ago([
           ...init,
           [20_000, "9990:compile1:start:1000"],
           [3_000, "26990:compile2:start:1000"],
@@ -928,23 +942,23 @@ Deno.test("The engine is blamed only for an item without progress for the stall 
         ]),
       ),
       "slow",
-      /^compile1 was still in progress, and the latest progress was only 20[0-9][0-9] ms before the stall$/,
+      /^compile1 was still in progress, and the latest progress was only 2000 ms before the stall$/,
     ],
     [
       "a step deadline 1 ms after its post to an idle worker",
-      evidenceOf(
+      taken(
         "compile:2",
-        factsAgo([...idle, [1, "page:post:compile:2"]]),
+        ago([...idle, [1, "page:post:compile:2"]]),
         deadline,
       ),
       "slow",
-      /^the idle worker had not received compile:2, and the latest progress was only [0-9] ms before the stall$/,
+      /^the idle worker had not received compile:2, and the latest progress was only 1 ms before the stall$/,
     ],
     [
       "a step deadline 20 s after its post to an idle worker",
-      evidenceOf(
+      taken(
         "compile:2",
-        factsAgo([...idle, [20_000, "page:post:compile:2"]]),
+        ago([...idle, [20_000, "page:post:compile:2"]]),
         deadline,
       ),
       "engine",
@@ -952,9 +966,9 @@ Deno.test("The engine is blamed only for an item without progress for the stall 
     ],
     [
       "a new worker that started and went idle after the post, 20 s ago",
-      evidenceOf(
+      taken(
         "init:1",
-        factsAgo([
+        ago([
           [20_050, "page:post:init:1"],
           [20_000, "0:started"],
           [20_000, "0:idle:start"],
@@ -965,40 +979,40 @@ Deno.test("The engine is blamed only for an item without progress for the stall 
     ],
     [
       "a new worker that started and went idle 1 s ago",
-      evidenceOf(
+      taken(
         "init:1",
-        factsAgo([
+        ago([
           [20_050, "page:post:init:1"],
           [1_000, "0:started"],
           [1_000, "0:idle:start"],
         ]),
       ),
       "slow",
-      /^the idle worker had not received init:1, and the latest progress was only 10[0-9][0-9] ms before the stall$/,
+      /^the idle worker had not received init:1, and the latest progress was only 1000 ms before the stall$/,
     ],
     [
       "a worker not started 1 s after the post",
-      evidenceOf("init:1", factsAgo([[1_000, "page:post:init:1"]])),
+      taken("init:1", ago([[1_000, "page:post:init:1"]])),
       "slow",
-      /^the worker had not started, and the latest progress was only 10[0-9][0-9] ms before the stall$/,
+      /^the worker had not started, and the latest progress was only 1000 ms before the stall$/,
     ],
     [
       "a worker not started 20 s after the post",
-      evidenceOf("init:1", factsAgo([[20_000, "page:post:init:1"]])),
+      taken("init:1", ago([[20_000, "page:post:init:1"]])),
       "engine",
       /^the engine never ran the worker's script$/,
     ],
     [
       "a reply posted 1 s ago that has not reached the page",
-      evidenceOf("init:1", factsAgo([...init, [1_000, "28990:reply:1"]])),
+      taken("init:1", ago([...init, [1_000, "28990:reply:1"]])),
       "slow",
-      /^the worker's reply to init:1 had not reached the page, and the latest progress was only 10[0-9][0-9] ms before the stall$/,
+      /^the worker's reply to init:1 had not reached the page, and the latest progress was only 1000 ms before the stall$/,
     ],
     [
       "a reply posted 20 s ago that never reached the page",
-      evidenceOf(
+      taken(
         "init:1",
-        factsAgo([...init, [20_000, "9990:reply:1"], [20_000, "9990:idle:1"]]),
+        ago([...init, [20_000, "9990:reply:1"], [20_000, "9990:idle:1"]]),
       ),
       "engine",
       /^the engine never delivered the worker's reply to init:1$/,
@@ -2146,19 +2160,22 @@ Deno.test("the floor scales with the wait that caught a stall", () => {
     `TimeoutError: no progress: webkit load SDK did not finish within ${
       ms / 1000
     } seconds`;
+  const now = performance.now();
   const late = judgeStall(
     evidenceOf(
       "init:1",
-      factsAgo([[3_000, "page:post:init:1"]]),
+      factsAgo([[3_000, "page:post:init:1"]], now),
       deadline(60_000),
+      now,
     ),
     { floorMs: stallFloorFor(60_000) },
   );
   const stuck = judgeStall(
     evidenceOf(
       "init:1",
-      factsAgo([[4_000, "page:post:init:1"]]),
+      factsAgo([[4_000, "page:post:init:1"]], now),
       deadline(5_000),
+      now,
     ),
     { floorMs: stallFloorFor(5_000) },
   );
@@ -2185,8 +2202,9 @@ Deno.test("a timeout sample's start stall is judged on its own floor, and a canc
     [2_017, "5:idle"],
   ];
   const timedOut = "TimeoutError: the job stopped";
+  const now = performance.now();
   // Drill T1: the engine never delivered the job before the deadline.
-  const t1 = evidenceOf("compile:2", factsAgo(served), timedOut);
+  const t1 = evidenceOf("compile:2", factsAgo(served, now), timedOut, now);
   const onFloor = judgeStall(t1, { floorMs: stallFloorFor(2_018) });
   const unscaled = judgeStall(t1);
   assert(
@@ -2206,7 +2224,7 @@ Deno.test("a timeout sample's start stall is judged on its own floor, and a canc
     [48, "2052:reply:2:error"],
     [47, "page:reply:2"],
     [46, "2054:idle"],
-  ]);
+  ], now);
   const ranLate = judgeStall(
     { ...evidenceOf("compile:2", late, timedOut), count: 3 },
     { floorMs: stallFloorFor(2_018) },

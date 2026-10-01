@@ -119,8 +119,10 @@ async function measured<T>(run: () => Promise<T>): Promise<Took> {
 }
 
 /**
- * How far past the deadline a wait may ask to end: the SDK computes its
- * deadline synchronously within the call, microseconds after `started`.
+ * How far past the deadline a wait may ask to end. The deadline is bounded by
+ * the guest's first wait: the SDK computed it when the job began, before the
+ * guest could ask to sleep, so `first ask + timeoutMs` is never earlier than
+ * the deadline, however long the host took to get there.
  */
 const waitSlackMs = 20;
 
@@ -133,7 +135,8 @@ const waitSlackMs = 20;
  * after its last wait; and since a sleep that ran on would spend none, the
  * test also checks what the SDK asked the host for: it must sleep, and no
  * wait it asks for may end past the job's deadline. That holds however late a
- * loaded host wakes the thread. The wall-clock bound catches only a hang.
+ * loaded host wakes the thread, or late it begins the job. The wall-clock
+ * bound catches only a hang.
  */
 function stoppedInTime(
   took: Took,
@@ -160,7 +163,7 @@ function stoppedInTime(
   assert(took.wall < hangMs, `${what} took ${took.wall} ms`);
   if (runaway === "waiting") {
     assert(took.waits.length > 0, `${what} never slept in Atomics.wait`);
-    const deadline = took.started + timeoutMs;
+    const deadline = took.waits[0].at + timeoutMs;
     for (const wait of took.waits) {
       const past = wait.at + wait.ms - deadline;
       assert(
@@ -757,10 +760,13 @@ Deno.test("SDK direct jobs stop running guests at their deadline", async () => {
 });
 
 Deno.test("A direct job's CPU bound counts its own thread, not the engine's helper threads", async () => {
-  // Another thread spends 600 ms of its own CPU while a guest spins to its
-  // deadline, as the collector and compiler threads can on a slow multi-core
-  // host: the process passes the bound, the job's thread does not. The other
-  // thread counts its own CPU, so a loaded host only makes it take longer.
+  // Another thread spends as much CPU as the busy bound allows, by its own
+  // clock, while a guest spins to its deadline: as the collector and compiler
+  // threads can on a slow multi-core host. How soon that thread gets the CPU
+  // depends on the host; the test only waits for it and compares what was
+  // measured: the process counted that thread's CPU, and the job's own thread
+  // stayed within its bound.
+  const burnMs = timeoutMs + lateMs;
   const burner = URL.createObjectURL(
     new Blob([
       `import process from "node:process";
@@ -768,36 +774,48 @@ const cpu = () => {
   const { user, system } = process.threadCpuUsage();
   return (user + system) / 1000;
 };
-const start = cpu();
-while (cpu() - start < 600) {}
-postMessage("burned");`,
+self.onmessage = () => {
+  const start = cpu();
+  while (cpu() - start < ${burnMs}) {}
+  postMessage(cpu() - start);
+};`,
     ], { type: "text/javascript" }),
   );
+  const worker = new Worker(burner, { type: "module" });
   const run = await catchRetry();
   let failure: unknown;
-  const took = await measured(async () => {
-    const worker = new Worker(burner, { type: "module" });
-    const burned = new Promise((resolve) => (worker.onmessage = resolve));
-    try {
-      await run(catchRetryMode.spin);
-    } catch (error) {
-      failure = error;
-    }
-    await burned;
+  let burned = 0;
+  try {
+    const took = await measured(async () => {
+      const reported = new Promise<number>((resolve) =>
+        worker.onmessage = ({ data }) => resolve(data)
+      );
+      // The other thread spins only inside the measured window.
+      worker.postMessage("go");
+      try {
+        await run(catchRetryMode.spin);
+      } catch (error) {
+        failure = error;
+      }
+      burned = await reported;
+    });
+    assert(
+      failure instanceof DOMException && failure.name === "TimeoutError",
+      `the spinning guest: ${failure}`,
+    );
+    assert(
+      took.processCpu - took.cpu >= 0.9 * burned,
+      `the process counted ${
+        (took.processCpu - took.cpu).toFixed(0)
+      } ms of CPU beyond this thread's, while the other thread reported ${
+        burned.toFixed(0)
+      } ms of its own`,
+    );
+    stoppedInTime(took, "a guest beside a busy thread");
+  } finally {
     worker.terminate();
-  });
-  URL.revokeObjectURL(burner);
-  assert(
-    failure instanceof DOMException && failure.name === "TimeoutError",
-    `the spinning guest: ${failure}`,
-  );
-  assert(
-    took.processCpu >= timeoutMs + lateMs,
-    `the other thread spent too little to matter: the process spent ${
-      took.processCpu.toFixed(0)
-    } ms of CPU`,
-  );
-  stoppedInTime(took, "a guest beside a busy thread");
+    URL.revokeObjectURL(burner);
+  }
 });
 
 Deno.test("SDK direct jobs stop bulk operations and costly imports at their deadline", async () => {

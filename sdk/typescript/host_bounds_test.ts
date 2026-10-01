@@ -14,15 +14,20 @@ import { assert, equalBytes, rejects } from "./testdata/support.ts";
 const rssBudget = 256 * 1024 * 1024;
 
 /**
- * The work bound is on the CPU the process spent (every thread), which host
- * work in proportion to a guest's request would spend, while a loaded host
- * only stretches the wall time; the wall-clock bound only catches a hang.
+ * The work bound is on the CPU this thread spent: a direct job runs its
+ * guest and every WASI import it calls on the calling thread, so host work in
+ * proportion to a guest's request would spend it there, while a loaded host
+ * only stretches the wall time and the engine's helper threads (compilation,
+ * parallel collection) are not that work. The wall-clock bound only catches a
+ * hang. Without process.threadCpuUsage, the whole process's CPU.
  */
 const workMs = 1000;
 const hangMs = 30_000;
 
 function cpuMs(): number {
-  const { user, system } = process.cpuUsage();
+  const { user, system } = typeof process.threadCpuUsage === "function"
+    ? process.threadCpuUsage()
+    : process.cpuUsage();
   return (user + system) / 1000;
 }
 
