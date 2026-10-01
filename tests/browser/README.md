@@ -85,7 +85,11 @@ seconds. Environment variables adjust this:
 
 For example,
 `CAPNP_BROWSER_STALL="abort recovery cycle 3" CAPNP_BROWSER_DEADLINE_MS=5000 mise run test:browser chromium`
-fails on that step five seconds after it starts. `deadline_test.ts`, part of
+fails on that step five seconds after it starts. A step deadline shorter than
+the SDK's own 30-second timeouts makes the deadline catch a worker step's stall
+first; the stall rule then judges it on a floor scaled to that deadline (see
+[Recovery soak](#recovery-soak)), 3.75 seconds for this one, so a stuck worker
+still reads as a stall rather than slowness. `deadline_test.ts`, part of
 `test:browser-bootstrap`, checks the deadline without a browser. The nightly
 browser job sets `CAPNP_BROWSER_JOBS=1` on Linux and macOS: with three engines
 at once on a four-CPU runner, WebKit stalled starting or recovering workers in
@@ -173,38 +177,51 @@ Every SDK worker the main page creates is traced from the start
 (`worker-trace.ts`, installed as an init script): a module that loads before the
 worker's own script reports the worker's start, each message it receives, each
 Wasm compile and instantiate, marking an instantiation that runs a start
-section's function, and each reply once posted. After the start and after each
-reply it reports when the worker's thread is next back in its event loop, idle.
-The page adds each message it posts to the worker, each reply that reaches it,
-and its `terminate()` call. It folds every event into facts about the worker,
-kept whole and timed on the page's clock: when it started and whether it is
-idle, the messages it received and answered, the replies that reached the page,
-its unfinished compiles and instantiations, and when the page terminated it. The
-latest 60 events are kept for display. A recovery gets 20 seconds, over six
-times the slowest one measured in CI. One that does not finish in time is
-retried once on the same client, which replaces the stalled worker as it would
-for an application, and the evidence is judged by one rule (`judgeStall()`),
-which the termination check's start stalls share. The message the worker had to
-answer is the page's latest post for the recovery that no reply answered.
+section's function, each reply once posted, and `self.close()`. It keeps the
+worker's timers, microtask queue, and event listener functions before that
+script runs, and runs every callback the script gives them (timers, intervals,
+microtasks, event listeners and handlers) as a numbered task between a start and
+an end event. After any event it reports when the worker's thread is next back
+in its event loop, idle, through a timer of its own that the worker's code
+cannot replace. The page adds each message it posts to the worker, each reply
+that reaches it, whatever its id, and its `terminate()` call. It folds every
+event into facts about the worker, kept whole and timed on the page's clock:
+when it started, whether it is idle or a callback of its own still runs, the
+messages it received and answered, the replies that reached the page, its
+unfinished compiles and instantiations, the Wasm it compiled, and when it closed
+itself or the page terminated it. The latest 60 events are kept for display.
+Every stall's evidence also counts the page's workers: how many it created, how
+many are still live, and the Wasm compiled in those. A recovery gets 20 seconds,
+over six times the slowest one measured in CI. One that does not finish in time
+is retried once on the same client, which replaces the stalled worker as it
+would for an application, and the evidence is judged by one rule
+(`judgeStall()`), which the termination check's start stalls share. The message
+the worker had to answer is the page's latest post for the recovery that no
+reply answered.
 
 - The SDK is the suspect when the recovery ended with anything but a timeout, a
   failure rather than a stall; when the page never posted the message, or every
   reply reached the page and the client still did not settle, since only the
   SDK's client decides; when the page posted to a worker it had terminated, or
-  to one still working on an earlier message; when the worker's own code held
-  its thread after starting or after its last reply, so it never took the
-  message; when an unfinished instantiation runs a start function, which is
-  guest code the SDK must stop; or when the engine did its part and stayed
+  to one still working on an earlier message; when the worker closed itself;
+  when the worker's own code kept it from its event loop after its latest
+  activity (a callback of its own still running, or no idle report since), so it
+  never took the message; when an unfinished instantiation runs a start
+  function, which is guest code the SDK must stop; when the job ran until the
+  SDK's own timeout cancelled it; or when the engine did its part and stayed
   healthy, yet the worker never answered. The run then fails with both workers'
   traces.
 - The engine is the suspect when a fresh worker no longer starts, or Wasm no
   longer compiles in a worker or on the page; or when the engine never ran the
-  worker's script, never delivered the message to the idle worker, never
-  finished a Wasm compile or instantiation, or never delivered a reply the
-  worker sent, each for at least 5 seconds (`stallFloorMs`) since the item began
-  and since the worker's latest event. With less quiet than that, the evidence
-  shows slowness rather than a stall, which fails the run as well, whether an
-  SDK timeout or a step deadline ended the wait.
+  worker's script, never delivered the message to a worker idle since its latest
+  activity, never finished a Wasm compile or instantiation, or never delivered a
+  reply the worker sent, each for at least the floor since the item began and
+  since the worker's latest event. The floor is 5 seconds (`stallFloorMs`), or
+  three quarters of a shorter wait that caught the stall: a step deadline under
+  about 6.7 seconds, or a termination timeout sample's 2-second deadline (1.5
+  seconds). With less quiet than that, the evidence shows slowness rather than a
+  stall, which fails the run as well, whether an SDK timeout or a step deadline
+  ended the wait.
 - A stall that points at the engine is tolerated within a budget per CI job.
   `CAPNP_SOAK_STALL_BUDGET` (1 by default, 0 for none) bounds these stalls, the
   termination check's start stalls (see below), and the stalls of every other
@@ -221,7 +238,9 @@ an unfinished compile or instantiation is the engine's, unless the instantiation
 runs a start function. Until the rule read facts kept whole and knew when a
 worker went idle, it also blamed the engine for a worker whose own code kept its
 thread after a reply, and read a long-lived worker whose start the display had
-dropped as never started.
+dropped as never started. Until it traced the worker's own tasks, a hold queued
+as a timer after the reply, or a worker that closed itself in a later task, read
+as a message the engine never delivered.
 
 A tolerated stall prints an `OBSERVED <engine> soak recovery stall` line with
 both traces and the health checks, goes into the engine's receipt and the run
@@ -245,15 +264,18 @@ stall that points at the engine prints
 the step's kind, and the step runs once more on a fresh main page. That page
 loads the page and its assets from the driver's memory, replays the steps later
 ones depend on, and, once the driver has gone offline, is taken offline too. The
-retry runs only the stalled attempt, on a fresh client without the stalled one's
-history: an engine verdict rests only on what the engine failed to do for the
-stalled message, and a fault the client's history causes shows in the facts as
-the SDK's. A stall that points at the SDK or shows only slowness, a page that
-cannot report its evidence, a second stall, or a stall beyond the budget fails
-the run. `CAPNP_BROWSER_WORKER_STALL` drills the rule: the next SDK worker of a
-matching step never runs its script (`start`) or never receives a message after
-init (`job`), as an engine stall would, or never answers (`silent`), as an SDK
-fault would. An entry that armed no step by the end of the run fails it.
+retry faces the stalled attempt's client history. A step that creates its own
+clients is its own unit; a feature row first replays the worker rows that ran
+before it on the page's worker client, and a conformance row the rows its
+surface's cached client (one per configuration) or the Studio adapter ran before
+it. A fault that history causes then recurs on the retry and fails it as a
+second stall, however the first stall was judged. A stall that points at the SDK
+or shows only slowness, a page that cannot report its evidence, a second stall,
+or a stall beyond the budget fails the run. `CAPNP_BROWSER_WORKER_STALL` drills
+the rule: the next SDK worker of a matching step never runs its script (`start`)
+or never receives a message after init (`job`), as an engine stall would, or
+never answers (`silent`), as an SDK fault would. An entry that armed no step by
+the end of the run fails it.
 
 One recovery stall has been seen. In the nightly run
 [36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524),
@@ -339,11 +361,16 @@ returns its facts and trace, with the page's own posts to the worker, its
 `terminate()` call and the replies that reached it, and the engine health
 checks. The soak's rule judges the evidence, with the guest's counter as one
 more sign: a guest that ran, only late, points at the engine, and one that never
-ran while the engine did its part points at the SDK. A stall that points at the
-SDK or shows only slowness fails the check. Otherwise the sample is retried
-once, and the stall counts against the soak's stall budget, with an
-`OBSERVED <engine> worker start stall` line, a receipt entry, and a warning
-annotation on GitHub Actions. One start stall has been seen: in the nightly run
+ran while the engine did its part points at the SDK. The rule judges a start
+stall on a floor scaled to the wait that caught it: 1.5 seconds for a timeout
+sample, whose deadline is 2 seconds, and 5 seconds otherwise. A timeout sample's
+job that the SDK's own deadline cancelled, and whose cancellation reached the
+page, is no client that failed to settle, so a guest that ran only late still
+points at the engine. A stall that points at the SDK or shows only slowness
+fails the check. Otherwise the sample is retried once, and the stall counts
+against the soak's stall budget, with an `OBSERVED <engine> worker start stall`
+line, a receipt entry, and a warning annotation on GitHub Actions. One start
+stall has been seen: in the nightly run
 [36132427000](https://github.com/nullstyle/capnpc-wasm/actions/runs/36132427000),
 WebKit on Linux did not initialize the probe worker for the pure-Wasm abort
 within the SDK's default 30-second init timeout, in the suite's second run with
