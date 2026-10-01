@@ -107,8 +107,10 @@ const waitSlackMs = 20;
 /**
  * A guest stopped at its deadline: not before it, by wall time, and not
  * after it. A `busy` guest that ran on would spend CPU, so its job's CPU is
- * bounded. A `waiting` guest (a sleep) that ran on would spend none, so the
- * test checks what the SDK asked the host for instead: it must sleep, and no
+ * bounded by the deadline plus lateMs. A `waiting` guest (a sleep) spends
+ * almost none, so its CPU is bounded by lateMs alone, which catches CPU spent
+ * after its last wait; and since a sleep that ran on would spend none, the
+ * test also checks what the SDK asked the host for: it must sleep, and no
  * wait it asks for may end past the job's deadline. That holds however late a
  * loaded host wakes the thread. The wall-clock bound catches only a hang.
  */
@@ -121,11 +123,16 @@ function stoppedInTime(
     took.wall >= timeoutMs,
     `${what} stopped before its deadline: ${took.wall} ms`,
   );
+  const cpuBound = runaway === "waiting" ? lateMs : timeoutMs + lateMs;
   assert(
-    took.cpu < timeoutMs + lateMs,
+    took.cpu < cpuBound,
     `${what} ran past its deadline: the process spent ${
       took.cpu.toFixed(0)
-    } ms of CPU during a ${timeoutMs} ms job`,
+    } ms of CPU during a ${timeoutMs} ms job${
+      runaway === "waiting"
+        ? " that should have slept, beyond its "
+        : ", beyond its "
+    }${cpuBound} ms bound`,
   );
   assert(took.wall < hangMs, `${what} took ${took.wall} ms`);
   if (runaway === "waiting") {
