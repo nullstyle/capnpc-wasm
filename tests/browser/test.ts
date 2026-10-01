@@ -30,6 +30,7 @@ import {
   workerTracerScript,
 } from "./worker-trace.ts";
 import {
+  readStalls,
   recordStall,
   type SoakStall,
   stallBudget,
@@ -42,6 +43,7 @@ import {
 import {
   parseWorkerStallDrill,
   type StallRuleHost,
+  type StepStallEvidence,
   underStallRule,
 } from "./stall-rule.ts";
 import { describeObservation } from "../conformance/outcome.ts";
@@ -171,6 +173,20 @@ function assert(condition: unknown, message: string): asserts condition {
 // next to the receipt for run.ts, which reports it if it has to stop a driver.
 const receiptPath = Deno.args[1];
 const stepPath = receiptPath ? `${receiptPath}.step` : undefined;
+/**
+ * Stalls the run did not recover from (a second stall, or one beyond the
+ * job's budget), one line each, next to the receipt for run.ts's summary:
+ * they fail the run and are not in the ledger.
+ */
+const unrecoveredPath = receiptPath ? `${receiptPath}.unrecovered` : undefined;
+async function noteUnrecovered(line: string): Promise<void> {
+  if (!unrecoveredPath) return;
+  try {
+    await Deno.writeTextFile(unrecoveredPath, `${line}\n`, { append: true });
+  } catch {
+    // The note is a diagnostic; the run's failure does not depend on it.
+  }
+}
 /** Once a step fails, cleanup steps no longer replace its label. */
 let failedStep: string | undefined;
 function recordStep(label: string) {
@@ -813,23 +829,51 @@ try {
   // job's ledger, which holds the stall budget (soak-stalls.ts).
   const soakStalls: SoakStall[] = [];
   const soakStallBudget = stallBudget();
-  /** Record a stall that points at the engine; `then` says what follows. */
+  const describeStallPlace = (stall: SoakStall) =>
+    `${stallTitle(stall).toLowerCase()} in ${stallPlace(stall)}`;
+  /**
+   * Fail a stall beyond the job's budget, the `total`-th: an OBSERVED line
+   * and a note for run.ts's summary.
+   */
+  const beyondBudget = async (stall: SoakStall, total: number) => {
+    const what = describeStallPlace(stall);
+    console.log(
+      `OBSERVED ${engine} ${what}, attributed to the engine and beyond the job's stall budget of ${soakStallBudget}: ${
+        JSON.stringify(stall.detail)
+      }`,
+    );
+    await noteUnrecovered(
+      `${what}, attributed to the engine and beyond the job's stall budget of ${soakStallBudget}: ${stall.summary}`,
+    );
+    throw new Error(
+      `${engine}: stall ${total} of this job, a ${what}, exceeds its budget of ${soakStallBudget} (CAPNP_SOAK_STALL_BUDGET; the ledger ${stallLedgerPath} is cleared by mise run clean:test): ${stall.summary}`,
+    );
+  };
+  /** Fail a stall now when the job's budget is spent, before any retry. */
+  const admit = async (stall: SoakStall) => {
+    const total = (await readStalls()).filter((entry) =>
+      entry.job === stall.job
+    ).length + 1;
+    if (total > soakStallBudget) await beyondBudget(stall, total);
+  };
+  /**
+   * Record a stall that points at the engine and recovered: its ledger
+   * entry, which spends the job's budget, and its OBSERVED line; `then` says
+   * how it recovered. The budget is checked first, and again after the
+   * entry, since another driver of the job may have recorded one meanwhile.
+   */
   const tolerate = async (
     stall: SoakStall,
     then = "recovered on retry",
   ): Promise<void> => {
-    soakStalls.push(stall);
+    await admit(stall);
     const total = await recordStall(stall);
-    const what = `${stallTitle(stall).toLowerCase()} in ${stallPlace(stall)}`;
-    const over = total > soakStallBudget;
+    if (total > soakStallBudget) await beyondBudget(stall, total);
+    soakStalls.push(stall);
     console.log(
-      `OBSERVED ${engine} ${what}, attributed to the engine and ${
-        over ? `beyond the job's stall budget of ${soakStallBudget}` : then
-      }: ${JSON.stringify(stall.detail)}`,
-    );
-    assert(
-      !over,
-      `${engine}: stall ${total} of this job, a ${what}, exceeds its budget of ${soakStallBudget} (CAPNP_SOAK_STALL_BUDGET; the ledger ${stallLedgerPath} is cleared by mise run clean:test): ${stall.summary}`,
+      `OBSERVED ${engine} ${
+        describeStallPlace(stall)
+      }, attributed to the engine and ${then}: ${JSON.stringify(stall.detail)}`,
     );
   };
   // CAPNP_BROWSER_WORKER_STALL arms a drill: the next SDK worker of a
@@ -837,6 +881,26 @@ try {
   const drills = parseWorkerStallDrill(
     Deno.env.get("CAPNP_BROWSER_WORKER_STALL"),
   );
+  /** A step's stall as the ledger records it (soak-stalls.ts). */
+  const stepStall = (
+    kind: string,
+    label: string,
+    evidence: StepStallEvidence,
+    because: string,
+  ): SoakStall => ({
+    job: stallJob(),
+    engine,
+    os: Deno.build.os,
+    kind: kind as StallStep,
+    mode: label,
+    at: new Date().toISOString(),
+    summary: `${evidence.error}; ${because}; the last event: ${
+      evidence.events.at(-1) ?? "none"
+    }; fresh worker ${evidence.health.plainWorker}, Wasm in a worker ${evidence.health.workerCompile}, Wasm on the page ${evidence.health.pageCompile}; ${
+      describePage(evidence.page)
+    }`,
+    detail: evidence,
+  });
   const rule: StallRuleHost = {
     evaluate,
     async freshPage(label) {
@@ -851,21 +915,25 @@ try {
         );
       }
     },
+    admit: (kind, label, evidence, because) =>
+      admit(stepStall(kind, label, evidence, because)),
     tolerate: (kind, label, evidence, because) =>
-      tolerate({
-        job: stallJob(),
-        engine,
-        os: Deno.build.os,
-        kind: kind as StallStep,
-        mode: label,
-        at: new Date().toISOString(),
-        summary: `${evidence.error}; ${because}; the last event: ${
-          evidence.events.at(-1) ?? "none"
-        }; fresh worker ${evidence.health.plainWorker}, Wasm in a worker ${evidence.health.workerCompile}, Wasm on the page ${evidence.health.pageCompile}; ${
-          describePage(evidence.page)
-        }`,
-        detail: evidence,
-      }, "retried on a fresh page"),
+      tolerate(
+        stepStall(kind, label, evidence, because),
+        "recovered on a fresh page",
+      ),
+    async stalledAgain(kind, label, evidence, because, again, replaying) {
+      const stall = stepStall(kind, label, evidence, because);
+      const what = `${
+        describeStallPlace(stall)
+      }, attributed to the engine, then stalled again on a fresh page${
+        replaying ? " while it replayed its clients' history" : ""
+      } (${again})`;
+      console.log(
+        `OBSERVED ${engine} ${what}: ${JSON.stringify(stall.detail)}`,
+      );
+      await noteUnrecovered(`${what}: ${stall.summary}`);
+    },
     async beforeAttempt(label) {
       const drill = drills.find((entry) =>
         entry.remaining > 0 && label.includes(entry.text)

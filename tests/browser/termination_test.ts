@@ -1534,8 +1534,20 @@ function fakeRuleHost(page: { tracer: PageTracer }) {
       page.tracer = { workers: [], posts: [], drill: null };
       return Promise.resolve();
     },
+    admit(kind, label, evidence: StepStallEvidence) {
+      log.push(`admit ${kind} ${label} (${evidence.expected})`);
+      return Promise.resolve();
+    },
     tolerate(kind, label, evidence: StepStallEvidence, because) {
       log.push(`tolerate ${kind} ${label}: ${because} (${evidence.expected})`);
+      return Promise.resolve();
+    },
+    stalledAgain(kind, label, _evidence, because, again, replaying) {
+      log.push(
+        `stalled again ${kind} ${label}: ${because}; ${again}${
+          replaying ? " (replaying)" : ""
+        }`,
+      );
       return Promise.resolve();
     },
     beforeAttempt(label) {
@@ -1621,7 +1633,7 @@ Deno.test("the stall rule retries an engine stall once, on a fresh page", async 
   assert(
     result === "recovered" &&
       engine.log.join("; ") ===
-        "arm step; disarm step; tolerate resource-limits step: the engine never ran the worker's script (init:1); fresh page for step; arm step; disarm step",
+        "arm step; disarm step; admit resource-limits step (init:1); fresh page for step; arm step; disarm step; tolerate resource-limits step: the engine never ran the worker's script (init:1)",
     engine.log.join("; "),
   );
 });
@@ -1661,12 +1673,20 @@ Deno.test("the stall rule fails an SDK stall, a second stall, and a stall it can
     ),
     twiceFailure,
   );
-  // The budget: tolerate refuses, so the step fails without a retry.
+  // A stall that stalls again is reported as such, and never tolerated: no
+  // ledger entry spends the budget on it.
+  assert(
+    twice.log.join("; ") ===
+      "arm setup; disarm setup; admit conformance-setup setup (init:1); fresh page for setup; arm setup; disarm setup; stalled again conformance-setup setup: the engine never ran the worker's script; TimeoutError: compilation timed out",
+    twice.log.join("; "),
+  );
+  // The budget: admit refuses, so the step fails without a retry and leaves
+  // no ledger entry.
   const budgetPage = {
     tracer: { workers: [], posts: [], drill: null } as PageTracer,
   };
   const budget = fakeRuleHost(budgetPage);
-  budget.host.tolerate = () =>
+  budget.host.admit = () =>
     Promise.reject(new Error("stall 2 of this job exceeds its budget of 1"));
   const budgetFailure = await rejection(() =>
     underStallRule(budget.host, "hostile-guests", "hostile", () => {
@@ -1676,7 +1696,9 @@ Deno.test("the stall rule fails an SDK stall, a second stall, and a stall it can
   );
   assert(
     budgetFailure === "stall 2 of this job exceeds its budget of 1" &&
-      !budget.log.some((entry) => entry.startsWith("fresh page")),
+      !budget.log.some((entry) =>
+        entry.startsWith("fresh page") || entry.startsWith("tolerate")
+      ),
     `${budgetFailure} / ${budget.log.join("; ")}`,
   );
   // A page that cannot report its evidence.
@@ -2306,7 +2328,7 @@ Deno.test("the stall rule's retry replays the step's client history first", asyn
   assert(
     result === "recovered" &&
       replayed.log.join("; ") ===
-        "arm row; attempt 1; disarm row; tolerate feature-rows row: the engine never ran the worker's script (init:1); fresh page for row; replay the client's history; arm row; attempt 2; disarm row",
+        "arm row; attempt 1; disarm row; admit feature-rows row (init:1); fresh page for row; replay the client's history; arm row; attempt 2; disarm row; tolerate feature-rows row: the engine never ran the worker's script (init:1)",
     replayed.log.join("; "),
   );
   // A stall while the history replays is a second stall.
@@ -2502,5 +2524,40 @@ Deno.test("a 2 s timeout sample whose job the engine never delivered is retried 
     result.verdict.startsWith("PASS webkit") &&
       tolerated.join() === "webkit isolated termination pure timeout: start",
     `tolerated ${tolerated.join()}: ${result.verdict}`,
+  );
+});
+
+Deno.test("the trace runs the handler properties of every EventTarget type as tasks", async () => {
+  // A hold in FileReader's onload, as one in IDBRequest's onsuccess would be:
+  // a handler property of an EventTarget type other than the worker's own.
+  const hold = "{ const end = Date.now() + 400; while (Date.now() < end) {} }";
+  const seen = await traceInWorker(
+    `self.onmessage = ({ data }) => {
+  self.postMessage({ id: data.id });
+  const reader = new FileReader();
+  reader.onload = () => ${hold};
+  reader.readAsArrayBuffer(new Blob([new Uint8Array(1)]));
+};`,
+    [{ kind: "job", id: 1 }],
+    (seen) =>
+      seen.some((event) =>
+        /^task:end:[0-9]+$/.test(named(event)) &&
+        seen.some((other) => /:onload handler$/.test(named(other)))
+      ) && named(seen.at(-1)!) === "idle",
+  );
+  const start = seen.findIndex((event) =>
+    /^task:start:[0-9]+:onload handler$/.test(named(event))
+  );
+  assert(start >= 0, `no onload task: ${seen.join()}`);
+  const task = named(seen[start]).split(":")[2];
+  const end = seen.findIndex((event) => named(event) === `task:end:${task}`);
+  const judged = judgeStall(
+    evidenceOf("job:2", factsOf([...seen.slice(0, end), "page:post:job:2"])),
+  );
+  assert(
+    judged.suspect === "sdk" &&
+      judged.because ===
+        `the worker's own code held its thread in its onload handler (task ${task}), so it never took job:2`,
+    `${JSON.stringify(judged)} from ${seen.join()}`,
   );
 });

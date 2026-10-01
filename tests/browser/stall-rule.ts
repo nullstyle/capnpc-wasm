@@ -14,10 +14,11 @@
 // (worker-trace.ts), and the engine health checks. judgeStall() reads it. A
 // stall that points at the engine is recorded (an OBSERVED line and a ledger
 // entry, soak-stalls.ts, against the same budget per CI job as the soak and
-// the termination acceptance) and the step runs once more on a fresh page. A
-// stall that points at the SDK or shows only slowness, a page that cannot
-// report its evidence, a second stall, or a stall beyond the budget fails the
-// step with the evidence. Every assertion about what the SDK does stays with
+// the termination acceptance) once the step, run once more on a fresh page,
+// passed; the budget is checked before that retry. A stall that points at
+// the SDK or shows only slowness, a page that cannot report its evidence, a
+// second stall, or a stall beyond the budget fails the step with the
+// evidence, and leaves no ledger entry. Every assertion about what the SDK does stays with
 // the step: the rule only excuses a stall the evidence attributes to the
 // engine.
 //
@@ -147,14 +148,36 @@ export interface StallRuleHost {
   /** Replace that page with a fresh one, its prerequisites replayed. */
   freshPage(label: string): Promise<void>;
   /**
-   * Record an engine stall: print the OBSERVED line and append the ledger
-   * entry. Throws when the stall exceeds the job's budget.
+   * Before the retry of an engine stall: throw when the job's stall budget
+   * is spent, so the stall fails without a retry or a ledger entry.
+   */
+  admit?(
+    kind: string,
+    label: string,
+    evidence: StepStallEvidence,
+    because: string,
+  ): Promise<void>;
+  /**
+   * Record an engine stall whose retry passed: print the OBSERVED line and
+   * append the ledger entry. Throws when the stall exceeds the job's budget.
    */
   tolerate(
     kind: string,
     label: string,
     evidence: StepStallEvidence,
     because: string,
+  ): Promise<void>;
+  /**
+   * Report an engine stall whose retry stalled again, which fails the step:
+   * an OBSERVED line and a note for the run's summary, no ledger entry.
+   */
+  stalledAgain?(
+    kind: string,
+    label: string,
+    evidence: StepStallEvidence,
+    because: string,
+    again: string,
+    replaying: boolean,
   ): Promise<void>;
   /** Arm the page for an attempt (CAPNP_BROWSER_WORKER_STALL), and disarm it after. */
   beforeAttempt?(label: string): Promise<void>;
@@ -253,10 +276,20 @@ export async function underStallRule<T>(
       }: ${because}: ${JSON.stringify(evidence)}`,
     );
   }
-  await host.tolerate(kind, label, evidence, because);
+  // The budget is checked before the retry; the stall is recorded, and
+  // spends it, only once the retry passed.
+  await host.admit?.(kind, label, evidence, because);
   await host.freshPage(label);
   const second = await run(true);
   if (second.stall !== undefined) {
+    await host.stalledAgain?.(
+      kind,
+      label,
+      evidence,
+      because,
+      second.stall,
+      second.replaying,
+    );
     throw new Error(
       `${label}: the step stalled again on a fresh page${
         second.replaying ? ", while it replayed its clients' history" : ""
@@ -265,6 +298,7 @@ export async function underStallRule<T>(
       }`,
     );
   }
+  await host.tolerate(kind, label, evidence, because);
   return second.result;
 }
 

@@ -134,6 +134,20 @@ async function relay(
   if (pending) write(`${prefix}${pending}`);
 }
 
+/**
+ * The stalls a driver did not recover from (a second stall, or one beyond
+ * the job's budget), as it noted them next to its receipt: they failed it
+ * and are not in the ledger.
+ */
+function unrecovered(receiptPath: string): string[] {
+  try {
+    return Deno.readTextFileSync(`${receiptPath}.unrecovered`).split("\n")
+      .filter((line) => line.trim()).map((line) => `unrecovered ${line}`);
+  } catch {
+    return [];
+  }
+}
+
 function lastStep(receiptPath: string): string {
   try {
     return Deno.readTextFileSync(`${receiptPath}.step`).trim() || "unknown";
@@ -223,7 +237,10 @@ async function runEngine(engine: Engine, receipts: string): Promise<Outcome> {
       engine,
       passed: false,
       seconds,
-      summary: [`stopped after overrunning its deadline during: ${overran}`],
+      summary: [
+        `stopped after overrunning its deadline during: ${overran}`,
+        ...unrecovered(receiptPath),
+      ],
     };
   }
   if (!status.success) {
@@ -235,6 +252,7 @@ async function runEngine(engine: Engine, receipts: string): Promise<Outcome> {
         `browser suite failed (exit ${status.code}) during: ${
           lastStep(receiptPath)
         }`,
+        ...unrecovered(receiptPath),
       ],
     };
   }
