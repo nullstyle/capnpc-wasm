@@ -178,26 +178,32 @@ Every SDK worker the main page creates is traced from the start
 worker's own script reports the worker's start, each message it receives, each
 Wasm compile and instantiate, marking an instantiation that runs a start
 section's function, each reply once posted, and `self.close()`. It keeps the
-worker's timers, microtask queue, and event listener functions before that
-script runs, and runs every callback the script gives them (timers, intervals,
-microtasks, event listeners and handlers) as a numbered task between a start and
-an end event. After any event it reports when the worker's thread is next back
-in its event loop, idle, through a timer of its own that the worker's code
-cannot replace. The page adds each message it posts to the worker, each reply
-that reaches it, whatever its id, and its `terminate()` call. It folds every
-event into facts about the worker, kept whole and timed on the page's clock:
-when it started, whether it is idle or a callback of its own still runs, the
-messages it received and answered, the replies that reached the page, its
-unfinished compiles and instantiations, the Wasm it compiled, and when it closed
-itself or the page terminated it. The latest 60 events are kept for display.
-Every stall's evidence also counts the page's workers: how many it created, how
-many are still live, and the Wasm compiled in those. A recovery gets 20 seconds,
-over six times the slowest one measured in CI. One that does not finish in time
-is retried once on the same client, which replaces the stalled worker as it
-would for an application, and the evidence is judged by one rule
-(`judgeStall()`), which the termination check's start stalls share. The message
-the worker had to answer is the page's latest post for the recovery that no
-reply answered.
+worker's timer, microtask, and event listener functions before that script runs,
+and runs these callbacks as numbered tasks, between a start and an end event:
+timers, intervals, `queueMicrotask`, every listener added with
+`addEventListener` on any target, and every `on...` handler property of the
+worker's global and of every EventTarget type the worker has (`IDBRequest`,
+`FileReader`, `BroadcastChannel`, `XMLHttpRequest`, `WebSocket`, `MessagePort`,
+and the like). A promise job that an engine API settles (`Blob`, `fetch`,
+`crypto`) is no task of its own and goes untraced: a hold there reads as a
+message the engine never delivered, which the retry's history replay (below)
+then catches as a second stall. After any event the trace reports when the
+worker's thread is next back in its event loop, idle, through a timer of its own
+that the worker's code cannot replace. The page adds each message it posts to
+the worker, each reply that reaches it, whatever its id, and its `terminate()`
+call. It folds every event into facts about the worker, kept whole and timed on
+the page's clock: when it started, whether it is idle or a callback of its own
+still runs, the messages it received and answered, the replies that reached the
+page, its unfinished compiles and instantiations, the Wasm it compiled, and when
+it closed itself or the page terminated it. The latest 60 events are kept for
+display. Every stall's evidence also counts the page's workers: how many it
+created, how many are still live, and the Wasm compiled in those. A recovery
+gets 20 seconds, over six times the slowest one measured in CI. One that does
+not finish in time is retried once on the same client, which replaces the
+stalled worker as it would for an application, and the evidence is judged by one
+rule (`judgeStall()`), which the termination check's start stalls share. The
+message the worker had to answer is the page's latest post for the recovery that
+no reply answered.
 
 - The SDK is the suspect when the recovery ended with anything but a timeout, a
   failure rather than a stall; when the page never posted the message, or every
@@ -242,11 +248,12 @@ dropped as never started. Until it traced the worker's own tasks, a hold queued
 as a timer after the reply, or a worker that closed itself in a later task, read
 as a message the engine never delivered.
 
-A tolerated stall prints an `OBSERVED <engine> soak recovery stall` line with
-both traces and the health checks, goes into the engine's receipt and the run
-summary, and on GitHub Actions becomes a warning annotation. A retry that fails
-too, or a stall beyond the budget, fails the run; the OBSERVED line and the run
-summary of a stall beyond the budget say so.
+A stall is tolerated, and spends the budget, only once its retry passed: it
+prints an `OBSERVED <engine> soak recovery stall` line with both traces and the
+health checks, goes into the ledger, the engine's receipt and the run summary,
+and on GitHub Actions becomes a warning annotation. A retry that fails too, or a
+stall beyond the budget, fails the run with no ledger entry or warning; its
+OBSERVED line says which, and the run summary lists it as unrecovered.
 
 Every other step that creates, initializes, or first uses SDK workers runs under
 the same rule (`stall-rule.ts`): loading the SDK clients, preparing the
@@ -258,24 +265,25 @@ timeout its expectation does not accept, or any timeout from a worker that never
 initialized. The page then reports the latest message it posted during the step
 that no reply answered, that worker's facts and trace, and the health checks;
 when every message was answered, it shows the last worker the step posted to. A
-stall that points at the engine prints
-`OBSERVED <engine> worker stall in
-<step>`, counts against the same budget under
-the step's kind, and the step runs once more on a fresh main page. That page
-loads the page and its assets from the driver's memory, replays the steps later
-ones depend on, and, once the driver has gone offline, is taken offline too. The
-retry faces the stalled attempt's client history. A step that creates its own
-clients is its own unit; a feature row first replays the worker rows that ran
-before it on the page's worker client, and a conformance row the rows its
-surface's cached client (one per configuration) or the Studio adapter ran before
-it. A fault that history causes then recurs on the retry and fails it as a
-second stall, however the first stall was judged. A stall that points at the SDK
-or shows only slowness, a page that cannot report its evidence, a second stall,
-or a stall beyond the budget fails the run. `CAPNP_BROWSER_WORKER_STALL` drills
-the rule: the next SDK worker of a matching step never runs its script (`start`)
-or never receives a message after init (`job`), as an engine stall would, or
-never answers (`silent`), as an SDK fault would. An entry that armed no step by
-the end of the run fails it.
+stall that points at the engine, if the job's budget allows another, has the
+step run once more on a fresh main page; once that retry passes, it prints
+`OBSERVED <engine> worker stall in <step>` and counts against the same budget
+under the step's kind. A retry that stalls again prints an OBSERVED line saying
+so, and fails the run without a ledger entry. The fresh page loads the page and
+its assets from the driver's memory, replays the steps later ones depend on,
+and, once the driver has gone offline, is taken offline too. The retry faces the
+stalled attempt's client history. A step that creates its own clients is its own
+unit; a feature row first replays the worker rows that ran before it on the
+page's worker client, and a conformance row the rows its surface's cached client
+(one per configuration) or the Studio adapter ran before it. A fault that
+history causes then recurs on the retry and fails it as a second stall, however
+the first stall was judged. A stall that points at the SDK or shows only
+slowness, a page that cannot report its evidence, a second stall, or a stall
+beyond the budget fails the run. `CAPNP_BROWSER_WORKER_STALL` drills the rule:
+the next SDK worker of a matching step never runs its script (`start`) or never
+receives a message after init (`job`), as an engine stall would, or never
+answers (`silent`), as an SDK fault would. An entry that armed no step by the
+end of the run fails it.
 
 One recovery stall has been seen. In the nightly run
 [36112692524](https://github.com/nullstyle/capnpc-wasm/actions/runs/36112692524),

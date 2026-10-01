@@ -146,7 +146,14 @@ export interface TracedWorker {
  * timer of its own that the worker's code cannot cancel or replace: until
  * then, the worker's own code holds its thread. Every callback the worker's
  * code gives an event loop task source runs as a numbered task between
- * `task:start:<n>:<what>` and `task:end:<n>`; self.close() says `close`. A
+ * `task:start:<n>:<what>` and `task:end:<n>`: timers, intervals,
+ * queueMicrotask, every addEventListener listener on any target, and every
+ * `on...` handler property of the worker's global and of every EventTarget
+ * type the worker has (IDBRequest, FileReader, BroadcastChannel,
+ * XMLHttpRequest, WebSocket, MessagePort and the like). A promise job an
+ * engine API settles (Blob, fetch, crypto) is no task of its own and goes
+ * untraced; a hold there is the stall rule's history replay's to catch.
+ * self.close() says `close`. A
  * module compiled from bytes with a start section runs guest code when it is
  * instantiated, which its `instantiate<n>:start:runs-start` event says. A
  * reply is logged once its post returned.
@@ -224,8 +231,19 @@ const handlers = (target, names) => {
     } catch {}
   }
 };
-handlers(self, ["onmessage", "onmessageerror", "onerror", "onunhandledrejection", "onrejectionhandled"]);
-if (typeof MessagePort === "function") handlers(MessagePort.prototype, ["onmessage", "onmessageerror"]);
+const handlerNames = (owner) => Object.getOwnPropertyNames(owner).filter((name) => name.startsWith("on"));
+for (let owner = self; owner && owner !== Object.prototype; owner = Object.getPrototypeOf(owner)) {
+  handlers(owner, handlerNames(owner));
+}
+for (const name of Object.getOwnPropertyNames(self)) {
+  let prototype;
+  try {
+    const value = self[name];
+    prototype = typeof value === "function" ? value.prototype : undefined;
+    if (!(prototype instanceof EventTarget)) continue;
+  } catch { continue; }
+  handlers(prototype, handlerNames(prototype));
+}
 self.postMessage = (message, transfer) => {
   const posted = post(message, transfer);
   if (message && message.id !== undefined) say("reply:" + message.id + (message.error ? ":error" : ""));
