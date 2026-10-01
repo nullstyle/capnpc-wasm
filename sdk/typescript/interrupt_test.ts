@@ -785,6 +785,7 @@ self.onmessage = () => {
   const run = await catchRetry();
   let failure: unknown;
   let burned = 0;
+  let jobEnded = 0;
   try {
     const took = await measured(async () => {
       const reported = new Promise<number>((resolve) =>
@@ -797,6 +798,7 @@ self.onmessage = () => {
       } catch (error) {
         failure = error;
       }
+      jobEnded = performance.now();
       burned = await reported;
     });
     assert(
@@ -811,7 +813,12 @@ self.onmessage = () => {
         burned.toFixed(0)
       } ms of its own`,
     );
-    stoppedInTime(took, "a guest beside a busy thread");
+    // The window also waits for the other thread's CPU, which a busy host
+    // can stretch at will; the wall-clock checks read the job alone.
+    stoppedInTime(
+      { ...took, wall: jobEnded - took.started },
+      "a guest beside a busy thread",
+    );
   } finally {
     worker.terminate();
     URL.revokeObjectURL(burner);
