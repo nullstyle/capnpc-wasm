@@ -21,23 +21,6 @@ every flavor it applies to has shipped it.
 - Tests: `test:cli-parity` runs upstream `capnp-test.sh` and conversion/eval
   matrices on native, the launcher, Wasmtime, wazero, and the Deno host,
   byte-compared with native.
-- Go SDK, breaking before the first tag: `Language` and `Stage` are named types
-  (`Modules.Generators`, `Generators`, and `Outputs` are keyed by `Language`),
-  stages `compile` and `generate` are now `compiler` and the generator's
-  language, and `Diagnostic.Message` is `Diagnostic.Stderr`.
-- Go SDK: `Request.ImportPaths` and `Request.SourcePrefix` with the TypeScript
-  validation and argument order; `WithLimits`/`DefaultLimits` with the
-  TypeScript names and defaults; `WithMaxConcurrentJobs`; `Error` gains
-  `ExitCode`, `Limit`, and `Diagnostics` (every stage so far); sentinels
-  `ErrInvalidRequest` and `ErrLimitExceeded`; the C++ generator runs as
-  `capnpc-c++`; paths of 4,092 to 4,096 bytes compile; generators may create
-  4,096 entries (was 4,095); output-budget breaches name the budget instead of
-  surfacing as opaque exit codes; SDK tests skip outside the checkout.
-- Go SDK: a job's context stops its guest: `poll_oneoff` sleeps wake when the
-  context ends, the engine traps a looping or recursing guest at its next edge
-  (`WithCloseOnContextDone`), `Close(ctx)` waits for active calls and terminates
-  them at its own deadline, and `New` observes its context between compilations
-  (one module's compilation runs to completion).
 - Documentation: `docs/sdk-contract.md` defines the shared SDK contract, with
   the limit defaults pinned in `tests/fixtures/contract/limits.json`; the Go
   package consumer compares complete digest maps and the compiler-path fixture.
@@ -119,12 +102,6 @@ every flavor it applies to has shipped it.
   archives. `THIRD_PARTY_NOTICES.md` ships at the package root and `licenses/`
   holds only the flavor's texts. The full SDK archive packages every non-test
   `.go` file of the Go SDK.
-- Zig generator: `ref/capnp-zig` advances from `0fb8df4` to `295ff5e`, the
-  revision the scheduled nightly measures (Zig pin unchanged,
-  `0.17.0-dev.1683+5ceec001b`); generated Zig output needs the runtime at
-  `295ff5e`, and on an interface with streaming methods an error from an
-  ordinary method now returns an exception for that call only instead of
-  rejecting the calls after it.
 - Tests: a failure and limit conformance corpus (`tests/fixtures/conformance`,
   `test:conformance` in `test`) runs one set of failing and budget-breaching
   inputs through TypeScript direct and worker execution, the Go SDK, the
