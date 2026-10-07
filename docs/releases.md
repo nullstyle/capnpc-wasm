@@ -59,26 +59,25 @@ every flavor adds its own row after its draft is verified and before it is
 published (the [release process](#release-process) below), and a row is never
 changed afterwards.
 
-| Release                        | Archive                                                  | Archive SHA-256                                                    | `package/manifest.json` SHA-256                                                                     | Producer commit                            | CI on the producer commit                                                                                                                                                                      |
-| ------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tools rc.2, 2026-09-15         | `capnp-wasm-tools-0.1.0-rc.2.tgz`, 908,300 bytes         | `84f6dd426dd0e94dd5d7fd3dd0e9390e84905ac4b5e6957af57788967e5065f4` | Not recorded; `SHA256SUMS` asset `510fd723d1ddc48a26e966ae20e3f8790c8f92f61473b5f975a2b381abc25c1d` | `0c45c08aa7a836a09e2d715f790823288769b04c` | Passed ([run 34922318054](https://github.com/nullstyle/capnpc-wasm/actions/runs/34922318054))                                                                                                  |
-| Compiler host rc.2, 2026-09-15 | `capnp-wasm-compiler-host-0.1.0-rc.2.tgz`, 944,201 bytes | `5f99f8756070c9eb267160b1af41efe227175ace3e5f751b3a35bb5bb2470b24` | `e84125596f6d26818529f1315ca10875ae99910e35c47f97a27e97a0a2db7bc6`                                  | `97508128435afcc502aab63f1f08a3aa8090a1b7` | Not green: the macos-15 `mise run check` step failed and the other jobs were cancelled by the next push ([run 34933604007](https://github.com/nullstyle/capnpc-wasm/actions/runs/34933604007)) |
-| Compiler host rc.3, 2026-09-15 | `capnp-wasm-compiler-host-0.1.0-rc.3.tgz`, 945,229 bytes | `ca8dfa0033e417e1db0522f2d1c28ccfeda4d42c18ae160de3a26d8a763521ec` | `322fa3148ec3cb7e31454b910a5e8d831a3bf1ec2635b5a8c5794c10a66077ce`                                  | `a5ccaae128665914d3878d83908bd5ddbece58ea` | Failed only at `git diff --exit-code` after every check passed on both hosts ([run 34934841115](https://github.com/nullstyle/capnpc-wasm/actions/runs/34934841115)); fixed by `672679a`        |
-
-The full SDK archive (`capnpc-wasm-<version>.tgz`) has never been published.
+| Release                        | Archive                                                  | Archive SHA-256                                                    | `package/manifest.json` SHA-256                                                                     | Producer commit                            | CI on the producer commit                                                                                                                                                                                                        |
+| ------------------------------ | -------------------------------------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tools rc.2, 2026-09-15         | `capnp-wasm-tools-0.1.0-rc.2.tgz`, 908,300 bytes         | `84f6dd426dd0e94dd5d7fd3dd0e9390e84905ac4b5e6957af57788967e5065f4` | Not recorded; `SHA256SUMS` asset `510fd723d1ddc48a26e966ae20e3f8790c8f92f61473b5f975a2b381abc25c1d` | `0c45c08aa7a836a09e2d715f790823288769b04c` | Passed ([run 34922318054](https://github.com/nullstyle/capnpc-wasm/actions/runs/34922318054))                                                                                                                                    |
+| Compiler host rc.2, 2026-09-15 | `capnp-wasm-compiler-host-0.1.0-rc.2.tgz`, 944,201 bytes | `5f99f8756070c9eb267160b1af41efe227175ace3e5f751b3a35bb5bb2470b24` | `e84125596f6d26818529f1315ca10875ae99910e35c47f97a27e97a0a2db7bc6`                                  | `97508128435afcc502aab63f1f08a3aa8090a1b7` | Not green: the macos-15 `mise run check` step failed and the other jobs were cancelled by the next push ([run 34933604007](https://github.com/nullstyle/capnpc-wasm/actions/runs/34933604007))                                   |
+| Compiler host rc.3, 2026-09-15 | `capnp-wasm-compiler-host-0.1.0-rc.3.tgz`, 945,229 bytes | `ca8dfa0033e417e1db0522f2d1c28ccfeda4d42c18ae160de3a26d8a763521ec` | `322fa3148ec3cb7e31454b910a5e8d831a3bf1ec2635b5a8c5794c10a66077ce`                                  | `a5ccaae128665914d3878d83908bd5ddbece58ea` | Failed only at `git diff --exit-code` after every check passed on both hosts ([run 34934841115](https://github.com/nullstyle/capnpc-wasm/actions/runs/34934841115)); fixed by `672679a`                                          |
+| Full SDK rc.5, 2026-10-07      | `capnpc-wasm-0.1.0-rc.5.tgz`, 3,944,974 bytes            | `84c80737cdd26d2ff3d8725da52cf16b9313d24d0d93d379ced0a2bb8066b911` | `6e439c23cfc7a0478a0a02007274b66a91a092d4c6a1a72a93670d5e1b55d25e`                                  | `f6a9509211ff1782a954b51538a77ae5b30e7330` | Passed ([run 37571913174](https://github.com/nullstyle/capnpc-wasm/actions/runs/37571913174)); built and attested by the release workflow ([run 37573044236](https://github.com/nullstyle/capnpc-wasm/actions/runs/37573044236)) |
 
 ## Release process
 
 `.github/workflows/release.yml` is the only producer of published assets. It
-reached `main` on 2026-10-07 with the other scheduled workflows, and it has
-never produced a release. It runs when a tag `capnp-wasm-tools-v<version>`,
-`capnp-wasm-compiler-host-v<version>`, or `capnpc-wasm-v<version>` is pushed,
-and the tag must name that flavor's own version, `versions["<flavor>"]` in
-`release.json`. A `workflow_dispatch` run takes a flavor and performs the same
-build and checks as a dry run: it uploads the assets as workflow artifacts and
-never creates a release, an attestation, or a tag. Each flavor has its own
-version and cadence; releasing one flavor never changes another flavor's
-version.
+reached `main` on 2026-10-07 with the other scheduled workflows and first
+produced the full SDK rc.5 the same day. It runs when a tag
+`capnp-wasm-tools-v<version>`, `capnp-wasm-compiler-host-v<version>`, or
+`capnpc-wasm-v<version>` is pushed, and the tag must name that flavor's own
+version, `versions["<flavor>"]` in `release.json`. A `workflow_dispatch` run
+takes a flavor and performs the same build and checks as a dry run: it uploads
+the assets as workflow artifacts and never creates a release, an attestation, or
+a tag. Each flavor has its own version and cadence; releasing one flavor never
+changes another flavor's version.
 
 1. Check that the flavor's entry in `release.json` names the version to release,
    and change only that entry if it does not (the
