@@ -20,10 +20,11 @@ and tags are named.
 
 ## Public compiler downloads
 
-| Package                        | Release                                                                                                  | Host runtime       |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------- | ------------------ |
-| Compiler and Wasmtime launcher | [0.1.0-rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.2)         | Wasmtime 48.0.1    |
-| Compiler and TypeScript host   | [0.1.0-rc.3](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.3) | Deno worker: 2.6.8 |
+| Package                        | Release                                                                                                  | Host runtime           |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------- |
+| Full SDK (TypeScript and Go)   | [0.1.0-rc.5](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnpc-wasm-v0.1.0-rc.5)              | Deno, browser, Go 1.25 |
+| Compiler and Wasmtime launcher | [0.1.0-rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.2)         | Wasmtime 48.0.1        |
+| Compiler and TypeScript host   | [0.1.0-rc.3](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.3) | Deno worker: 2.6.8     |
 
 The earlier
 [compiler host rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.2)
