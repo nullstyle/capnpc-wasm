@@ -33,6 +33,11 @@ every flavor it applies to has shipped it.
   `capnpc-c++`; paths of 4,092 to 4,096 bytes compile; generators may create
   4,096 entries (was 4,095); output-budget breaches name the budget instead of
   surfacing as opaque exit codes; SDK tests skip outside the checkout.
+- Go SDK: a job's context stops its guest: `poll_oneoff` sleeps wake when the
+  context ends, the engine traps a looping or recursing guest at its next edge
+  (`WithCloseOnContextDone`), `Close(ctx)` waits for active calls and terminates
+  them at its own deadline, and `New` observes its context between compilations
+  (one module's compilation runs to completion).
 - Documentation: `docs/sdk-contract.md` defines the shared SDK contract, with
   the limit defaults pinned in `tests/fixtures/contract/limits.json`; the Go
   package consumer compares complete digest maps and the compiler-path fixture.
@@ -341,6 +346,11 @@ created by hand after the SDK API freeze. No `sdk/go/v*` tag exists.
   `capnpc-c++`; paths of 4,092 to 4,096 bytes compile; generators may create
   4,096 entries (was 4,095); output-budget breaches name the budget instead of
   surfacing as opaque exit codes; SDK tests skip outside the checkout.
+- Go SDK: a job's context stops its guest: `poll_oneoff` sleeps wake when the
+  context ends, the engine traps a looping or recursing guest at its next edge
+  (`WithCloseOnContextDone`), `Close(ctx)` waits for active calls and terminates
+  them at its own deadline, and `New` observes its context between compilations
+  (one module's compilation runs to completion).
 - Documentation: `docs/sdk-contract.md` defines the shared SDK contract, with
   the limit defaults pinned in `tests/fixtures/contract/limits.json`; the Go
   package consumer compares complete digest maps and the compiler-path fixture.
