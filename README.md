@@ -80,10 +80,8 @@ directory, and the project redirects build output and working caches below this
 checkout. Initial installation and reference fetching need network access.
 
 Prerequisites, on macOS and Linux, arm64 and x64 (CI tests Linux x64 and macOS
-arm64 on every push; the nightly legs for the other two are held, verified once
-on a throwaway branch
-([run 36106633950](https://github.com/nullstyle/capnpc-wasm/actions/runs/36106633950)),
-with no scheduled run yet; Windows supports only the Go SDK, not development):
+arm64 on every push; the nightly workflow, on `main` since 2026-10-07, runs the
+other two daily; Windows supports only the Go SDK, not development):
 
 - Run `mise trust` once in every new clone or worktree; mise refuses untrusted
   configuration, and a non-interactive session stops there.
@@ -213,23 +211,23 @@ describes the published archives and testing a full SDK candidate with
 
 ## Support matrix
 
-Evidence as of 2026-09-24. "Tested" means a CI check runs on every push to
+Evidence as of 2026-10-07. "Tested" means a CI check runs on every push to
 `main`. "Tested nightly" means only the scheduled nightly workflow runs it; that
-workflow is held until it reaches `main`, so those rows have no scheduled run
-yet (see [release readiness](docs/release-readiness.md)).
+workflow reached `main` on 2026-10-07 and runs daily at 11:17 UTC (see
+[release readiness](docs/release-readiness.md)).
 
 | Host or runtime                                                                      | Status                                                                                                                                                  | Evidence                                                         |
 | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | Linux x64 (ubuntu-24.04 with `g++-14` and `pkg-config`)                              | Tested on every push: build, tests, packaging                                                                                                           | CI job `check`                                                   |
 | macOS arm64 (macos-15 with Xcode Command Line Tools)                                 | Tested on every push: build, tests, packaging                                                                                                           | CI job `check`                                                   |
-| Linux arm64 (ubuntu-24.04-arm), macOS x64 (macos-15-intel)                           | Supported; tested nightly, not per push: cold bootstrap, `check`, packaging                                                                             | Nightly job `bootstrap` (no scheduled run yet)                   |
-| Windows: the Go SDK only (windows-latest)                                            | Supported for the Go SDK; tested nightly against Linux-built modules, native comparisons skipped. No build, launcher, or tooling support                | Nightly job `windows-go-sdk` (no scheduled run yet)              |
+| Linux arm64 (ubuntu-24.04-arm), macOS x64 (macos-15-intel)                           | Supported; tested nightly, not per push: cold bootstrap, `check`, packaging                                                                             | Nightly job `bootstrap` (scheduled since 2026-10-07)             |
+| Windows: the Go SDK only (windows-latest)                                            | Supported for the Go SDK; tested nightly against Linux-built modules, native comparisons skipped. No build, launcher, or tooling support                | Nightly job `windows-go-sdk` (scheduled since 2026-10-07)        |
 | Wasmtime 48.0.1                                                                      | Tested; the packaged launcher accepts this version, newer 48.0.x patch releases (warning), or one version named by `CAPNP_WASM_WASMTIME_ACCEPT_VERSION` | `test:package`, `test:launcher`, `tests/toolchain_test.ts`       |
 | wazero `v1.12.1-0.20260908083515-451613caac44`, compiler engine with experimental EH | Tested                                                                                                                                                  | `sdk/go` tests, `test:package`, `tests/toolchain_test.ts`        |
 | Deno 2.9.6, direct execution                                                         | Tested                                                                                                                                                  | `mise run test` (`test:sdk-ts`)                                  |
 | Deno 2.9.6, worker execution                                                         | Tested; `createWorkerCompiler` admits every Deno release with Wasm exception handling                                                                   | `mise run test` (`test:sdk-ts`), worker tests on the pinned Deno |
 | Chromium 153.0.8010.12 (r1243), Firefox 155.0 (r1543), WebKit 26.6 (r2359) on Linux  | Tested: offline SDK parity, cancellation, Schema Studio                                                                                                 | CI job `browsers`                                                |
-| Chromium, Firefox, WebKit on macOS (macos-15)                                        | Tested nightly (held): SDK parity, cancellation, Studio, soak; all three engines passed two verification runs, and Chromium and WebKit passed locally   | [Recorded runs](tests/browser/README.md#termination-acceptance)  |
+| Chromium, Firefox, WebKit on macOS (macos-15)                                        | Tested nightly: SDK parity, cancellation, Studio, soak; all three engines passed two verification runs before the workflow reached `main`               | [Recorded runs](tests/browser/README.md#termination-acceptance)  |
 | Node.js and Bun, direct execution (`createCompiler`)                                 | Best effort, with no support guarantee: Bun 1.3.14 verified locally, not in CI; Node.js untested                                                        | A local run on Bun 1.3.14                                        |
 | Node.js and Bun, worker execution (`createWorkerCompiler`)                           | Bun: admitted, verified locally on Bun 1.3.14, not run in CI. Node.js: rejected, it has no Web `Worker`; use direct execution                           | `test:sdk-ts` (simulated runtimes); local runs on Bun 1.3.14     |
 | Other browser versions                                                               | Untested; no support claimed                                                                                                                            | None                                                             |
@@ -332,24 +330,24 @@ For CMake cross builds, use
 
 ## Layout and references
 
-| Path           | Contents                                                                                                                                                                                                                                                                   |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ref/`         | Upstream Git submodules and their [source map](ref/README.md)                                                                                                                                                                                                              |
-| `scripts/`     | Project setup, build, packaging, and verification scripts                                                                                                                                                                                                                  |
-| `cmake/`       | Minimal synchronous C++ command build for WASI                                                                                                                                                                                                                             |
-| `patches/`     | Documented upstream porting changes                                                                                                                                                                                                                                        |
-| `generators/`  | Language command builds, wrappers, pinned dependency manifests, and the Zig sync manifest                                                                                                                                                                                  |
-| `sdk/`         | TypeScript worker/in-memory SDK and Go wazero SDK                                                                                                                                                                                                                          |
-| `bin/`         | The Wasmtime launcher packaged into the compiler-only and full archives                                                                                                                                                                                                    |
-| `examples/`    | Schema Studio and the Deno SDK example                                                                                                                                                                                                                                     |
-| `tests/`       | Schema fixtures, native oracle, conformance suites, and development host runners                                                                                                                                                                                           |
-| `docs/`        | Current documents, release evidence, and history; start at the [index](docs/README.md)                                                                                                                                                                                     |
-| `third_party/` | Vendored license texts for linked components whose sources are not checked out (WASI SDK 34 runtimes), pinned to the reference gitlinks                                                                                                                                    |
-| `.github/`     | The CI workflow (clean-checkout checks on Linux and macOS, browser job on Linux); `nightly.yml`, `supply-chain.yml`, `upstream-canary.yml`, `release.yml`, and `dependabot.yml` are held on the `quality/held-workflows` branch until they merge and are not on `main` yet |
-| `release.json` | One version per archive flavor (`versions`), the full SDK's package name, the private flag, and the license                                                                                                                                                                |
-| `build/`       | Ignored build trees, scratch source copies, and generated files                                                                                                                                                                                                            |
-| `dist/`        | Ignored SDK bundles, command modules, standard schemas, and prepared release archives                                                                                                                                                                                      |
-| `.cache/`      | Ignored project caches                                                                                                                                                                                                                                                     |
+| Path           | Contents                                                                                                                                                                                                                                  |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ref/`         | Upstream Git submodules and their [source map](ref/README.md)                                                                                                                                                                             |
+| `scripts/`     | Project setup, build, packaging, and verification scripts                                                                                                                                                                                 |
+| `cmake/`       | Minimal synchronous C++ command build for WASI                                                                                                                                                                                            |
+| `patches/`     | Documented upstream porting changes                                                                                                                                                                                                       |
+| `generators/`  | Language command builds, wrappers, pinned dependency manifests, and the Zig sync manifest                                                                                                                                                 |
+| `sdk/`         | TypeScript worker/in-memory SDK and Go wazero SDK                                                                                                                                                                                         |
+| `bin/`         | The Wasmtime launcher packaged into the compiler-only and full archives                                                                                                                                                                   |
+| `examples/`    | Schema Studio and the Deno SDK example                                                                                                                                                                                                    |
+| `tests/`       | Schema fixtures, native oracle, conformance suites, and development host runners                                                                                                                                                          |
+| `docs/`        | Current documents, release evidence, and history; start at the [index](docs/README.md)                                                                                                                                                    |
+| `third_party/` | Vendored license texts for linked components whose sources are not checked out (WASI SDK 34 runtimes), pinned to the reference gitlinks                                                                                                   |
+| `.github/`     | The CI workflow (clean-checkout checks on Linux and macOS, browser job on Linux), the scheduled nightly, supply-chain, and upstream-canary workflows, the tag-triggered release workflow, and Dependabot (all on `main` since 2026-10-07) |
+| `release.json` | One version per archive flavor (`versions`), the full SDK's package name, the private flag, and the license                                                                                                                               |
+| `build/`       | Ignored build trees, scratch source copies, and generated files                                                                                                                                                                           |
+| `dist/`        | Ignored SDK bundles, command modules, standard schemas, and prepared release archives                                                                                                                                                     |
+| `.cache/`      | Ignored project caches                                                                                                                                                                                                                    |
 
 `mise run refs:sync` initializes only the top-level references at the commits
 recorded by this repository, and additionally fetches the older audited

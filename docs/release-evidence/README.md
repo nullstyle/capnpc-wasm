@@ -32,13 +32,13 @@ revision the index pins. It rewrites the computed fields and keeps the
 hand-maintained ones (`requiredConsecutiveScheduledRuns`, `rules`,
 `publicationAuthorized`, `supersedes`). `mise run audit:nightly -- --check`
 writes nothing and fails when the committed ledger is stale. The nightly
-workflow, held on the `quality/held-workflows` branch until it reaches `main`,
-runs the task in a `ledger` job after its other jobs and uploads the result as
-an artifact; CI never commits it. Commit a regenerated ledger with any
-`ref/capnp-zig` bump, since the bump restarts the streak; until then
-`check:evidence` fails because the ledger names the previous gitlink. Any re-run
-ends the streak, even of a run whose first attempt succeeded, because the API
-reports only the latest attempt; do not re-run scheduled nightly runs.
+workflow, on `main` since 2026-10-07, runs the task in a `ledger` job after its
+other jobs and uploads the result as an artifact; CI never commits it. Commit a
+regenerated ledger with any `ref/capnp-zig` bump, since the bump restarts the
+streak; until then `check:evidence` fails because the ledger names the previous
+gitlink. Any re-run ends the streak, even of a run whose first attempt
+succeeded, because the API reports only the latest attempt; do not re-run
+scheduled nightly runs.
 
 ## Versions
 

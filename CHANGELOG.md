@@ -152,11 +152,11 @@ every flavor it applies to has shipped it.
   nightly-confidence ledger measures this repository's scheduled `nightly.yml`
   at the `ref/capnp-zig` gitlink (decision D5 = A), ends the streak on any
   re-run, and is regenerated from the GitHub API by `mise run audit:nightly`
-  (streak 0 until the held workflow runs from `main`); `mise run test:evidence`
-  tests both scripts; the capnp-zig-based ledger is kept as
-  `capnp-zig-nightly-confidence.json`.
+  (streak 0 until the first scheduled run from `main`, 2026-10-07);
+  `mise run test:evidence` tests both scripts; the capnp-zig-based ledger is
+  kept as `capnp-zig-nightly-confidence.json`.
 - Support matrix: per-push claims name only the tested hosts, Linux x64 and
-  macOS arm64; the nightly workflow (held until it reaches `main`) tests Linux
+  macOS arm64; the nightly workflow (on `main` since 2026-10-07) tests Linux
   arm64, macOS x64 (`macos-15-intel`), browsers on macOS, and the Go SDK on
   Windows against Linux-built modules with the native-oracle comparisons
   skipped; Node.js and Bun direct execution is best effort, and
