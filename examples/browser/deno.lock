@@ -2,30 +2,12 @@
   "version": "5",
   "specifiers": {
     "npm:@codemirror/language@6.12.4": "6.12.4",
-    "npm:@codemirror/state@6.7.4": "6.7.4",
-    "npm:@codemirror/view@6.43.11": "6.43.11",
-    "npm:codemirror@6.0.2": "6.0.2",
+    "npm:@codemirror/state@6.7.6": "6.7.6",
+    "npm:@codemirror/view@6.43.13": "6.43.13",
+    "npm:codemirror@6.65.7": "6.65.7",
     "npm:fflate@0.8.3": "0.8.3"
   },
   "npm": {
-    "@codemirror/autocomplete@6.20.3": {
-      "integrity": "sha512-tlosUqb+3BbxCxZdu4tKeRghPFC+QM7q4X5YhKV2eCmPG+1r2F3f4AaSz5sCrFqUtX4Jh20VFTKecl16MgiV9g==",
-      "dependencies": [
-        "@codemirror/language",
-        "@codemirror/state",
-        "@codemirror/view",
-        "@lezer/common"
-      ]
-    },
-    "@codemirror/commands@6.11.0": {
-      "integrity": "sha512-/K4Rl5BN0OtTiPWmJCdqODu38XnDMsDxKY5rgrPnCkutPTJf2wVbkoixLfealF5Kwse/s8P8M5jAiURiwSwnFA==",
-      "dependencies": [
-        "@codemirror/language",
-        "@codemirror/state",
-        "@codemirror/view",
-        "@lezer/common"
-      ]
-    },
     "@codemirror/language@6.12.4": {
       "integrity": "sha512-1q4PaT+o6PbgpkJt4Q8Fv5XJxTy4FUZ4MWETtyiDw3J0Pyr9E2vqcKL+k9wcvjNTIsauxvE7OfmWj3FRPHQ76A==",
       "dependencies": [
@@ -37,30 +19,14 @@
         "style-mod"
       ]
     },
-    "@codemirror/lint@6.9.7": {
-      "integrity": "sha512-28/+iWLYxKxsvGYhSYL7zaCZqLz5+FFFDq9tVsvGv9kv8RY4fFAchJ5WX9M3YrrRlTIsECjsXPqeNgnSmNP2dg==",
-      "dependencies": [
-        "@codemirror/state",
-        "@codemirror/view",
-        "crelt"
-      ]
-    },
-    "@codemirror/search@6.7.2": {
-      "integrity": "sha512-gUYkYhT2+n/+VGZ+8EzE5WFkYZUZYm1VOKDudIsNqh42uRVQJ0a6Yss9sdKT3MeOYfuL1N6AZA57oza0Oyr0LA==",
-      "dependencies": [
-        "@codemirror/state",
-        "@codemirror/view",
-        "crelt"
-      ]
-    },
-    "@codemirror/state@6.7.4": {
-      "integrity": "sha512-QhQIVRY+xHZDxwOSFrJ1eUMapJBUID3IdeAjf7dHO7zBUzSkyooHiodnalz5MG3iHzwixKMlAAyn7244y537EA==",
+    "@codemirror/state@6.7.6": {
+      "integrity": "sha512-kAz+AncRtKuIknedxT1bq4XwXv4UowhbkHU1myPrtVb/jZtImWuV5BXzv5vK6i3kYACsdiZiQKFQQ5Mq7elW8w==",
       "dependencies": [
         "@marijn/find-cluster-break"
       ]
     },
-    "@codemirror/view@6.43.11": {
-      "integrity": "sha512-2+esucbQX6wB2JYi1eDvdCPFTA31BN8oSy6xCmk3G6CloV11yOvEjYk+gH7kLrP0MuHG94E8WDhjs5oMiu3+Wg==",
+    "@codemirror/view@6.43.13": {
+      "integrity": "sha512-sihaFrUzAsYBQsL9J2t69y8nfMQGwcYmggAZsk+kjPbjYZMyuf2hU8tUNTZ+P+isb6XRr8JE22TZlJxBoVdH1A==",
       "dependencies": [
         "@codemirror/state",
         "crelt",
@@ -86,17 +52,9 @@
     "@marijn/find-cluster-break@1.0.4": {
       "integrity": "sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ=="
     },
-    "codemirror@6.0.2": {
-      "integrity": "sha512-VhydHotNW5w1UGK0Qj96BwSk/Zqbp9WbnyK2W/eVMv4QyF41INRGpjUhFJY7/uDNuudSc33a/PKr4iDqRduvHw==",
-      "dependencies": [
-        "@codemirror/autocomplete",
-        "@codemirror/commands",
-        "@codemirror/language",
-        "@codemirror/lint",
-        "@codemirror/search",
-        "@codemirror/state",
-        "@codemirror/view"
-      ]
+    "codemirror@6.65.7": {
+      "integrity": "sha512-HcfnUFJwI2FvH73YWVbbMh7ObWxZiHIycEhv9ZEXy6e8ZKDjtZKbbYFUtsLN46HFXPvU5V2Uvc2d55Z//oFW5A==",
+      "deprecated": true
     },
     "crelt@1.0.7": {
       "integrity": "sha512-aK6BbWfhf4U/wCcLHKPJl/xa6VkVstRaPywWtMKGwuOLc/wZTyQYuoxgvZnNsBvv7Kg3YTBQYYBCggcviQczuA=="
@@ -114,9 +72,9 @@
   "workspace": {
     "dependencies": [
       "npm:@codemirror/language@6.12.4",
-      "npm:@codemirror/state@6.7.4",
-      "npm:@codemirror/view@6.43.11",
-      "npm:codemirror@6.0.2",
+      "npm:@codemirror/state@6.7.6",
+      "npm:@codemirror/view@6.43.13",
+      "npm:codemirror@6.65.7",
       "npm:fflate@0.8.3"
     ]
   }
