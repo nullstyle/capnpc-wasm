@@ -24,7 +24,7 @@ import {
   type ResultSummary,
   type Surface,
 } from "../conformance/outcome.ts";
-import { orderCases } from "../conformance/page-runner.js";
+import { configurationKey, orderCases } from "../conformance/page-runner.js";
 import type { Engine } from "./engines.ts";
 
 export type BrowserSurface = "browser-direct" | "browser-worker" | "studio";
@@ -255,11 +255,53 @@ export async function teardownConformance(
 }
 
 /**
+ * Runs one row step under the stall rule (stall-rule.ts), which `classify`
+ * tells when the row's result shows a stall.
+ */
+/**
+ * The rows that ran on the client a surface's row runs on, which the row's
+ * stall rule retry replays first, so that the retry faces the same client
+ * history: cachingHost keeps one client, for one configuration key, and the
+ * Studio surface keeps one adapter for all of its rows.
+ */
+export function clientHistory(surface: string) {
+  let key: string | undefined;
+  let rows: (() => Promise<unknown>)[] = [];
+  return {
+    /** Before a row runs: the replay of the rows its client ran so far. */
+    before(spec: Parameters<typeof configurationKey>[0]): () => Promise<void> {
+      const next = surface === "studio" ? "studio" : configurationKey(spec);
+      if (next !== key) {
+        key = next;
+        rows = [];
+      }
+      const earlier = [...rows];
+      return async () => {
+        for (const row of earlier) await row();
+      };
+    },
+    /** After a row ran on that client. */
+    ran(row: () => Promise<unknown>): void {
+      rows.push(row);
+    },
+  };
+}
+
+export type RowRule = <T>(
+  label: string,
+  attempt: () => Promise<T>,
+  classify: (result: T) => string | null,
+  history: () => Promise<unknown>,
+) => Promise<T>;
+
+/**
  * Run every case the surface expresses, one page step each in the shared
  * orderCases() order (deadline rows last: in WebKit each leaves its guest
  * spinning until the browser closes), and check the page's summary against
  * expected.json. Throws after the whole surface ran when any row mismatched,
- * naming each one; returns the rows in corpus order.
+ * naming each one; returns the rows in corpus order. With `rule`, each row
+ * runs under the stall rule, and a timeout counts as a stall when its
+ * expectation does not accept one or when it came from the factory.
  */
 export async function runBrowserSurface(
   engine: Engine,
@@ -267,8 +309,10 @@ export async function runBrowserSurface(
   corpus: BrowserCorpus,
   valid: Uint8Array,
   evaluate: Evaluate,
+  rule?: RowRule,
 ): Promise<BrowserRow[]> {
   const rows: BrowserRow[] = [];
+  const history = clientHistory(surface);
   for (const spec of orderCases(corpus.cases)) {
     const expectation = expectationFor(
       corpus.expected,
@@ -292,43 +336,66 @@ export async function runBrowserSurface(
       ...workspace,
       request: spec.request ? requestVariant(spec.request, valid) : undefined,
     };
-    const { phase, summary } = await evaluate(
-      async ({ surface, spec, inputs }) => {
-        const state = (globalThis as unknown as {
-          capnpConformance: {
-            runner: {
-              runCase(...args: unknown[]): Promise<{ summary: unknown }>;
-              runStudioCase(...args: unknown[]): Promise<{ summary: unknown }>;
+    const label = `${engine} ${surface} conformance ${spec.name}`;
+    const replay = history.before(spec);
+    const accepted = Array.isArray(expectation.expect)
+      ? expectation.expect
+      : [expectation.expect];
+    const run = () =>
+      evaluate(
+        async ({ surface, spec, inputs }) => {
+          const state = (globalThis as unknown as {
+            capnpConformance: {
+              runner: {
+                runCase(...args: unknown[]): Promise<{ summary: unknown }>;
+                runStudioCase(
+                  ...args: unknown[]
+                ): Promise<{ summary: unknown }>;
+              };
+              studio: unknown;
+              studioCompileError: unknown;
+              hosts: Record<string, unknown>;
+              guests: unknown;
+              modules: unknown;
             };
-            studio: unknown;
-            studioCompileError: unknown;
-            hosts: Record<string, unknown>;
-            guests: unknown;
-            modules: unknown;
+          }).capnpConformance;
+          const result = surface === "studio"
+            ? await state.runner.runStudioCase(
+              spec,
+              inputs,
+              state.studio,
+              state.studioCompileError,
+            )
+            : await state.runner.runCase(
+              spec,
+              inputs,
+              state.hosts[surface],
+              state.modules,
+              state.guests,
+            );
+          return {
+            phase: (result as { phase?: "factory" | "job" }).phase ?? "job",
+            summary: result.summary as ErrorSummary | ResultSummary,
           };
-        }).capnpConformance;
-        const result = surface === "studio"
-          ? await state.runner.runStudioCase(
-            spec,
-            inputs,
-            state.studio,
-            state.studioCompileError,
-          )
-          : await state.runner.runCase(
-            spec,
-            inputs,
-            state.hosts[surface],
-            state.modules,
-            state.guests,
-          );
-        return {
-          phase: (result as { phase?: "factory" | "job" }).phase ?? "job",
-          summary: result.summary as ErrorSummary | ResultSummary,
-        };
-      },
-      { surface, spec, inputs },
-      `${engine} ${surface} conformance ${spec.name}`,
-    );
+        },
+        { surface, spec, inputs },
+        label,
+      );
+    const { phase, summary } = rule
+      ? await rule(
+        label,
+        run,
+        // A timeout is a stall where the row accepts none, and in the
+        // factory phase (a worker that never initialized) for every row.
+        (result) =>
+          observe(result.summary, result.phase).outcome === "timeout" &&
+            (result.phase === "factory" || !accepted.includes("timeout"))
+            ? `TimeoutError: ${(result.summary as ErrorSummary).message}`
+            : null,
+        replay,
+      )
+      : await run();
+    history.ran(run);
     const observation = observe(summary, phase);
     rows.push({
       name: spec.name,

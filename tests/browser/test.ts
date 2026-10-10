@@ -1,5 +1,6 @@
 import { chromium, firefox, webkit } from "./playwright.ts";
-import type { Browser, BrowserContext, Page } from "playwright";
+import type { Browser, BrowserContext, Page, Route } from "playwright";
+import { Buffer } from "node:buffer";
 import { selectedEngines } from "./engines.ts";
 import { hostileGuests } from "../../sdk/typescript/testdata/hostile_guests.ts";
 import { interruptGuests } from "../../sdk/typescript/testdata/interrupt_guests.ts";
@@ -18,23 +19,33 @@ import type {
 import { envMilliseconds, stepClock } from "./deadline.ts";
 import { scaled } from "../lib/timeout-scale.ts";
 import {
+  describePage,
   type EngineHealth,
   engineHealthScript,
   judgeStall,
+  type PageTracer,
+  type PageWorkers,
   type StallEvidence,
-  type TracedWorker,
-  traceModuleSource,
-  traceWorkerTemplate,
+  verdictWords,
+  workerTracerScript,
 } from "./worker-trace.ts";
 import {
+  readStalls,
   recordStall,
   type SoakStall,
   stallBudget,
   stallJob,
   stallLedgerPath,
   stallPlace,
+  type StallStep,
   stallTitle,
 } from "./soak-stalls.ts";
+import {
+  parseWorkerStallDrill,
+  type StallRuleHost,
+  type StepStallEvidence,
+  underStallRule,
+} from "./stall-rule.ts";
 import { describeObservation } from "../conformance/outcome.ts";
 import {
   closedTargetError,
@@ -103,16 +114,6 @@ type BrowserState = {
   hostileGuests?: Record<string, Uint8Array>;
   /** The recovery soak's client: the real compiler and a spinning zig generator. */
   soak?: WorkerCompiler;
-  /**
-   * The soak's traced workers, the page's own Worker, the traced script, and
-   * how many messages the page has posted to traced workers.
-   */
-  soakTrace?: {
-    workers: TracedWorker[];
-    RealWorker: typeof Worker;
-    url: string;
-    posts: number;
-  };
 };
 
 /**
@@ -133,7 +134,11 @@ type SoakStallRecord = StallEvidence & {
     workers: string[][];
   };
 };
-type BrowserGlobal = typeof globalThis & { capnpTest: BrowserState };
+type BrowserGlobal = typeof globalThis & {
+  capnpTest: BrowserState;
+  /** Every worker the main page created, traced (worker-trace.ts). */
+  capnpTracer: PageTracer;
+};
 type HostileOutcome = {
   request?: number[];
   // Entries, not an object: Playwright's result transport cannot carry an own
@@ -160,12 +165,28 @@ function assert(condition: unknown, message: string): asserts condition {
 // the pages' Playwright timeouts, and the close steps scale together by
 // CAPNP_TEST_TIMEOUT_SCALE (tests/lib/timeout-scale.ts); an explicit
 // CAPNP_BROWSER_DEADLINE_MS is used as given, and the SDK bounds inside the
-// page (termination, soak, resource limits) keep their calibrated values.
+// page keep their values: the termination bound, and the probe start, soak
+// recovery, and other worker steps' SDK timeouts, whose misses the stall rule
+// judges and budgets (stall-rule.ts).
 // CAPNP_BROWSER_STALL=<text> makes the first step whose label contains the
 // text hang, which demonstrates the deadline. The running step's label is kept
 // next to the receipt for run.ts, which reports it if it has to stop a driver.
 const receiptPath = Deno.args[1];
 const stepPath = receiptPath ? `${receiptPath}.step` : undefined;
+/**
+ * Stalls the run did not recover from (a second stall, or one beyond the
+ * job's budget), one line each, next to the receipt for run.ts's summary:
+ * they fail the run and are not in the ledger.
+ */
+const unrecoveredPath = receiptPath ? `${receiptPath}.unrecovered` : undefined;
+async function noteUnrecovered(line: string): Promise<void> {
+  if (!unrecoveredPath) return;
+  try {
+    await Deno.writeTextFile(unrecoveredPath, `${line}\n`, { append: true });
+  } catch {
+    // The note is a diagnostic; the run's failure does not depend on it.
+  }
+}
 /** Once a step fails, cleanup steps no longer replace its label. */
 let failedStep: string | undefined;
 function recordStep(label: string) {
@@ -185,6 +206,7 @@ const clock = stepClock({
 });
 
 /** page.evaluate under a labelled deadline. */
+type Evaluate = ReturnType<typeof evaluateOn>;
 function evaluateOn(page: Page) {
   return <T, A>(
     fn: (argument: A) => T | Promise<T>,
@@ -614,13 +636,14 @@ assets.set("/conformance/page-runner.js", {
   bytes: await Deno.readFile(`${root}/tests/conformance/page-runner.js`),
   type: "text/javascript",
 });
+const pageHtml = "<!doctype html><title>capnpc-wasm browser tests</title>";
 const server = Deno.serve(
   { hostname: "127.0.0.1", port: 0, onListen() {} },
   (request) => {
     const path = new URL(request.url).pathname;
     if (path === "/" || path === "/isolated") {
       return new Response(
-        "<!doctype html><title>capnpc-wasm browser tests</title>",
+        pageHtml,
         {
           headers: {
             "Content-Type": "text/html",
@@ -647,6 +670,8 @@ let browser: Browser | undefined;
 let closing = false;
 let engineCrash: EngineCrash | undefined;
 let soakCycle: number | null = null;
+/** The current main page's name, which a fresh page after a stall changes. */
+let mainPageName = "main";
 const traces = new TraceMirror();
 const runStarted = Date.now();
 function crashed(event: string, page: string) {
@@ -682,73 +707,310 @@ try {
     `${engine} launch`,
   );
   browser.on("disconnected", () => {
-    if (!closing) crashed("the browser disconnected", "main");
+    if (!closing) crashed("the browser disconnected", mainPageName);
   });
   console.log(`Testing ${engine} ${browser.version()}`);
-  const context = await clock.step(
-    browser.newContext({ serviceWorkers: "block" }),
-    `${engine} new context`,
-  );
-  // The engine health checks (worker-trace.ts) that a soak stall runs.
-  await clock.step(
-    context.addInitScript(engineHealthScript),
-    `${engine} install the engine health checks`,
-  );
-  const page = await clock.step(context.newPage(), `${engine} new page`);
-  page.on("pageerror", (error) => errors.push(error.message));
-  await watchPage(page, "main");
-  page.setDefaultTimeout(scaled(60_000));
-  const evaluate = evaluateOn(page);
-  await clock.step(page.goto(`${origin}/`), `${engine} load page`);
-  await evaluate(
-    async ({ memoryGuest, streamGuest }) => {
-      const sdk = await import(
-        new URL("/sdk/mod.js", location.href).href
-      ) as SDK;
-      const read = async (name: string) => {
-        const response = await fetch(`/wasm/${name}.wasm`);
-        if (!response.ok) throw new Error(`failed to load ${name}`);
-        return new Uint8Array(await response.arrayBuffer());
-      };
-      const modules: Modules = {
-        compiler: await read("capnp"),
-        generators: {
-          cpp: await read("capnpc-c++"),
-          rust: await read("capnpc-rust"),
-          go: await read("capnpc-go"),
-        },
-      };
-      const workerSource = await (await fetch("/sdk/worker.js")).text();
-      const workerURL = URL.createObjectURL(
-        new Blob([workerSource], {
-          type: "text/javascript",
-        }),
+  const opened = browser;
+  // The main page, where every step but the termination acceptance runs.
+  // The stall rule (stall-rule.ts) may replace it with a fresh page, which
+  // loads the page and its assets from the driver's memory, replays the steps
+  // later ones depend on (prerequisites), and once the driver has gone
+  // offline is taken offline too.
+  // Every module worker a main page creates is traced from the start
+  // (worker-trace.ts workerTracerScript), and the page has the engine health
+  // checks.
+  type MainPage = { context: BrowserContext; page: Page; evaluate: Evaluate };
+  const serveFromMemory = (route: Route) => {
+    const url = new URL(route.request().url());
+    if (url.protocol === "blob:") return route.continue();
+    if (url.origin === origin && url.pathname === "/") {
+      return route.fulfill({ contentType: "text/html", body: pageHtml });
+    }
+    const asset = url.origin === origin
+      ? assets.get(decodeURIComponent(url.pathname))
+      : undefined;
+    return asset
+      ? route.fulfill({
+        contentType: asset.type,
+        body: Buffer.from(asset.bytes),
+      })
+      : route.abort();
+  };
+  let freshPages = 0;
+  const openMainPage = async (fromMemory: boolean): Promise<MainPage> => {
+    const name = freshPages === 0 ? "main" : `fresh main ${freshPages}`;
+    const context = await clock.step(
+      opened.newContext({ serviceWorkers: "block" }),
+      `${engine} new ${name} context`,
+    );
+    // The engine health checks and the worker tracer (worker-trace.ts),
+    // which the stall evidence reads.
+    await clock.step(
+      context.addInitScript(engineHealthScript),
+      `${engine} install the ${name} page's engine health checks`,
+    );
+    await clock.step(
+      context.addInitScript(workerTracerScript),
+      `${engine} install the ${name} page's worker tracer`,
+    );
+    if (fromMemory) {
+      await clock.step(
+        context.route("**/*", serveFromMemory),
+        `${engine} serve the ${name} page from memory`,
       );
-      (globalThis as BrowserGlobal).capnpTest = {
-        direct: await sdk.createCompiler(modules),
-        worker: await sdk.createWorkerCompiler(workerURL, modules),
-        workerURL,
-        sdk,
-        modules,
-        memoryGuest,
-        streamGuest,
-      };
-      for (const name of ["Deno", "process", "require"]) {
-        if (name in globalThis) {
-          throw new Error(`browser exposes native API ${name}`);
-        }
+    }
+    const page = await clock.step(
+      context.newPage(),
+      `${engine} new ${name} page`,
+    );
+    page.on("pageerror", (error) => errors.push(error.message));
+    await watchPage(page, name);
+    page.setDefaultTimeout(scaled(60_000));
+    await clock.step(page.goto(`${origin}/`), `${engine} load ${name} page`);
+    return { context, page, evaluate: evaluateOn(page) };
+  };
+  let main = await openMainPage(false);
+  /** Evaluate on the current main page. */
+  const evaluate: Evaluate = (fn, argument, label, ms) =>
+    main.evaluate(fn, argument, label, ms);
+  /** Main-page steps a fresh main page replays, in order. */
+  const prerequisites: ((run: Evaluate) => Promise<unknown>)[] = [];
+  let offline = false;
+  let goOffline: (name: string, each: BrowserContext) => Promise<void> = () =>
+    Promise.reject(new Error("the driver has not gone offline yet"));
+  const replaceMainPage = async () => {
+    const stale = main;
+    freshPages++;
+    const fresh = await openMainPage(true);
+    for (const prerequisite of prerequisites) {
+      await prerequisite(fresh.evaluate);
+    }
+    if (offline) {
+      await clock.step(
+        fresh.context.unroute("**/*", serveFromMemory),
+        `${engine} stop serving the fresh main page from memory`,
+      );
+      await goOffline(`fresh main ${freshPages}`, fresh.context);
+    }
+    main = fresh;
+    mainPageName = `fresh main ${freshPages}`;
+    await clock.step(
+      stale.context.close().catch(() => {}),
+      `${engine} close the stalled main page`,
+      scaled(30_000),
+    );
+  };
+
+  // Tolerated stalls, of the steps under the stall rule, the soak and the
+  // termination acceptance: recorded in this engine's receipt and in the
+  // job's ledger, which holds the stall budget (soak-stalls.ts).
+  const soakStalls: SoakStall[] = [];
+  const soakStallBudget = stallBudget();
+  const describeStallPlace = (stall: SoakStall) =>
+    `${stallTitle(stall).toLowerCase()} in ${stallPlace(stall)}`;
+  /**
+   * Fail a stall beyond the job's budget, the `total`-th: an OBSERVED line
+   * and a note for run.ts's summary.
+   */
+  const beyondBudget = async (stall: SoakStall, total: number) => {
+    const what = describeStallPlace(stall);
+    console.log(
+      `OBSERVED ${engine} ${what}, attributed to the engine and beyond the job's stall budget of ${soakStallBudget}: ${
+        JSON.stringify(stall.detail)
+      }`,
+    );
+    await noteUnrecovered(
+      `${what}, attributed to the engine and beyond the job's stall budget of ${soakStallBudget}: ${stall.summary}`,
+    );
+    throw new Error(
+      `${engine}: stall ${total} of this job, a ${what}, exceeds its budget of ${soakStallBudget} (CAPNP_SOAK_STALL_BUDGET; the ledger ${stallLedgerPath} is cleared by mise run clean:test): ${stall.summary}`,
+    );
+  };
+  /** Fail a stall now when the job's budget is spent, before any retry. */
+  const admit = async (stall: SoakStall) => {
+    const total = (await readStalls()).filter((entry) =>
+      entry.job === stall.job
+    ).length + 1;
+    if (total > soakStallBudget) await beyondBudget(stall, total);
+  };
+  /**
+   * Record a stall that points at the engine and recovered: its ledger
+   * entry, which spends the job's budget, and its OBSERVED line; `then` says
+   * how it recovered. The budget is checked first, and again after the
+   * entry, since another driver of the job may have recorded one meanwhile.
+   */
+  const tolerate = async (
+    stall: SoakStall,
+    then = "recovered on retry",
+  ): Promise<void> => {
+    await admit(stall);
+    const total = await recordStall(stall);
+    if (total > soakStallBudget) await beyondBudget(stall, total);
+    soakStalls.push(stall);
+    console.log(
+      `OBSERVED ${engine} ${
+        describeStallPlace(stall)
+      }, attributed to the engine and ${then}: ${JSON.stringify(stall.detail)}`,
+    );
+  };
+  // CAPNP_BROWSER_WORKER_STALL arms a drill: the next SDK worker of a
+  // matching step never runs its script, or never answers (stall-rule.ts).
+  const drills = parseWorkerStallDrill(
+    Deno.env.get("CAPNP_BROWSER_WORKER_STALL"),
+  );
+  /** A step's stall as the ledger records it (soak-stalls.ts). */
+  const stepStall = (
+    kind: string,
+    label: string,
+    evidence: StepStallEvidence,
+    because: string,
+  ): SoakStall => ({
+    job: stallJob(),
+    engine,
+    os: Deno.build.os,
+    kind: kind as StallStep,
+    mode: label,
+    at: new Date().toISOString(),
+    summary: `${evidence.error}; ${because}; the last event: ${
+      evidence.events.at(-1) ?? "none"
+    }; fresh worker ${evidence.health.plainWorker}, Wasm in a worker ${evidence.health.workerCompile}, Wasm on the page ${evidence.health.pageCompile}; ${
+      describePage(evidence.page)
+    }`,
+    detail: evidence,
+  });
+  const rule: StallRuleHost = {
+    evaluate,
+    async freshPage(label) {
+      try {
+        await replaceMainPage();
+      } catch (error) {
+        throw new Error(
+          `${label}: the fresh main page for its retry could not be prepared: ${
+            (error as Error).message
+          }`,
+          { cause: error },
+        );
       }
     },
-    { memoryGuest: data.memoryGuest, streamGuest: data.streamGuest },
-    `${engine} load SDK`,
-  );
+    admit: (kind, label, evidence, because) =>
+      admit(stepStall(kind, label, evidence, because)),
+    tolerate: (kind, label, evidence, because) =>
+      tolerate(
+        stepStall(kind, label, evidence, because),
+        "recovered on a fresh page",
+      ),
+    async stalledAgain(kind, label, evidence, because, again, replaying) {
+      const stall = stepStall(kind, label, evidence, because);
+      const what = `${
+        describeStallPlace(stall)
+      }, attributed to the engine, then stalled again on a fresh page${
+        replaying ? " while it replayed its clients' history" : ""
+      } (${again})`;
+      console.log(
+        `OBSERVED ${engine} ${what}: ${JSON.stringify(stall.detail)}`,
+      );
+      await noteUnrecovered(`${what}: ${stall.summary}`);
+    },
+    async beforeAttempt(label) {
+      const drill = drills.find((entry) =>
+        entry.remaining > 0 && label.includes(entry.text)
+      );
+      if (!drill) return;
+      drill.remaining--;
+      await evaluate(
+        (mode) => {
+          (globalThis as BrowserGlobal).capnpTracer.drill = {
+            mode,
+            remaining: 1,
+          };
+        },
+        drill.mode,
+        `${label}: arm the worker stall drill (${drill.mode})`,
+      );
+    },
+    async afterAttempt(label) {
+      if (drills.length === 0) return;
+      await evaluate(
+        () => {
+          const tracer = (globalThis as BrowserGlobal).capnpTracer;
+          if (tracer) tracer.drill = null;
+        },
+        undefined,
+        `${label}: disarm the worker stall drill`,
+      ).catch(() => {});
+    },
+  };
+  /** Run a step that creates or first uses SDK workers under the stall rule. */
+  const stepRule = <T>(
+    kind: StallStep,
+    label: string,
+    attempt: () => Promise<T>,
+    classify?: (result: T) => string | null,
+    history?: () => Promise<unknown>,
+  ) => underStallRule(rule, kind, label, attempt, classify, history);
+
+  const loadSdk = (run: Evaluate) =>
+    run(
+      async ({ memoryGuest, streamGuest }) => {
+        const sdk = await import(
+          new URL("/sdk/mod.js", location.href).href
+        ) as SDK;
+        const read = async (name: string) => {
+          const response = await fetch(`/wasm/${name}.wasm`);
+          if (!response.ok) throw new Error(`failed to load ${name}`);
+          return new Uint8Array(await response.arrayBuffer());
+        };
+        const modules: Modules = {
+          compiler: await read("capnp"),
+          generators: {
+            cpp: await read("capnpc-c++"),
+            rust: await read("capnpc-rust"),
+            go: await read("capnpc-go"),
+          },
+        };
+        const workerSource = await (await fetch("/sdk/worker.js")).text();
+        const workerURL = URL.createObjectURL(
+          new Blob([workerSource], {
+            type: "text/javascript",
+          }),
+        );
+        (globalThis as BrowserGlobal).capnpTest = {
+          direct: await sdk.createCompiler(modules),
+          worker: await sdk.createWorkerCompiler(workerURL, modules),
+          workerURL,
+          sdk,
+          modules,
+          memoryGuest,
+          streamGuest,
+        };
+        for (const name of ["Deno", "process", "require"]) {
+          if (name in globalThis) {
+            throw new Error(`browser exposes native API ${name}`);
+          }
+        }
+      },
+      { memoryGuest: data.memoryGuest, streamGuest: data.streamGuest },
+      `${engine} load SDK`,
+    );
+
+  await stepRule("sdk-client", `${engine} load SDK`, () => loadSdk(evaluate));
+  prerequisites.push(loadSdk);
   // The conformance rows import the shared runner and the Studio adapter,
   // and prime the adapter with every language, while the server is up.
-  const valid = await setupConformance(
-    evaluate,
-    data.corpus.guests,
+  let valid: Uint8Array = new Uint8Array();
+  const prepareConformance = async (run: Evaluate) => {
+    valid = await setupConformance(
+      run,
+      data.corpus.guests,
+      `${engine} load the conformance runner and the Studio adapter`,
+    );
+  };
+  await stepRule(
+    "conformance-setup",
     `${engine} load the conformance runner and the Studio adapter`,
+    () => prepareConformance(evaluate),
   );
+  prerequisites.push(prepareConformance);
 
   // The termination acceptance (TST-04) runs a spinning guest on two more
   // pages that audit every Worker the SDK creates and terminates: one
@@ -802,12 +1064,7 @@ try {
   }
 
   let networkRequests = 0;
-  for (
-    const [name, each] of [
-      ["main", context] as const,
-      ...terminationPages.map((entry) => [entry.name, entry.context] as const),
-    ]
-  ) {
+  goOffline = async (name, each) => {
     each.on("request", (request) => {
       if (!request.url().startsWith("blob:")) networkRequests++;
     });
@@ -836,7 +1093,16 @@ try {
         `${engine} take the ${name} context offline`,
       );
     }
+  };
+  for (
+    const [name, each] of [
+      ["main", main.context] as const,
+      ...terminationPages.map((entry) => [entry.name, entry.context] as const),
+    ]
+  ) {
+    await goOffline(name, each);
   }
+  offline = true;
   await server.shutdown();
   await Deno.permissions.revoke({ name: "run" });
   await Deno.permissions.revoke({ name: "net" });
@@ -849,30 +1115,52 @@ try {
     "network permission was not revoked",
   );
 
+  // The worker rows run one after another on the page's worker client: a
+  // row's retry replays the rows before it first (the stall rule's history).
+  const workerRows: (() => Promise<unknown>)[] = [];
   for (const host of ["direct", "worker"] as const) {
     for (const scenario of data.scenarios) {
-      const result = await evaluate(
-        async ({ host, input }) => {
-          const result = await (globalThis as BrowserGlobal).capnpTest[host]
-            .compile(input);
-          return {
-            request: Array.from(result.request),
-            outputs: Object.fromEntries(
-              Object.entries(result.outputs).map(([language, files]) => [
-                language,
-                Object.fromEntries(
-                  Object.entries(files!).map((
-                    [path, bytes],
-                  ) => [path, Array.from(bytes)]),
-                ),
-              ]),
-            ),
-            diagnostics: result.diagnostics,
-          };
-        },
-        { host, input: scenario.input },
-        `${engine} ${host} compile ${scenario.name}`,
-      );
+      // A worker row runs a job in the page's worker client, the first of
+      // which starts its worker: under the stall rule.
+      const underRule = async <T>(label: string, attempt: () => Promise<T>) => {
+        if (host !== "worker") return await attempt();
+        const before = [...workerRows];
+        const result = await stepRule(
+          "feature-rows",
+          label,
+          attempt,
+          undefined,
+          async () => {
+            for (const row of before) await row();
+          },
+        );
+        workerRows.push(attempt);
+        return result;
+      };
+      const compileLabel = `${engine} ${host} compile ${scenario.name}`;
+      const result = await underRule(compileLabel, () =>
+        evaluate(
+          async ({ host, input }) => {
+            const result = await (globalThis as BrowserGlobal).capnpTest[host]
+              .compile(input);
+            return {
+              request: Array.from(result.request),
+              outputs: Object.fromEntries(
+                Object.entries(result.outputs).map(([language, files]) => [
+                  language,
+                  Object.fromEntries(
+                    Object.entries(files!).map((
+                      [path, bytes],
+                    ) => [path, Array.from(bytes)]),
+                  ),
+                ]),
+              ),
+              diagnostics: result.diagnostics,
+            };
+          },
+          { host, input: scenario.input },
+          compileLabel,
+        ));
       assert(result.request.length > 0, `${host} produced no request`);
       // The isolated driver never regains process permission. Its parent audits
       // these bytes with the independent native canonicalizer after it exits.
@@ -891,28 +1179,30 @@ try {
         }`,
       );
 
-      const replayed = await evaluate(
-        async ({ host, request, generators }) => {
-          const result = await (globalThis as BrowserGlobal).capnpTest[host]
-            .generate({ request, generators });
-          return Object.fromEntries(
-            Object.entries(result.outputs).map(([language, files]) => [
-              language,
-              Object.fromEntries(
-                Object.entries(files!).map((
-                  [path, bytes],
-                ) => [path, Array.from(bytes)]),
-              ),
-            ]),
-          );
-        },
-        {
-          host,
-          request: scenario.request,
-          generators: scenario.input.generators,
-        },
-        `${engine} ${host} replay ${scenario.name}`,
-      );
+      const replayLabel = `${engine} ${host} replay ${scenario.name}`;
+      const replayed = await underRule(replayLabel, () =>
+        evaluate(
+          async ({ host, request, generators }) => {
+            const result = await (globalThis as BrowserGlobal).capnpTest[host]
+              .generate({ request, generators });
+            return Object.fromEntries(
+              Object.entries(result.outputs).map(([language, files]) => [
+                language,
+                Object.fromEntries(
+                  Object.entries(files!).map((
+                    [path, bytes],
+                  ) => [path, Array.from(bytes)]),
+                ),
+              ]),
+            );
+          },
+          {
+            host,
+            request: scenario.request,
+            generators: scenario.input.generators,
+          },
+          replayLabel,
+        ));
       equalOutputs(
         replayed,
         scenario.expected,
@@ -1049,155 +1339,158 @@ try {
 
   // The resource-limits step starts four compilers (two with every module)
   // and runs six small jobs. In nightly 36141746707 (ubuntu-24.04, three
-  // engines at once) a WebKit worker's init ran out of the SDK's implicit
-  // 30-second default, while such an init measures about 0.1 s idle and
-  // 0.15 s with every core busy (macOS arm64; jobs 16 ms or less): a start
-  // stall more than slowness (ledger row 139). Init and every job get
-  // explicit bounds with that headroom, the step's deadline covers one init
-  // at its bound with a minute to spare, and whatever runs out names itself
-  // and its duration; the OBSERVED line keeps every duration.
-  const limitsInitTimeoutMs = 60_000;
-  const limitsJobTimeoutMs = 30_000;
-  const limitsStepMs = limitsInitTimeoutMs + 60_000;
+  // engines at once) a WebKit worker's init ran out of the SDK's 30-second
+  // default, while such an init measures about 0.1 s idle and 0.15 s with
+  // every core busy (macOS arm64; jobs 16 ms or less): a start stall more
+  // than slowness (ledger row 139). The worker step runs under the stall rule
+  // (stall-rule.ts), with the SDK's own init and job defaults: whatever times
+  // out names itself and its duration in a TimeoutError, which the rule reads.
+  // The OBSERVED line keeps every duration.
   for (const host of ["direct", "worker"] as const) {
-    const evidence = await evaluate(
-      async ({ host, input, request, initTimeoutMs, jobTimeoutMs }) => {
-        const state = (globalThis as BrowserGlobal).capnpTest;
-        const durations: Record<string, number> = {};
-        const timed = async <T>(label: string, run: () => Promise<T>) => {
-          const started = performance.now();
+    const limitsLabel = `${engine} ${host} resource limits`;
+    const limits = () =>
+      evaluate(
+        async ({ host, input, request }) => {
+          const state = (globalThis as BrowserGlobal).capnpTest;
+          const durations: Record<string, number> = {};
+          const timed = async <T>(label: string, run: () => Promise<T>) => {
+            const started = performance.now();
+            try {
+              return await run();
+            } catch (error) {
+              if ((error as Error).name !== "TimeoutError") throw error;
+              throw new DOMException(
+                `${label} timed out after ${
+                  Math.round(performance.now() - started)
+                } ms`,
+                "TimeoutError",
+              );
+            } finally {
+              durations[label] = Math.round(performance.now() - started);
+            }
+          };
+          const create = (
+            label: string,
+            modules: Modules,
+            options: CompilerOptions,
+          ) =>
+            timed(
+              `${label} ${host === "direct" ? "creation" : "worker init"}`,
+              () =>
+                host === "direct"
+                  ? state.sdk.createCompiler(modules, options)
+                  : state.sdk.createWorkerCompiler(
+                    state.workerURL,
+                    modules,
+                    options,
+                  ),
+            );
+          const close = (compiler: Compiler | WorkerCompiler) => {
+            if ("dispose" in compiler) compiler.dispose();
+          };
+          const rejected = async (
+            label: string,
+            run: () => Promise<unknown>,
+          ) => {
+            try {
+              await timed(label, run);
+              return null;
+            } catch (error) {
+              // A timeout is a stall for the rule, not the limit's rejection.
+              if ((error as Error).name === "TimeoutError") throw error;
+              return {
+                name: (error as Error).name,
+                message: (error as Error).message,
+                hasOutputs: "outputs" in (error as object),
+              };
+            }
+          };
+          const workspace = await create("workspace-limited", state.modules, {
+            limits: { workspaceBytes: 0 },
+          });
+          let workspaceFailure;
           try {
-            return await run();
-          } catch (error) {
-            if ((error as Error).name !== "TimeoutError") throw error;
-            throw new Error(
-              `${label} timed out after ${
-                Math.round(performance.now() - started)
-              } ms`,
+            workspaceFailure = await rejected(
+              "workspace-limited compile",
+              () => workspace.compile(input),
+            );
+            await timed(
+              "workspace-limited rust generation",
+              () => workspace.generate({ request, generators: ["rust"] }),
             );
           } finally {
-            durations[label] = Math.round(performance.now() - started);
+            close(workspace);
           }
-        };
-        const create = (
-          label: string,
-          modules: Modules,
-          options: CompilerOptions,
-        ) =>
-          timed(
-            `${label} ${host === "direct" ? "creation" : "worker init"}`,
-            () =>
-              host === "direct"
-                ? state.sdk.createCompiler(modules, options)
-                // The SDK's WorkerCompilerOptions add initTimeoutMs; the
-                // driver's SDK type declares only CompilerOptions.
-                : state.sdk.createWorkerCompiler(state.workerURL, modules, {
-                  ...options,
-                  initTimeoutMs,
-                } as CompilerOptions),
-          );
-        const job = { timeoutMs: jobTimeoutMs };
-        const close = (compiler: Compiler | WorkerCompiler) => {
-          if ("dispose" in compiler) compiler.dispose();
-        };
-        const rejected = async (label: string, run: () => Promise<unknown>) => {
+          const output = await create("output-limited", state.modules, {
+            limits: { outputBytes: 0 },
+          });
+          let outputFailure;
           try {
-            await timed(label, run);
-            return null;
-          } catch (error) {
-            return {
-              name: (error as Error).name,
-              message: (error as Error).message,
-              hasOutputs: "outputs" in (error as object),
-            };
+            outputFailure = await rejected(
+              "output-limited rust generation",
+              () => output.generate({ request, generators: ["rust"] }),
+            );
+            await timed(
+              "output-limited compile",
+              () => output.compile({ ...input, generators: [] }),
+            );
+          } finally {
+            close(output);
           }
-        };
-        const workspace = await create("workspace-limited", state.modules, {
-          limits: { workspaceBytes: 0 },
-        });
-        let workspaceFailure;
-        try {
-          workspaceFailure = await rejected(
-            "workspace-limited compile",
-            () => workspace.compile(input, job),
-          );
-          await timed(
-            "workspace-limited rust generation",
-            () => workspace.generate({ request, generators: ["rust"] }, job),
-          );
-        } finally {
-          close(workspace);
-        }
-        const output = await create("output-limited", state.modules, {
-          limits: { outputBytes: 0 },
-        });
-        let outputFailure;
-        try {
-          outputFailure = await rejected(
-            "output-limited rust generation",
-            () => output.generate({ request, generators: ["rust"] }, job),
-          );
-          await timed(
-            "output-limited compile",
-            () => output.compile({ ...input, generators: [] }, job),
-          );
-        } finally {
-          close(output);
-        }
-        const memory = await create("memory-limited", {
-          compiler: state.memoryGuest,
-          generators: {},
-        }, { limits: { memoryPages: 2 } });
-        try {
-          const result = await timed(
-            "memory-limited compile",
-            () =>
-              memory.compile({
-                files: { "unused.capnp": "" },
-                includeFiles: {},
-                entrypoints: ["unused.capnp"],
-                generators: [],
-              }, job),
-          );
-          const stream = await create("stream-limited", {
-            compiler: state.streamGuest,
+          const memory = await create("memory-limited", {
+            compiler: state.memoryGuest,
             generators: {},
-          }, { limits: { stdoutBytes: 6 } });
+          }, { limits: { memoryPages: 2 } });
           try {
-            const streamFailure = await rejected(
-              "stream-limited compile",
+            const result = await timed(
+              "memory-limited compile",
               () =>
-                stream.compile({
+                memory.compile({
                   files: { "unused.capnp": "" },
                   includeFiles: {},
                   entrypoints: ["unused.capnp"],
                   generators: [],
-                }, job),
+                }),
             );
-            return {
-              workspaceFailure,
-              outputFailure,
-              streamFailure,
-              memory: [...result.request],
-              durations,
-            };
+            const stream = await create("stream-limited", {
+              compiler: state.streamGuest,
+              generators: {},
+            }, { limits: { stdoutBytes: 6 } });
+            try {
+              const streamFailure = await rejected(
+                "stream-limited compile",
+                () =>
+                  stream.compile({
+                    files: { "unused.capnp": "" },
+                    includeFiles: {},
+                    entrypoints: ["unused.capnp"],
+                    generators: [],
+                  }),
+              );
+              return {
+                workspaceFailure,
+                outputFailure,
+                streamFailure,
+                memory: [...result.request],
+                durations,
+              };
+            } finally {
+              close(stream);
+            }
           } finally {
-            close(stream);
+            close(memory);
           }
-        } finally {
-          close(memory);
-        }
-      },
-      {
-        host,
-        input: data.scenarios[0].input,
-        request: data.scenarios[0].request,
-        initTimeoutMs: limitsInitTimeoutMs,
-        jobTimeoutMs: limitsJobTimeoutMs,
-      },
-      `${engine} ${host} resource limits`,
-      limitsStepMs,
-    );
+        },
+        {
+          host,
+          input: data.scenarios[0].input,
+          request: data.scenarios[0].request,
+        },
+        limitsLabel,
+      );
+    const evidence = host === "worker"
+      ? await stepRule("resource-limits", limitsLabel, limits)
+      : await limits();
     console.log(
       `OBSERVED ${engine} ${host} resource limits: ${
         Object.entries(evidence.durations).map(([label, ms]) =>
@@ -1240,90 +1533,105 @@ try {
 
   // Hostile and probing guests: every guest-sized host bound, the read-only
   // workspace, and result shapes must hold in each engine and both modes.
-  await evaluate(
-    (guests) => {
-      (globalThis as BrowserGlobal).capnpTest.hostileGuests = guests;
-    },
-    data.hostileGuests,
-    `${engine} load hostile guests`,
-  );
-  for (const host of ["direct", "worker"] as const) {
-    const outcomes = await evaluate(
-      async ({ host, stages }) => {
-        const state = (globalThis as BrowserGlobal).capnpTest;
-        const outcomes: Record<string, HostileOutcome> = {};
-        for (const [name, stage] of Object.entries(stages)) {
-          const bytes = state.hostileGuests![name];
-          const modules: Modules = {
-            compiler: bytes,
-            generators: stage === "generator" ? { cpp: bytes } : {},
-          };
-          const started = performance.now();
-          const compiler = host === "direct"
-            ? await state.sdk.createCompiler(modules)
-            : await state.sdk.createWorkerCompiler(state.workerURL, modules);
-          try {
-            const result = stage === "compiler"
-              ? await compiler.compile({
-                files: { a: "x" },
-                includeFiles: {},
-                entrypoints: ["a"],
-                generators: [],
-              })
-              : await compiler.generate({
-                request: new Uint8Array(1),
-                generators: ["cpp"],
-              });
-            const files = result.outputs.cpp as
-              | Record<string, Uint8Array>
-              | undefined;
-            outcomes[name] = {
-              request: stage === "compiler"
-                ? Array.from((result as Result).request)
-                : undefined,
-              outputs: files
-                ? Object.entries(files).map((
-                  [path, data],
-                ) => [path, Array.from(data)] as [string, number[]])
-                : undefined,
-              plain: files
-                ? Object.getPrototypeOf(files) === Object.prototype &&
-                  Object.getPrototypeOf(result.outputs) ===
-                    Object.prototype &&
-                  Object.keys(files).every((path) => Object.hasOwn(files, path))
-                : undefined,
-              elapsed: performance.now() - started,
-            };
-          } catch (error) {
-            outcomes[name] = {
-              error: {
-                name: (error as Error).name,
-                message: (error as Error).message,
-                isCompileError: error instanceof state.sdk.CompileError,
-                hasOutputs: "outputs" in (error as object),
-                hasCause: (error as Error).cause !== undefined,
-              },
-              elapsed: performance.now() - started,
-            };
-          } finally {
-            // Since both kinds take job options, the conditional's type
-            // reduces to Compiler, which declares no dispose.
-            if ("dispose" in compiler) (compiler as WorkerCompiler).dispose();
-          }
-        }
-        return outcomes;
+  // The worker step starts a worker per guest, under the stall rule; each
+  // guest's elapsed time is its job's, after its compiler exists.
+  const loadHostile = (run: Evaluate) =>
+    run(
+      (guests) => {
+        (globalThis as BrowserGlobal).capnpTest.hostileGuests = guests;
       },
-      {
-        host,
-        stages: Object.fromEntries(
-          Object.entries(hostileGuests).map(([name, guest]) => [
-            name,
-            guest.stage,
-          ]),
-        ),
-      },
-      `${engine} ${host} hostile guests`,
+      data.hostileGuests,
+      `${engine} load hostile guests`,
     );
+  await loadHostile(evaluate);
+  prerequisites.push(loadHostile);
+  for (const host of ["direct", "worker"] as const) {
+    const hostileLabel = `${engine} ${host} hostile guests`;
+    const hostile = () =>
+      evaluate(
+        async ({ host, stages }) => {
+          const state = (globalThis as BrowserGlobal).capnpTest;
+          const outcomes: Record<string, HostileOutcome> = {};
+          for (const [name, stage] of Object.entries(stages)) {
+            const bytes = state.hostileGuests![name];
+            const modules: Modules = {
+              compiler: bytes,
+              generators: stage === "generator" ? { cpp: bytes } : {},
+            };
+            const compiler = host === "direct"
+              ? await state.sdk.createCompiler(modules)
+              : await state.sdk.createWorkerCompiler(state.workerURL, modules);
+            const started = performance.now();
+            try {
+              const result = stage === "compiler"
+                ? await compiler.compile({
+                  files: { a: "x" },
+                  includeFiles: {},
+                  entrypoints: ["a"],
+                  generators: [],
+                })
+                : await compiler.generate({
+                  request: new Uint8Array(1),
+                  generators: ["cpp"],
+                });
+              const files = result.outputs.cpp as
+                | Record<string, Uint8Array>
+                | undefined;
+              outcomes[name] = {
+                request: stage === "compiler"
+                  ? Array.from((result as Result).request)
+                  : undefined,
+                outputs: files
+                  ? Object.entries(files).map((
+                    [path, data],
+                  ) => [path, Array.from(data)] as [string, number[]])
+                  : undefined,
+                plain: files
+                  ? Object.getPrototypeOf(files) === Object.prototype &&
+                    Object.getPrototypeOf(result.outputs) ===
+                      Object.prototype &&
+                    Object.keys(files).every((path) =>
+                      Object.hasOwn(files, path)
+                    )
+                  : undefined,
+                elapsed: performance.now() - started,
+              };
+            } catch (error) {
+              // No hostile guest may time out: a timeout is a stall, which the
+              // stall rule reads.
+              if ((error as Error).name === "TimeoutError") throw error;
+              outcomes[name] = {
+                error: {
+                  name: (error as Error).name,
+                  message: (error as Error).message,
+                  isCompileError: error instanceof state.sdk.CompileError,
+                  hasOutputs: "outputs" in (error as object),
+                  hasCause: (error as Error).cause !== undefined,
+                },
+                elapsed: performance.now() - started,
+              };
+            } finally {
+              // Since both kinds take job options, the conditional's type
+              // reduces to Compiler, which declares no dispose.
+              if ("dispose" in compiler) (compiler as WorkerCompiler).dispose();
+            }
+          }
+          return outcomes;
+        },
+        {
+          host,
+          stages: Object.fromEntries(
+            Object.entries(hostileGuests).map(([name, guest]) => [
+              name,
+              guest.stage,
+            ]),
+          ),
+        },
+        hostileLabel,
+      );
+    const outcomes = host === "worker"
+      ? await stepRule("hostile-guests", hostileLabel, hostile)
+      : await hostile();
     for (const [name, guest] of Object.entries(hostileGuests)) {
       const outcome = outcomes[name];
       const label = `${host} ${name}`;
@@ -1393,105 +1701,24 @@ try {
   // worker and Wasm compilation still respond, then retried once on the same
   // client, which replaces the stalled worker as it would for an application.
   // judgeStall() decides who the stall points at: a stall that points at the
-  // SDK, or a retry that fails too, fails the run, and one that points at the
-  // engine counts against the job's stall budget (soak-stalls.ts).
+  // SDK or shows only slowness, or a retry that fails too, fails the run, and
+  // one that points at the engine counts against the job's stall budget
+  // (soak-stalls.ts).
   const soakLanguages = ["cpp", "rust", "go"] as const;
   const soakRecoveryMs = 20_000;
-  await evaluate(
-    async ({ spinGuest, template, traceModule }) => {
-      const state = (globalThis as BrowserGlobal).capnpTest;
-      const workers: TracedWorker[] = [];
-      const byWorker = new WeakMap<Worker, TracedWorker>();
-      const RealWorker = globalThis.Worker;
-      const soakTrace = { workers, RealWorker, url: "", posts: 0 };
-      // Each event also goes to the driver (capnpTraceSink), which keeps the
-      // trace should the page crash.
-      const sink = (globalThis as unknown as {
-        capnpTraceSink?: (worker: number, event: string) => Promise<void>;
-      }).capnpTraceSink;
-      const keep = (traced: TracedWorker, event: string) => {
-        traced.events.push(event);
-        if (traced.events.length > 60) traced.events.splice(0, 20);
-        sink?.(workers.indexOf(traced), event)?.catch(() => {});
-      };
-      globalThis.Worker = class extends RealWorker {
-        constructor(url: string | URL, options?: WorkerOptions) {
-          super(url, options);
-          const traced: TracedWorker = { events: [], terminated: false };
-          workers.push(traced);
-          byWorker.set(this, traced);
-          this.addEventListener("message", (event: MessageEvent) => {
-            const message = event.data;
-            if (message && message.kind === "capnpTrace") {
-              keep(traced, `${message.t}:${message.event}`);
-            } else if (message && typeof message.id === "number") {
-              keep(traced, `page:reply:${message.id}`);
-            }
-          });
-        }
-        override postMessage(
-          message: unknown,
-          transfer?: Transferable[] | StructuredSerializeOptions,
-        ): void {
-          const traced = byWorker.get(this);
-          const { kind, id } = (message ?? {}) as {
-            kind?: unknown;
-            id?: unknown;
-          };
-          if (traced && typeof kind === "string") {
-            soakTrace.posts++;
-            keep(
-              traced,
-              `page:post:${kind}${id === undefined ? "" : `:${id}`}`,
-            );
-          }
-          super.postMessage(message, transfer as Transferable[]);
-        }
-        override terminate() {
-          const traced = byWorker.get(this);
-          if (traced) traced.terminated = true;
-          super.terminate();
-        }
-      } as typeof Worker;
-      const blobURL = (source: string) =>
-        URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
-      soakTrace.url = blobURL(
-        template.replace("__TRACE_URL__", blobURL(traceModule))
-          .replace("__REAL_WORKER_URL__", state.workerURL),
-      );
-      state.soakTrace = soakTrace;
-      state.soak = await state.sdk.createWorkerCompiler(soakTrace.url, {
-        ...state.modules,
-        generators: { ...state.modules.generators, zig: spinGuest },
-      });
-    },
-    {
-      spinGuest: data.spinGuest,
-      template: traceWorkerTemplate,
-      traceModule: traceModuleSource,
-    },
-    `${engine} create the recovery soak client`,
-  );
-  // Tolerated stalls, of the soak and of the termination acceptance below:
-  // recorded in this engine's receipt and in the job's ledger, which holds the
-  // stall budget (soak-stalls.ts).
-  const soakStalls: SoakStall[] = [];
-  const soakStallBudget = stallBudget();
-  /** Record a stall that points at the engine and whose retry passed. */
-  const tolerate = async (stall: SoakStall): Promise<void> => {
-    soakStalls.push(stall);
-    const total = await recordStall(stall);
-    const what = `${stallTitle(stall).toLowerCase()} in ${stallPlace(stall)}`;
-    console.log(
-      `OBSERVED ${engine} ${what}, attributed to the engine and recovered on retry: ${
-        JSON.stringify(stall.detail)
-      }`,
-    );
-    assert(
-      total <= soakStallBudget,
-      `${engine}: stall ${total} of this job, a ${what}, exceeds its budget of ${soakStallBudget} (CAPNP_SOAK_STALL_BUDGET; the ledger ${stallLedgerPath} is cleared by mise run clean:test): ${stall.summary}`,
-    );
-  };
+  const soakLabel = `${engine} create the recovery soak client`;
+  await stepRule("soak-client", soakLabel, () =>
+    evaluate(
+      async ({ spinGuest }) => {
+        const state = (globalThis as BrowserGlobal).capnpTest;
+        state.soak = await state.sdk.createWorkerCompiler(state.workerURL, {
+          ...state.modules,
+          generators: { ...state.modules.generators, zig: spinGuest },
+        });
+      },
+      { spinGuest: data.spinGuest },
+      soakLabel,
+    ));
   for (let iteration = 0; iteration < 20; iteration++) {
     soakCycle = iteration + 1;
     const mode = iteration % 2 === 0 ? "abort" : "timeout";
@@ -1499,7 +1726,7 @@ try {
       async ({ mode, input, recovered, recoveryMs }) => {
         const state = (globalThis as BrowserGlobal).capnpTest;
         const soak = state.soak!;
-        const trace = state.soakTrace!;
+        const tracer = (globalThis as BrowserGlobal).capnpTracer;
         const controller = new AbortController();
         const spinning = { ...input, generators: ["zig" as const] };
         let pending: Promise<Result>;
@@ -1548,37 +1775,55 @@ try {
             };
           }
         };
-        const postsBefore = trace.posts;
+        const postsBefore = tracer.posts.length;
         let recovery = await recover();
         let stall: SoakStallRecord | undefined;
         if (!recovery.ok) {
-          const stalled = trace.workers.at(-1);
-          // Counted before the health checks, whose workers are traced too.
-          const workersStarted = trace.workers.length;
-          // A copy: the retry below may add to the same worker's events.
+          // The message the stalled worker had to answer: the page's latest
+          // post for the recovery that no reply answered, by the worker's
+          // facts; with none, the evidence shows the last worker posted to.
+          const posts = tracer.posts.slice(postsBefore);
+          let post: typeof posts[number] | undefined;
+          for (const entry of posts) {
+            const id = entry.post.slice(entry.post.indexOf(":") + 1);
+            if (
+              tracer.workers[entry.worker].facts.pageReplies[id] === undefined
+            ) post = entry;
+          }
+          const shown = post ?? posts.at(-1);
+          const stalled = shown
+            ? tracer.workers[shown.worker]
+            : tracer.workers.at(-1);
+          // Counted and copied before the health checks, whose workers are
+          // traced too; the retry below may add to the same worker's events.
+          const workersStarted = tracer.workers.length;
+          const at = performance.now();
+          const facts = post && stalled
+            ? JSON.parse(JSON.stringify(stalled.facts))
+            : null;
           const events = [...(stalled?.events ?? [])];
-          // The message the stalled worker had to answer: the page's last
-          // post to it, if the page posted anything for the recovery at all.
-          const post = trace.posts > postsBefore
-            ? events.filter((event) => event.startsWith("page:post:")).at(-1)
-            : undefined;
+          const page = (globalThis as unknown as {
+            capnpPageWorkers?: () => PageWorkers;
+          }).capnpPageWorkers?.();
           // Does the engine itself still start workers and compile Wasm?
           const health = await (globalThis as unknown as {
             capnpEngineHealth(): Promise<EngineHealth>;
           }).capnpEngineHealth();
           // The retry replaces the stalled worker; its trace is the second.
-          const before = trace.workers.length;
+          const before = tracer.workers.length;
           const started = performance.now();
           const retried = await recover();
           stall = {
-            expected: post === undefined
-              ? null
-              : post.slice("page:post:".length),
+            expected: post === undefined ? null : post.post,
             error: recovery.error,
-            // The whole list: the page keeps at most 60 events per worker.
+            // For display: the page shows at most 60 events per worker.
             events,
             health,
             count: null,
+            facts,
+            at,
+            answered: post === undefined && posts.length > 0,
+            page,
             afterMs: recovery.afterMs,
             terminated: stalled ? stalled.terminated : null,
             workersStarted,
@@ -1586,8 +1831,8 @@ try {
               ok: retried.ok,
               ms: Math.round(performance.now() - started),
               error: retried.ok ? null : retried.error,
-              workers: (trace.workers.length > before
-                ? trace.workers.slice(before)
+              workers: (tracer.workers.length > before
+                ? tracer.workers.slice(before)
                 : stalled
                 ? [stalled]
                 : []).map((worker) =>
@@ -1637,7 +1882,7 @@ try {
         suspect === "engine",
         `${engine}: soak recovery after ${mode} in cycle ${
           iteration + 1
-        } stalled, and the evidence points at the SDK: ${because}; ${
+        } stalled, and the evidence ${verdictWords(suspect)}: ${because}; ${
           JSON.stringify(stall)
         }`,
       );
@@ -1672,7 +1917,9 @@ try {
           judgeStall(stall).because
         }; the last event: ${
           stall.events.at(-1) ?? "none"
-        }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}; the retry recovered in ${stall.retry.ms} ms`,
+        }; fresh worker ${stall.health.plainWorker}, Wasm in a worker ${stall.health.workerCompile}, Wasm on the page ${stall.health.pageCompile}; ${
+          describePage(stall.page)
+        }; the retry recovered in ${stall.retry.ms} ms`,
         detail: stall,
       });
     }
@@ -1687,8 +1934,6 @@ try {
     () => {
       const state = (globalThis as BrowserGlobal).capnpTest;
       state.soak!.dispose();
-      globalThis.Worker = state.soakTrace!.RealWorker;
-      URL.revokeObjectURL(state.soakTrace!.url);
     },
     undefined,
     `${engine} dispose the recovery soak client`,
@@ -1700,12 +1945,17 @@ try {
   const conformance: Record<string, { observed: number; skipped: number }> = {};
   const conformanceRows: BrowserRow[] = [];
   for (const surface of browserSurfaces) {
+    // The worker and Studio rows start SDK workers: under the stall rule.
     const rows = await runBrowserSurface(
       engine,
       surface,
       data.corpus,
       valid,
       evaluate,
+      surface === "browser-direct"
+        ? undefined
+        : (label, attempt, classify, history) =>
+          stepRule("conformance-rows", label, attempt, classify, history),
     );
     conformanceRows.push(...rows);
     const skipped = rows.filter((row) => row.skipped).length;
@@ -1777,6 +2027,16 @@ try {
     undefined,
     `${engine} dispose`,
   );
+  // A drill entry with attempts left armed no step it named.
+  const unused = drills.filter((drill) => drill.remaining > 0);
+  assert(
+    unused.length === 0,
+    `CAPNP_BROWSER_WORKER_STALL: ${
+      unused.map((drill) => `"${drill.text}" (${drill.remaining} left)`).join(
+        ", ",
+      )
+    } armed no step attempt; check the label text`,
+  );
   const receipt = receiptPath ?? `${data.work}/requests.json`;
   await Deno.writeTextFile(
     receipt,
@@ -1813,7 +2073,10 @@ try {
     for (let wait = 0; wait < 20 && !engineCrash; wait++) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    crashed("the page or browser closed without a crash event", "main");
+    crashed(
+      "the page or browser closed without a crash event",
+      mainPageName,
+    );
   }
   if (engineCrash) {
     failedStep = engineCrash.step;

@@ -42,7 +42,7 @@ package anything that is not a private release candidate.
 - Artifacts in scope, each with its own version and changelog entry: the
   compiler-only toolchain archive (`capnp-wasm-tools`), the compiler and
   TypeScript host archive (`capnp-wasm-compiler-host`), the full SDK archive
-  (`capnpc-wasm`) with all six Wasm commands, and the Go module tag
+  (`capnpc-wasm`) with all five Wasm commands, and the Go module tag
   `sdk/go/v0.1.0` at the commit of `capnpc-wasm-v0.1.0`. Registry packages (npm,
   JSR) wait for the API freeze and the nightly gate (decision D2 = A).
 - API freeze: the TypeScript `CompileRequest`, `GenerationRequest`,
@@ -160,6 +160,13 @@ applies to connecting and waiting between HTTP reads; retries and locked digest
 verification still apply. The change gives slower downloads more time. Its
 effect on hosted runners awaits a run with this change; a successful local check
 does not prove that the download failure is fixed.
+
+On 2026-10-10 the maintainer decided to revive quality track T08e. Its direct
+SDK deadline tests now measure the guest thread's CPU and the waits a sleeping
+guest requests. The browser driver traces every SDK worker step and replays
+client history when it retries an engine-attributed stall. The default limit
+remains one stall per CI job. The macOS WebKit page crash remains unexplained;
+hosted checks of the revived code and successful scheduled runs are pending.
 
 Rules, from the JSON: a cycle is a scheduled run of the workflow. It qualifies
 when the run concluded `success` on its first attempt and was never re-run, so
