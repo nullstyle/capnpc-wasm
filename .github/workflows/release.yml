@@ -9,7 +9,7 @@
 # A tag push (capnp-wasm-tools-v*, capnp-wasm-compiler-host-v*, or
 # capnpc-wasm-v*, naming that flavor's own version under "versions" in
 # release.json) produces a DRAFT
-# prerelease with the archive, its manifest, the SPDX SBOM, and SHA256SUMS,
+# release with the archive, its manifest, the SPDX SBOM, and SHA256SUMS,
 # plus Sigstore build-provenance and SBOM attestations. A maintainer verifies
 # the draft, records the digests in docs/releases.md, and publishes it. A
 # workflow_dispatch run builds and verifies the same way but never creates a
@@ -71,6 +71,7 @@ jobs:
       tag: ${{ steps.release.outputs.tag }}
       stem: ${{ steps.release.outputs.stem }}
       commit: ${{ steps.release.outputs.commit }}
+      stable: ${{ steps.release.outputs.stable }}
       ci_run: ${{ steps.ci.outputs.run_url }}
     steps:
       # The full history and every tag: release.ts checks that HEAD carries
@@ -104,6 +105,8 @@ jobs:
             exit 1
           fi
           tag="${flavor}-v${version}"
+          stable=false
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then stable=true; fi
           if [ "$EVENT_NAME" = push ] && [ "$REF_NAME" != "$tag" ]; then
             echo "tag $REF_NAME does not name the release.json version of $flavor, $version (expected $tag)" >&2
             exit 1
@@ -115,6 +118,7 @@ jobs:
             echo "stem=${flavor}-${version}"
             echo "flag=$flag"
             echo "commit=$(git rev-parse HEAD)"
+            echo "stable=$stable"
           } >> "$GITHUB_OUTPUT"
       # A release commit must have a green CI run (ci.yml) for its exact
       # commit; a tag on a commit CI never saw, or whose run failed, gets the
@@ -165,10 +169,13 @@ jobs:
         env:
           FLAG: ${{ steps.release.outputs.flag }}
           MODE: ${{ github.event_name == 'push' && '--publish' || '--allow-existing-tag' }}
+          STABLE: ${{ steps.release.outputs.stable }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           args=(--out build/release "$MODE")
           if [ -n "$FLAG" ]; then args=("$FLAG" "${args[@]}"); fi
-          mise exec -- deno run --allow-read --allow-write=build --allow-run=git,go \
+          if [ "$STABLE" = true ]; then args+=(--stable); fi
+          mise exec -- deno run --allow-read --allow-write=build --allow-run=deno,git,go \
             scripts/release.ts "${args[@]}"
       - name: Verify release archives and external package consumers
         run: mise run test:package
@@ -286,12 +293,13 @@ jobs:
         with:
           subject-path: release/${{ env.STEM }}.tgz
           sbom-path: release/${{ env.STEM }}.spdx.json
-      - name: Draft the prerelease
+      - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
           FLAVOR: ${{ needs.build.outputs.flavor }}
           VERSION: ${{ needs.build.outputs.version }}
           CI_RUN: ${{ needs.build.outputs.ci_run }}
+          STABLE: ${{ needs.build.outputs.stable }}
         run: |
           notes="release/${STEM}.notes.md"
           {
@@ -306,13 +314,15 @@ jobs:
             fi
             echo "- Build provenance and SBOM attestations: \`gh attestation verify ${STEM}.tgz --repo ${GITHUB_REPOSITORY}\`"
           } >> "$notes"
+          args=(--draft --verify-tag)
+          if [ "$STABLE" != true ]; then args+=(--prerelease); fi
           url="$(gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --draft --prerelease --verify-tag \
+            "${args[@]}" \
             --title "${FLAVOR} ${VERSION}" --notes-file "$notes" \
             "release/${STEM}.tgz" "release/${STEM}.manifest.json" \
             "release/${STEM}.spdx.json" "release/SHA256SUMS")"
           {
-            echo "### Draft prerelease"
+            echo "### Draft release"
             echo
             echo "$url"
             echo

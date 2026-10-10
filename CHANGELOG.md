@@ -14,6 +14,9 @@ every flavor it applies to has shipped it.
   entrypoint's public symbols. They previously advertised four internal helper
   functions absent from the JavaScript bundle and the internal `WorkerRuntime`
   type. Use the documented runtime probes and compiler factories.
+- Release: add a reviewed SDK API baseline and an explicit stable packaging
+  mode. Stable archives require seven fresh scheduled nightly passes and the
+  recorded publication decision; publish mode checks the live nightly ledger.
 
 - Documentation: consumer quick start, support matrix, generated-code runtime
   requirements, published-release digests, security policy, threat model,

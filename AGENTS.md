@@ -56,6 +56,9 @@ release status; update it instead of restating status here.
   (pinned by `tests/fixtures/contract/limits.json`), stage names, and error
   classes aligned, and change the contract document, the export lists in
   `docs/api-stability.md`, and `CHANGELOG.md` with any SDK API change.
+  `test:sdk-api` checks the reviewed public API baseline; after that review,
+  `mise run test:sdk-api -- --write` updates it explicitly. Review printer and
+  documentation changes in the snapshots as well as signature changes.
 - The [schema feature corpus](tests/fixtures/features/README.md) is shared by
   the TypeScript, Go, and browser tests. Read embeds as bytes; compare the
   complete canonical request and every generated source byte with native output
@@ -181,9 +184,12 @@ before a rebase or hand-off.
 - `release.json` holds one version per archive flavor under `versions`:
   `capnpc-wasm` (full SDK; its version also names the Go module tag),
   `capnp-wasm-tools` (compiler and Wasmtime launcher), and
-  `capnp-wasm-compiler-host` (compiler and TypeScript host).
-  `scripts/release.ts` accepts only `X.Y.Z-rc.N` with `private: true` and
-  rejects a missing or unknown flavor.
+  `capnp-wasm-compiler-host` (compiler and TypeScript host). RC versions use
+  `X.Y.Z-rc.N` with `private: true`. Stable `X.Y.Z` versions require
+  `private: false` and `release.ts --stable`, which checks the SDK API, seven
+  fresh scheduled nightly passes, and `publicationAuthorized`; publish mode also
+  compares the ledger with GitHub. Missing/unknown flavors fail. A remaining RC
+  flavor in non-private metadata still ships a private package.
 - Each archive's `README.md` is generated from
   `scripts/templates/README-<flavor>.md`. `sdk/typescript/README.md` ships as
   `docs/typescript.md` in the SDK flavors and `sdk/go/README.md` in the full

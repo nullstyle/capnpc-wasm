@@ -5,7 +5,7 @@
 // import.meta.main, and the package tests import the flavor table from here.
 //
 // Usage: release.ts [--tools-only | --compiler-host] [--out DIR]
-//                   [--allow-dirty] [--allow-existing-tag] [--publish]
+//                   [--allow-dirty] [--allow-existing-tag] [--stable] [--publish]
 //
 // Each flavor has its own version, `versions["<flavor>"]` in release.json,
 // and its own release tag, `<flavor>-v<version>`; the full SDK's version also
@@ -32,6 +32,7 @@ import {
   sha256,
   verifyRelease,
 } from "./verify-release.ts";
+import { checkStableRelease } from "./stable-release.ts";
 
 export const repositorySlug = "nullstyle/capnpc-wasm";
 export const repositoryUrl = `https://github.com/${repositorySlug}`;
@@ -125,7 +126,7 @@ export interface ReleaseFile {
   name: string;
   /** Each flavor's own version; releasing one flavor changes no other. */
   versions: Record<FlavorName, string>;
-  private: true;
+  private: boolean;
   license: "Apache-2.0";
 }
 
@@ -135,22 +136,27 @@ export interface ReleaseMetadata {
   name: string;
   /** The flavor's own version, `versions["<flavor>"]` in release.json. */
   version: string;
-  private: true;
+  private: boolean;
   license: "Apache-2.0";
 }
 
 /**
  * The private release-candidate scheme, `X.Y.Z-rc.N` with no leading zeros
- * (Semantic Versioning); no other version is prepared yet.
+ * (Semantic Versioning). Stable versions use the explicit guarded mode below.
  */
 const candidateVersion =
   /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-rc\.(?:0|[1-9]\d*)$/;
+const stableVersion = /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+
+export const isStableVersion = (version: string): boolean =>
+  stableVersion.test(version);
 
 /**
  * Parses and validates release.json: the keys `name` (the full SDK's package
- * name), `versions`, `private` (true), and `license` (Apache-2.0) and no
- * others, and in `versions` exactly one `X.Y.Z-rc.N` version per flavor. A
- * missing or unknown flavor is an error.
+ * name), `versions`, `private`, and `license` (Apache-2.0) and no others.
+ * Private metadata permits only X.Y.Z-rc.N. Non-private metadata permits
+ * X.Y.Z as well and must include at least one stable flavor; any remaining
+ * RC flavors still produce private packages. Missing/unknown flavors fail.
  */
 export function parseReleaseFile(
   text: string,
@@ -173,9 +179,9 @@ export function parseReleaseFile(
   }
   const fullName = packageName(flavorNamed("capnpc-wasm"));
   if (metadata.name !== fullName) throw problem(`name must be ${fullName}`);
-  if (metadata.private !== true) {
+  if (typeof metadata.private !== "boolean") {
     throw problem(
-      "private must be true; only private release candidates are prepared",
+      "private must be true or false",
     );
   }
   if (metadata.license !== "Apache-2.0") {
@@ -195,13 +201,29 @@ export function parseReleaseFile(
       throw problem(`versions has no entry for ${flavor.name}`);
     }
     const version = versions[flavor.name];
-    if (typeof version !== "string" || !candidateVersion.test(version)) {
+    if (
+      typeof version !== "string" ||
+      !(candidateVersion.test(version) ||
+        (metadata.private === false && stableVersion.test(version)))
+    ) {
       throw problem(
-        `${flavor.name} version ${
-          JSON.stringify(version)
-        } is not a private release candidate (X.Y.Z-rc.N)`,
+        `${flavor.name} version ${JSON.stringify(version)} is not ${
+          metadata.private
+            ? "a private release candidate (X.Y.Z-rc.N)"
+            : "a release version (X.Y.Z or X.Y.Z-rc.N)"
+        }`,
       );
     }
+  }
+  if (
+    metadata.private === false &&
+    !Object.values(versions).some((version) =>
+      typeof version === "string" && stableVersion.test(version)
+    )
+  ) {
+    throw problem(
+      "private must be true when every flavor is a release candidate",
+    );
   }
   return metadata as unknown as ReleaseFile;
 }
@@ -215,7 +237,7 @@ export async function readMetadata(
   return {
     name: packageName(flavor),
     version: release.versions[flavor.name],
-    private: release.private,
+    private: !isStableVersion(release.versions[flavor.name]),
     license: release.license,
   };
 }
@@ -227,6 +249,8 @@ export interface PrepareOptions {
   allowDirty?: boolean;
   allowExistingTag?: boolean;
   publish?: boolean;
+  /** Explicit opt-in to the guarded non-private X.Y.Z packaging path. */
+  stable?: boolean;
 }
 
 export interface PreparedRelease {
@@ -983,6 +1007,16 @@ export async function prepareRelease(
   const publish = options.publish === true;
   const metadata = await readMetadata(flavor);
   const { name, version } = metadata;
+  if (isStableVersion(version)) {
+    if (options.stable !== true) {
+      throw new Error("stable versions require the explicit --stable mode");
+    }
+    await checkStableRelease(publish);
+  } else if (options.stable === true) {
+    throw new Error(
+      "--stable requires an X.Y.Z version for the selected flavor",
+    );
+  }
   const stem = archiveStem(flavor, version);
   const tag = releaseTag(flavor, version);
 
@@ -1466,7 +1500,7 @@ export async function prepareRelease(
 
 export function parseArguments(args: string[]): PrepareOptions {
   const usage =
-    "usage: release.ts [--tools-only | --compiler-host] [--out DIR] [--allow-dirty] [--allow-existing-tag] [--publish]";
+    "usage: release.ts [--tools-only | --compiler-host] [--out DIR] [--allow-dirty] [--allow-existing-tag] [--stable] [--publish]";
   let flavor: Flavor | undefined;
   const options: PrepareOptions = { flavor: flavors[0] };
   for (let index = 0; index < args.length; index += 1) {
@@ -1486,6 +1520,7 @@ export function parseArguments(args: string[]): PrepareOptions {
     } else if (arg === "--allow-dirty") options.allowDirty = true;
     else if (arg === "--allow-existing-tag") options.allowExistingTag = true;
     else if (arg === "--publish") options.publish = true;
+    else if (arg === "--stable") options.stable = true;
     else throw new Error(usage);
   }
   return { ...options, flavor: flavor ?? flavors[0] };

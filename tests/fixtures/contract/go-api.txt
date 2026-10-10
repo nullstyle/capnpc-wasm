@@ -1,0 +1,260 @@
+package capnpcwasm // import "github.com/nullstyle/capnpc-wasm/sdk/go"
+
+Package capnpcwasm compiles schema workspaces and generates source entirely in
+memory using the project's WASI command modules and the wazero runtime.
+
+The request fields, resource limits, stage names, and error model are shared
+with the TypeScript SDK; docs/sdk-contract.md in the repository defines them.
+
+VARIABLES
+
+var (
+	// ErrClosed reports a call on a closed Compiler, or a job that Close
+	// terminated.
+	ErrClosed = errors.New("compiler is closed")
+	// ErrInvalidRequest reports caller input that is rejected before any guest
+	// starts: request fields, options passed to New, and module bytes that are
+	// empty, unknown, or not WASI commands.
+	ErrInvalidRequest = errors.New("invalid request")
+	// ErrLimitExceeded reports a budget from Limits that was exceeded. The
+	// Error's Limit field names the budget. A budget exceeded by caller input
+	// before any guest starts also matches ErrInvalidRequest; a budget a guest
+	// exceeds while it runs matches ErrLimitExceeded only.
+	ErrLimitExceeded = errors.New("resource limit exceeded")
+)
+    Sentinel errors, matched through errors.Is on the *Error a call returns.
+
+
+TYPES
+
+type Compiler struct {
+	// Has unexported fields.
+}
+    Compiler owns reusable compiled Wasm modules. Compile and Generate support
+    concurrent calls; each call and generator receives fresh memory, stdio and
+    filesystems.
+
+    Close rejects new calls immediately and waits for active calls until its
+    context ends; then it terminates them.
+
+func New(ctx context.Context, modules Modules, opts ...Option) (*Compiler, error)
+    New compiles modules once. Compilation and execution require standardized
+    Wasm exception handling, enabled on the repository's pinned wazero runtime.
+    Modules compile concurrently; ctx is checked before each compilation
+    starts and after all of them finish, but one module's compilation cannot be
+    interrupted.
+
+func (c *Compiler) Close(ctx context.Context) error
+    Close marks the Compiler closed, so new calls fail with ErrClosed, and waits
+    for active calls to finish. If ctx ends first, Close terminates the active
+    calls (they fail with ErrClosed) and returns ctx's error; the runtime is
+    released as soon as the last of them stops. Repeated calls are safe.
+
+func (c *Compiler) Compile(ctx context.Context, request Request) (Result, error)
+    Compile compiles a workspace and runs the selected generators in order.
+    It performs no network operations and grants no host filesystem access.
+
+func (c *Compiler) Generate(ctx context.Context, request GenerationRequest) (GenerationResult, error)
+    Generate runs the selected generators on an existing unpacked
+    CodeGeneratorRequest, without invoking the compiler. Each generator receives
+    a fresh instance and an empty writable memory filesystem. Malformed requests
+    are diagnosed by the generators, not parsed by the host SDK.
+
+type Diagnostic struct {
+	Stage    Stage
+	Language Language
+	Stderr   string
+}
+    Diagnostic preserves a command's stderr without interpreting upstream
+    syntax. Stage is StageCompiler or the generator's language, which Language
+    repeats.
+
+type Engine int
+    Engine selects which wazero engine executes a Compiler's modules.
+
+    The pinned wazero compiler clones the Go-side stack on every Wasm try_table
+    entry. The C++ command modules (the compiler and the cpp generator) enter
+    thousands of try_table blocks per job, which makes them 2-7x slower on the
+    compiler engine than on the interpreter and allocates 10-155 GB per job.
+    The Rust, Go, and Zig generators contain no try_table blocks and run faster
+    on the compiler engine.
+
+const (
+	// EngineAuto runs the compiler module and the cpp generator on wazero's
+	// interpreter and every other generator on wazero's compiler where the
+	// platform supports it. It is the default.
+	EngineAuto Engine = iota
+	// EngineCompiler requests wazero's ahead-of-time compiler for every module.
+	// On platforms without compiler support, wazero runs its interpreter
+	// instead; New never panics.
+	EngineCompiler
+	// EngineInterpreter runs every module on wazero's interpreter.
+	EngineInterpreter
+)
+func (e Engine) String() string
+
+type Error struct {
+	// Stage is the step that failed.
+	Stage Stage
+	// Language is the generator when Stage is a generator stage, or the
+	// generator whose module New rejected; otherwise it is empty.
+	Language Language
+	// ExitCode is the failing guest's nonzero exit status. It is 0 for every
+	// other failure: a trap, an exceeded limit, cancellation, rejected input,
+	// or a command that exited 0 without honoring its contract.
+	ExitCode int
+	// Limit names the exceeded budget from Limits, or is empty.
+	Limit string
+	// Diagnostics holds every stage's stderr so far in execution order,
+	// including the failing stage's, exactly as a Result would have.
+	Diagnostics []Diagnostic
+	// Stderr is the failing stage's stderr, when it wrote any.
+	Stderr string
+	// Err is the underlying error; errors.Is on the *Error reaches it.
+	Err error
+}
+    Error is the error type every call returns. On any failure Compile and
+    Generate return zero results, so no partial files escape. Use errors.Is
+    with ErrInvalidRequest, ErrLimitExceeded, ErrClosed, context.Canceled,
+    and context.DeadlineExceeded, and errors.As to reach the fields.
+
+func (e *Error) Error() string
+
+func (e *Error) Unwrap() error
+
+type GenerationRequest struct {
+	Request    []byte
+	Generators []Language
+}
+    GenerationRequest runs generators on an existing standard unpacked
+    CodeGeneratorRequest. At least one generator is required. Do not mutate its
+    byte slice or generator list while Generate is running.
+
+type GenerationResult struct {
+	Outputs     map[Language]map[string][]byte
+	Diagnostics []Diagnostic
+}
+    GenerationResult is published only after every requested generator succeeds.
+    Outputs groups relative paths by language. All maps and bytes are
+    caller-owned.
+
+type Language string
+    Language names a generator: the key in Modules.Generators, the entries of
+    a request's Generators, the key of Outputs, and the Stage of a generator's
+    diagnostics and errors. The set may grow in later releases; treat unknown
+    values as data rather than exhausting them in a switch.
+
+const (
+	LanguageCpp  Language = "cpp"
+	LanguageRust Language = "rust"
+	LanguageGo   Language = "go"
+	LanguageZig  Language = "zig"
+)
+type Limits struct {
+	// MemoryPages bounds each guest instance's linear memory, in 64 KiB pages.
+	MemoryPages int
+	// WorkspaceBytes bounds the combined contents of Files and IncludeFiles.
+	WorkspaceBytes int
+	// WorkspaceEntries bounds the combined files and implied directories of
+	// Files and IncludeFiles, excluding the mount roots, and separately the
+	// number of Entrypoints and of ImportPaths.
+	WorkspaceEntries int
+	// PathBytes bounds the UTF-8 length of every workspace, entrypoint, import
+	// root, source prefix, and generated output path.
+	PathBytes int
+	// RequestBytes bounds the compiler's CodeGeneratorRequest output and a
+	// request supplied to Generate.
+	RequestBytes int
+	// OutputBytes bounds the file contents each generator retains.
+	OutputBytes int
+	// OutputEntries bounds the files and directories each generator creates
+	// over its lifetime; removing an entry does not refund it.
+	OutputEntries int
+	// StdoutBytes bounds captured stdout per command; the compiler's stdout is
+	// also bounded by RequestBytes.
+	StdoutBytes int
+	// StderrBytes bounds captured stderr per command.
+	StderrBytes int
+}
+    Limits are the per-job host budgets and the per-instance guest memory
+    ceiling, with the names and defaults of the TypeScript SDK's ResourceLimits.
+    Error.Limit names a field in lower camel case: "workspaceBytes" for
+    WorkspaceBytes. Start from DefaultLimits and change the fields to bound;
+    a zero field disallows the resource, except MemoryPages, which must be
+    between 1 and 65536.
+
+func DefaultLimits() Limits
+    DefaultLimits returns the limits a Compiler uses without WithLimits.
+    The values are recorded in tests/fixtures/contract/limits.json; the Go test
+    TestContractLimits and sdk/typescript/conformance_test.ts assert both SDKs'
+    defaults against that file.
+
+type Modules struct {
+	Compiler   []byte
+	Generators map[Language][]byte
+}
+    Modules contains the built compiler and the desired generators. No modules
+    are downloaded by the SDK.
+
+type Option func(*settings)
+    Option configures New.
+
+func WithCompilationCache(cache wazero.CompilationCache) Option
+    WithCompilationCache shares compiled code between Compilers that receive
+    the same cache, in memory or through wazero.NewCompilationCacheWithDir.
+    The cache outlives the Compilers that use it; close it after the last one.
+
+func WithEngine(engine Engine) Option
+    WithEngine selects the execution engine. The default is EngineAuto.
+
+func WithLimits(limits Limits) Option
+    WithLimits replaces DefaultLimits for every job of the Compiler. Every field
+    must be nonnegative and MemoryPages between 1 and 65536; otherwise New fails
+    with an Error at StageValidate that matches ErrInvalidRequest.
+
+func WithMaxConcurrentJobs(n int) Option
+    WithMaxConcurrentJobs bounds the Compile and Generate calls that run
+    guests at once. Further calls wait for a slot until their context ends or
+    Close terminates them; n must be at least 1. Without this option jobs are
+    unbounded.
+
+type Request struct {
+	Files        map[string][]byte
+	IncludeFiles map[string][]byte
+	// ImportPaths lists directories within Files, searched in order for
+	// absolute imports before IncludeFiles. An empty list adds no roots; the
+	// element "" names the /src root itself. Every other entry must be a
+	// directory implied by a path in Files.
+	ImportPaths []string
+	// SourcePrefix names a directory within Files to strip from requested
+	// source names; "" (the default) keeps names relative to /src.
+	SourcePrefix string
+	Entrypoints  []string
+	Generators   []Language
+}
+    Request is a schema workspace. Paths are canonical relative POSIX paths.
+    IncludeFiles supplies standard schemas and absolute imports (without their
+    leading slash), while Files supplies application schemas. Entrypoints names
+    files in Files. An empty Generators list requests only the compiler request.
+    Do not mutate the request's maps or byte slices while Compile is running.
+
+type Result struct {
+	Request     []byte
+	Outputs     map[Language]map[string][]byte
+	Diagnostics []Diagnostic
+}
+    Result is published only after every requested stage succeeds. Request is an
+    unpacked CodeGeneratorRequest. Outputs groups relative paths by language.
+    Diagnostics holds every stage's stderr in execution order.
+
+type Stage string
+    Stage identifies the step that produced a Diagnostic or an Error.
+    Guest stages are StageCompiler and, for a generator, Stage(language).
+    The remaining stages never run a guest: StageValidate rejects caller input,
+    and StageModules reports a module New could not compile.
+
+const (
+	StageValidate Stage = "validate"
+	StageModules  Stage = "modules"
+	StageCompiler Stage = "compiler"
+)

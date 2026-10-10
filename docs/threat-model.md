@@ -201,13 +201,17 @@ imports check declared sizes and entry counts before inflating.
 
 Each archive carries `manifest.json` (per-file SHA-256, source commit and dirty
 flag, source digest, and the reference gitlinks), a `provenance/` directory, and
-`verify-release.ts`. `SHA256SUMS` lists the archive and manifest digests, and
-the digests of every published asset are recorded in
-[published releases](releases.md#published-releases). Assets are not signed or
-attested and are built by hand from the maintainer's checkout (`SEC-04`). A
-party who can replace an asset and its `SHA256SUMS` on the download host can
-also recompute the manifest; the copy of the digests in this repository is the
-independent check.
+`verify-release.ts`. `SHA256SUMS` lists the archive, manifest, and SBOM digests,
+and the digests of every published asset are recorded in
+[published releases](releases.md#published-releases). The tag-triggered release
+workflow builds from a clean checkout, verifies package consumers, and attests
+build provenance for all assets and the SBOM for the archive. Consumers verify
+these attestations with `gh attestation verify`, using the commands in the
+release guide. Older assets without attestations still rely on the recorded
+digests. A party who can replace an asset and its `SHA256SUMS` can recompute its
+manifest; the repository's digests and the workflow's provenance provide
+independent checks (`SEC-04`). Stable builds also check the live scheduled
+nightly ledger and the recorded publication decision before preparing output.
 
 ## Non-goals
 
@@ -263,5 +267,5 @@ independent check.
 | Launcher output and inputs              | Resolved: staged output and a read-only workspace copy; `/` refused                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `GAP1-01`, `GAP1-02` (fixed)                    |
 | Launcher ceilings and confinement tests | Resolved: 256 MiB, 8 MiB stack, 300 s bounds; escape regression tests; symlink warning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `SEC-02`, `SEC-07`, `GAP1-V2` (fixed)           |
 | Launcher invocation                     | Resolved: symlink-resolving, executable through its shebang, listed under `package.json` `bin`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `SEC-06`, `GAP1-V1` (fixed)                     |
-| Release trust                           | Unsigned, hand-built assets; CI token and download hardening                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `SEC-04`, `SEC-08`                              |
+| Release trust                           | Older assets without attestations; immutable release and tag settings; CI token and download hardening                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `SEC-04`, `SEC-08`                              |
 | Names and diagnostics                   | Control characters pass through; host filesystems differ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `SEC-05`, `GAP3-07`                             |

@@ -13,6 +13,7 @@ import {
   flavorNamed,
   flavors,
   goModuleTag,
+  isStableVersion,
   packageName,
   parseReleaseFile,
   readMetadata,
@@ -79,7 +80,7 @@ const prepareArguments = [
   "run",
   "--allow-read",
   "--allow-write=build",
-  "--allow-run=git,go",
+  "--allow-run=deno,git,go",
   "scripts/release.ts",
   "--out",
   out,
@@ -87,7 +88,13 @@ const prepareArguments = [
   "--allow-existing-tag",
 ];
 const prepare = (...flags: string[]) =>
-  command([...prepareArguments, ...flags]);
+  command([
+    ...prepareArguments,
+    ...(isStableVersion(flags.includes(tools.flag!) ? toolsVersion : version)
+      ? ["--stable"]
+      : []),
+    ...flags,
+  ]);
 
 /** The digest lines SHA256SUMS must carry for a prepared candidate. */
 async function checkAssets(candidate: string, candidateStem: string) {
@@ -657,8 +664,9 @@ const publishArguments = [
   "run",
   "--allow-read",
   "--allow-write=build",
-  "--allow-run=git,go",
+  "--allow-run=deno,git,go",
   "scripts/release.ts",
+  ...(isStableVersion(version) ? ["--stable"] : []),
   "--out",
   probeOut,
 ];

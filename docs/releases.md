@@ -105,10 +105,10 @@ changes another flavor's version.
    extracts to exactly that manifest.
 3. The `publish` job (tag pushes only, and only if no release exists for the
    tag) re-verifies the uploaded assets, attaches build-provenance and SBOM
-   attestations, and creates a **draft prerelease** titled `<flavor> <version>`
-   with `<stem>.tgz`, `<stem>.manifest.json`, `<stem>.spdx.json`, and
-   `SHA256SUMS`. The notes come from the CHANGELOG entry and the digests, plus
-   the workflow and CI run links.
+   attestations, and creates a **draft release** titled `<flavor> <version>`
+   (marked prerelease for `X.Y.Z-rc.N`, stable for `X.Y.Z`) with `<stem>.tgz`,
+   `<stem>.manifest.json`, `<stem>.spdx.json`, and `SHA256SUMS`. The notes come
+   from the CHANGELOG entry and the digests, plus the workflow and CI run links.
 4. Download the draft's assets and verify them as a consumer would (below). Add
    the row to [published releases](#published-releases) in a docs commit, then
    publish the draft. With immutable releases enabled, the assets can no longer
@@ -117,11 +117,14 @@ changes another flavor's version.
    its next version (for example `0.1.0-rc.4` to `0.1.0-rc.5`) and commit, so
    that later candidates of the flavor never carry a published version;
    candidate mode refuses a flavor version whose tag exists at another commit.
-   The other flavors keep their versions until they are released. The Go module
-   tag `sdk/go/v<version>` takes the `capnpc-wasm` version: it is created by
-   hand, after the SDK API freeze, at the commit that `capnpc-wasm-v<version>`
-   names, and is not part of this workflow. `release.ts` refuses a `capnpc-wasm`
-   build whose Go module tag points at another commit.
+   The other flavors keep their versions until they are released. The release
+   metadata's `private` flag is true when all flavors are RC versions, and false
+   while any flavor names a stable version; update that shared flag if the bump
+   changes this condition. The Go module tag `sdk/go/v<version>` takes the
+   `capnpc-wasm` version: it is created by hand, after the SDK API freeze, at
+   the commit that `capnpc-wasm-v<version>` names, and is not part of this
+   workflow. `release.ts` refuses a `capnpc-wasm` build whose Go module tag
+   points at another commit.
 
 Repository settings that only a human can enable, and that the workflow assumes:
 immutable releases (Settings, General); tag rulesets for `capnp-wasm-*`,
@@ -130,6 +133,30 @@ deletion and updates (require signed tags when every maintainer signs); branch
 protection on `main` requiring the CI checks; and Actions permissions that allow
 the workflow's `contents: write`, `id-token: write`, and `attestations: write`
 grants.
+
+### Stable packaging
+
+`release.json` remains private while every flavor is a release candidate. To
+prepare a stable flavor, change only its version to `X.Y.Z` and set
+`private: false`, after the decisions in
+[release readiness](release-readiness.md) are recorded. Other flavors can keep
+their RC versions and still produce private packages. Versions with leading
+zeros, build metadata, or other prerelease suffixes are rejected.
+
+Stable packaging requires the explicit `--stable` flag. The release workflow
+selects it for a stable version; local `release:*` tasks accept it after `--`.
+The guard checks that the SDK API matches its baseline and that the ledger
+records seven consecutive first-attempt scheduled passes, with the newest today
+or yesterday in UTC, and `publicationAuthorized: true`. It rejects a different
+repository, workflow, or event and inconsistent cycle counters or dates. Publish
+mode additionally runs the read-only live nightly audit with `--check`, so stale
+evidence, a re-run, an API error, or missing GitHub access blocks the archive
+before output is written. Candidate override flags remain unavailable in publish
+mode.
+
+`private: false` and `--stable` prepare archive metadata; neither publishes an
+npm or JSR package. Registries follow the recorded channel decision. The Go
+module tag is still created by hand at the full SDK's release commit.
 
 To verify a download, check the assets, compare the archive digest with the
 [published releases](#published-releases) row (a channel independent of the
@@ -470,8 +497,8 @@ rc.3 are published at the links above.
 ## Deno and npm-compatible JavaScript
 
 The archive contains ESM `typescript/mod.js`, its TypeScript declarations,
-`typescript/worker.js`, all six Wasm commands, standard schemas, licenses, and a
-source copy of the Go SDK. No runtime import points back into the source
+`typescript/worker.js`, all five Wasm commands, standard schemas, licenses, and
+a source copy of the Go SDK. No runtime import points back into the source
 checkout. The package exports its main module, `./worker`, `./wasm/*`, and
 `./include/*`. It has no JavaScript package dependencies.
 

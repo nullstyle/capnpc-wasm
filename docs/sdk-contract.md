@@ -243,6 +243,11 @@ files as a single compile.
 
 ## Conformance
 
+- The [API baseline](../tests/fixtures/contract/README.md) pins the shipped
+  TypeScript declarations and Go public documentation. `test:sdk-api` compares
+  their complete shapes and checks TypeScript's declaration and value exports
+  against the public entrypoint.
+
 - Both SDKs are compared byte for byte with the native compiler and generators
   on the same workspaces, including the
   [feature corpus](../tests/fixtures/features/README.md) and the compiler-path

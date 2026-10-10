@@ -29,6 +29,7 @@ Area guides live beside their code:
 [examples/browser](../examples/browser/README.md),
 [tests/browser](../tests/browser/README.md),
 [tests/fixtures/features](../tests/fixtures/features/README.md),
+[tests/fixtures/contract](../tests/fixtures/contract/README.md),
 [tests/hosts/deno](../tests/hosts/deno/README.md),
 [tests/hosts/wazero](../tests/hosts/wazero/README.md), and
 [ref](../ref/README.md).

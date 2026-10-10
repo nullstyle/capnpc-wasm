@@ -7,7 +7,12 @@
 // as the optional argument, and otherwise on the Deno that runs this script,
 // the pinned one under mise (test:compiler-host-package passes no argument).
 import { packageFiles, sha256, verifyRelease } from "./verify-release.ts";
-import { archiveStem, flavorNamed, readMetadata } from "./release.ts";
+import {
+  archiveStem,
+  flavorNamed,
+  isStableVersion,
+  readMetadata,
+} from "./release.ts";
 import { compilerPathFixture } from "../tests/package/compiler-path-fixture.ts";
 
 const deno = Deno.args[0] ?? Deno.execPath();
@@ -85,8 +90,9 @@ const prepare = [
   "run",
   "--allow-read",
   "--allow-write=build",
-  "--allow-run=git",
+  "--allow-run=deno,git,go",
   "scripts/release.ts",
+  ...(isStableVersion(version) ? ["--stable"] : []),
   flavor.flag!,
   "--out",
   out,

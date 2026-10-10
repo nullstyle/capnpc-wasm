@@ -43,6 +43,15 @@ of the two takes the matching version change at its next release.
 
 ## Stable tier
 
+The `0.1.0` API baseline is recorded in
+[`tests/fixtures/contract/`](../tests/fixtures/contract/README.md).
+`mise run test:sdk-api` checks the shipped TypeScript declarations and Go's
+complete public documentation against it. It also checks that the declaration
+exports and JavaScript values match the TypeScript entrypoint. Review each
+difference under this policy and the SDK contract before updating the baseline.
+The release readiness page records the freeze decision; publication fixes each
+flavor's interface under the version rules below.
+
 A stable interface changes only as the [version rules](#version-rules) allow.
 The TypeScript exports are those of a package's main entry (`typescript/mod.js`
 with `typescript/mod.d.ts`, built from `sdk/typescript/mod.ts`); the Go exports

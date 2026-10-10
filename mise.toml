@@ -200,6 +200,8 @@ depends = [
   "test:sdk-ts",
   "test:features",
   "test:sdk-go",
+  "test:sdk-api",
+  "test:release-rules",
   # The Deno example imports dist/, so the type check of examples/deno.ts lives here.
   "example:deno",
   "test:cli-parity",
@@ -213,6 +215,15 @@ depends = [
 description = "Compare compiler and generator behavior in Wasmtime, wazero, and the Deno browser shim"
 depends = ["build:native", "build:wasm", "build:rust", "build:go", "build:wazero"]
 run = "deno test --allow-read --allow-write=build --allow-run --allow-env={{vars.suite_env}} tests/toolchain_test.ts"
+
+[tasks."test:sdk-api"]
+description = "Compare shipped TypeScript declarations and Go public docs with the reviewed API baseline; -- --write updates it explicitly"
+depends = ["build:sdk"]
+run = "deno run --allow-read --allow-run=deno,go --allow-write=tests/fixtures/contract scripts/check-sdk-api.ts"
+
+[tasks."test:release-rules"]
+description = "Verify stable packaging refuses stale, incomplete, rerun, or unapproved nightly evidence and detects SDK API drift"
+run = "deno test --allow-read tests/package/release-readiness_test.ts"
 
 [tasks."test:sdk-ts"]
 description = "Run every TypeScript SDK test under sdk/typescript/ on the pinned Deno"
@@ -315,7 +326,7 @@ run = "deno run --config tests/browser/deno.json --frozen --no-prompt --allow-re
 [tasks."release:prepare"]
 description = "Prepare a full SDK release candidate in dist/releases: archive, manifest, SBOM, notes, and SHA256SUMS (refuses a dirty tree)"
 depends = ["build:sdk"]
-run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/release.ts"
+run = "deno run --allow-read --allow-write=dist --allow-run=deno,git,go scripts/release.ts"
 
 [tasks."test:package"]
 description = "Verify reproducible candidate packaging and clean external Deno/Go consumers"
@@ -331,19 +342,18 @@ description = "Check the packaged Wasmtime launcher (binary streams, filesystem 
 # dirty tree and leaves dist/releases alone.
 depends = ["build:sdk"]
 run = [
-  "deno run --allow-read --allow-write=build --allow-run=git,go scripts/release.ts --out build/test/launcher --allow-dirty --allow-existing-tag",
-  "deno run --allow-read --allow-write=build --allow-run=bash,deno,wasmtime tests/package/launcher.ts",
+  "deno run --allow-read --allow-write=build --allow-run=bash,deno,git,go,wasmtime tests/package/launcher.ts",
 ]
 
 [tasks."release:tools"]
 description = "Prepare a compiler-only (tools) release candidate in dist/releases for repository toolchain integrations"
 depends = ["build:sdk"]
-run = "deno run --allow-read --allow-write=dist --allow-run=git,go scripts/release.ts --tools-only"
+run = "deno run --allow-read --allow-write=dist --allow-run=deno,git,go scripts/release.ts --tools-only"
 
 [tasks."release:compiler-host"]
 description = "Prepare a compiler and TypeScript host release candidate in dist/releases, without language generators"
 depends = ["build:sdk"]
-run = "deno run --allow-read --allow-write=dist --allow-run=git scripts/release.ts --compiler-host"
+run = "deno run --allow-read --allow-write=dist --allow-run=deno,git,go scripts/release.ts --compiler-host"
 
 [tasks."test:compiler-host-package"]
 description = "Verify compiler-host packaging and an offline external Deno worker consumer"

@@ -2,6 +2,8 @@ import { packageFiles } from "../../scripts/verify-release.ts";
 import {
   archiveStem,
   flavorNamed,
+  isStableVersion,
+  prepareRelease,
   readMetadata,
 } from "../../scripts/release.ts";
 import { runLauncherConformance } from "../conformance/launcher-surface.ts";
@@ -1553,10 +1555,18 @@ export async function checkLauncher(
 }
 
 if (import.meta.main) {
-  // `mise run test:launcher` prepares this candidate first; pass another
-  // package directory to check it instead.
+  // Prepare a throwaway candidate only when no existing package was supplied.
   const full = flavorNamed("capnpc-wasm");
   const { version } = await readMetadata(full);
+  if (Deno.args.length === 0) {
+    await prepareRelease({
+      flavor: full,
+      out: "build/test/launcher",
+      allowDirty: true,
+      allowExistingTag: true,
+      stable: isStableVersion(version),
+    });
+  }
   await checkLauncher(
     Deno.args[0] ??
       `build/test/launcher/${archiveStem(full, version)}/package`,
