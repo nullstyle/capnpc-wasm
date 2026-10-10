@@ -230,16 +230,23 @@ files those components need.
 
 ## Repository toolchain launcher
 
-Both archives include `bin/capnp-wasm`, an executable Bash launcher for Wasmtime
-(`package.json` also lists it under `bin`). It resolves its package root through
-symlinks, from a bare name, and with `CDPATH` set, so it can be linked onto
-`PATH` or run as `bash package/bin/capnp-wasm`. The packaged Wasmtime version is
-generated from `mise.toml` into `runtime/wasmtime-version`. The launcher accepts
-that version, any newer patch release of the same `major.minor` series (with a
-one-line warning), or exactly the version named by
-`CAPNP_WASM_WASMTIME_ACCEPT_VERSION`; anything else fails before the guest
-starts. `CAPNP_WASM_WASMTIME` selects the executable, otherwise `wasmtime` on
-`PATH`. Package integrity verification belongs to the consumer's bootstrap step.
+The tools archive and the full SDK archive include two launchers that implement
+one contract. `bin/capnp-wasm` is an executable Bash launcher for Linux and
+macOS (`package.json` lists it under `bin`). `bin/capnp-wasm.py` is the portable
+launcher for Linux, macOS, and Windows; it needs Python 3.9 or newer and nothing
+outside the Python standard library. The portable launcher is the supported way
+to run these archives on Windows, and it behaves the same on Linux and macOS;
+its additions are [below](#the-portable-launcher). The Bash launcher resolves
+its package root through symlinks, from a bare name, and with `CDPATH` set, so
+it can be linked onto `PATH` or run as `bash package/bin/capnp-wasm`. The
+packaged Wasmtime version is generated from `mise.toml` into
+`runtime/wasmtime-version`. Both launchers accept that version, any newer patch
+release of the same `major.minor` series (with a one-line warning), or exactly
+the version named by `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`; anything else fails
+before the guest starts. `CAPNP_WASM_WASMTIME` selects the executable, otherwise
+`wasmtime` on `PATH`. The Bash launcher leaves package integrity verification to
+the consumer's bootstrap step; the portable launcher checks the package before
+every run.
 
 ```sh
 # Stage project schemas and the required bundled includes in a fresh workspace.
@@ -328,6 +335,7 @@ statuses:
 | 69    | Wasmtime executable not found, or its version could not be read                                                                                                     |
 | 70    | The launcher cannot resolve its own location (unreadable or overlong symlink chain)                                                                                 |
 | 73    | Cannot stage the workspace, or cannot publish generator output (conflict, read-only, symlink, not writable); a move that fails part-way keeps the staging directory |
+| 74    | The package fails verification against its `manifest.json` (portable launcher only)                                                                                 |
 | 78    | Packaged runtime version missing, Wasmtime version rejected, or an invalid environment override                                                                     |
 | 134   | Wasmtime trap: timeout (`wasm trap: interrupt`), stack exhaustion, or a guest fault; the module's basename and a bounded backtrace are printed on stderr            |
 | 1     | Wasmtime could not load or instantiate a module whose magic bytes were valid                                                                                        |
@@ -337,13 +345,60 @@ statuses:
 `capnp-wasm --help` prints this contract and `capnp-wasm --version` prints the
 package version and the packaged Wasmtime version, both with exit 0.
 
+### The portable launcher
+
+`bin/capnp-wasm.py` implements the `compiler` and `generator` modes, the bounds,
+the environment overrides, and the exit statuses above, and the launcher test
+suite runs every check of the contract against both launchers. It adds:
+
+- Package verification. Before every mode except `--help` and `--version`, it
+  checks every file that `manifest.json` lists, by length and SHA-256, and that
+  the package holds no other file, as `verify-release.ts` does; a failure exits
+  74 before Wasmtime starts. `CAPNP_WASM_EXPECT_MANIFEST_SHA256` makes every run
+  also require that `manifest.json` has the digest a release publishes, and
+  `verify [--expect-manifest-sha256 HEX]` checks the package and prints the
+  digest. This checks an extracted package; the digest of the archive itself
+  still comes from the published releases row or `SHA256SUMS`.
+- `capnp -- CAPNP_ARGS...` runs the compiler on paths relative to the current
+  directory, like a native `capnp`. The deepest directory that holds the current
+  directory and every filename, `-I` path, and `--src-prefix` in the arguments
+  becomes guest `/`, because KJ opens every input through one root directory.
+  The guest reads that directory itself, not a copy. The bundled schemas are
+  added after the caller's options as `--no-standard-import -I<include>` unless
+  the arguments hold `--no-standard-import`, `--help`, or `--version`; when the
+  package is outside that directory, the schemas are copied into a temporary
+  `.capnp-wasm-include.*` directory in the current directory for the run. A
+  `compile` whose source prefixes do not cover the current directory also gets
+  `--src-prefix` for it, so requested file names stay relative to the caller. On
+  Windows, every path must be on the current directory's volume, and a
+  drive-relative path such as `D:schema.capnp` is refused with exit 64.
+- `generate (--module WASM | --plugin EXE) --output DIR [--plugin-arg ARG]... -- SCHEMA_ARGS...`
+  compiles `SCHEMA_ARGS` as `capnp` does (it adds `compile -o-` and refuses
+  `compile`, `-o`, and `--output` in them), spools the request to a temporary
+  file, and runs a WASI generator under Wasmtime with the generator mode's
+  staging, or a native generator with a staging directory as its working
+  directory. The output directory may be relative and is created if missing;
+  files move into it with the generator mode's checks only after both steps
+  succeed. Each `--plugin-arg` passes one generator argument
+  (`--plugin-arg=--no-reflection` for one that starts with `-`).
+
+On Windows, Wasmtime reports a trap with exit 3, the same status as a guest that
+exits 3, so the portable launcher reads Wasmtime's standard error as it passes
+it through and reports a trap as 134. Ctrl+C stops the guest and the launcher
+removes its staging directories. File permissions in the read-only workspace
+copy follow Windows semantics: the copied files are read-only, and the
+directories are not. The `windows-launcher` CI job runs
+`tests/package/portable_launcher_test.py` on `windows-latest` with Python 3.13
+against a tools candidate and the Zig generator built on Linux; `test:launcher`
+and `test:package` run the same test and the full contract on Linux and macOS.
+
 `mise run test:cli-parity` runs upstream `capnp-test.sh` plus conversion and
 eval matrices through the launcher, raw Wasmtime, wazero, and the Deno host,
 byte-compared with the native compiler.
 
 `mise run release:tools` prepares
 `dist/releases/capnp-wasm-tools-<version>/capnp-wasm-tools-<version>.tgz`. This
-smaller archive includes the compiler, standard include schemas, launcher,
+smaller archive includes the compiler, standard include schemas, both launchers,
 runtime version, licenses, and source provenance/integrity inventory. It omits
 SDK code and generator modules; repository consumers build generators matching
 their own runtime dependency pins. It uses the same `package/` extraction

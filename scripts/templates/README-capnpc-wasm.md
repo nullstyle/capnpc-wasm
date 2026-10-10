@@ -6,7 +6,9 @@ The complete Cap'n Proto toolchain for WebAssembly hosts: the schema compiler
 and the C++, schema-inspection, Rust, Go, and Zig generators as WASI commands
 (`wasm/`), the standard schemas (`include/`), the TypeScript host for Deno and
 browser workers (`typescript/`), the Go SDK source for wazero (`sdk/go/`), and
-`bin/capnp-wasm`, a Bash launcher for Wasmtime {{wasmtime}}. Built from
+two launchers for Wasmtime {{wasmtime}}: `bin/capnp-wasm.py` (Python 3.9 or
+newer; Linux, macOS, and Windows) and `bin/capnp-wasm` (Bash; Linux and macOS).
+Built from
 [nullstyle/capnpc-wasm](https://github.com/nullstyle/capnpc-wasm) at commit
 [`{{shortCommit}}`](https://github.com/nullstyle/capnpc-wasm/commit/{{commit}}) for the release
 [`{{tag}}`](https://github.com/nullstyle/capnpc-wasm/releases/tag/{{tag}}).
@@ -88,12 +90,35 @@ go mod edit -replace=github.com/nullstyle/capnpc-wasm/sdk/go=/absolute/path/to/p
 go mod tidy
 ```
 
-## Build systems: the launcher
+## Build systems: the launchers
 
-`bin/capnp-wasm` runs the compiler and the packaged generators under Wasmtime
-{{wasmtime}} (or a newer patch release of the same series) with explicit
-read-only workspace and staged output directories. With `example.capnp` in the
-current directory:
+Both launchers run the compiler and the packaged generators under Wasmtime
+{{wasmtime}} (or a newer patch release of the same series) and bound the
+guest's memory and time. From your project directory, on any of the three
+systems, the Python launcher's `capnp` mode takes paths relative to the current
+directory and adds the bundled schemas after your own `-I` paths, and its
+`generate` mode compiles and runs a generator in one step, writing the output
+directory only when both succeed. With `example.capnp` in the current directory:
+
+```sh example
+mkdir -p work/schema
+cp example.capnp work/schema/
+cd work
+python3 ../package/bin/capnp-wasm.py capnp -- \
+  compile -o- --src-prefix=schema schema/example.capnp > request.bin
+python3 ../package/bin/capnp-wasm.py generate --module ../package/wasm/capnpc-zig.wasm \
+  --output gen -- --src-prefix=schema schema/example.capnp
+```
+
+On Windows run `py -3` or `python`, from `cmd.exe`, Git Bash, or PowerShell 7.4
+or newer: Windows PowerShell 5.1 re-encodes redirected binary output. The Zig
+output needs the capnp-zig runtime that the
+[runtime requirements](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/README.md#generated-code-runtime-requirements)
+name for this commit.
+
+The compiler and generator modes are the launcher contract that both launchers
+implement, with a read-only copy of a workspace directory and absolute guest
+paths:
 
 ```sh example
 mkdir -p "$PWD/work/input/include" "$PWD/work/output"
@@ -106,9 +131,11 @@ package/bin/capnp-wasm generator --module "$PWD/package/wasm/capnpc-c++.wasm" \
   --output "$PWD/work/output" -- < "$PWD/work/request.bin"
 ```
 
-Module, workspace, and output paths must be absolute.
-`package/bin/capnp-wasm --help` prints the complete contract: filesystem roots,
-bounds and their environment overrides, and exit statuses.
+Module, workspace, and output paths must be absolute in these two modes.
+Generate from a request with the archive version that compiled it. `--help` on
+either launcher prints the complete contract: filesystem roots, bounds and their
+environment overrides, and exit statuses. The Python launcher also checks every
+packaged file against `manifest.json` before each run.
 
 ## Contents
 
@@ -118,7 +145,7 @@ bounds and their environment overrides, and exit statuses.
 | `include/`                           | The standard schemas and `go.capnp`                               |
 | `typescript/`                        | `mod.js`, `mod.d.ts`, and `worker.js`                             |
 | `sdk/go/`                            | The Go SDK module source                                          |
-| `bin/capnp-wasm`, `runtime/`         | The Wasmtime launcher and the Wasmtime version it accepts         |
+| `bin/`, `runtime/`                   | The Python and Bash launchers and the Wasmtime version they accept |
 | `docs/typescript.md`                 | The TypeScript SDK guide at the producer commit                   |
 | `manifest.json`, `verify-release.ts` | Every file's length and SHA-256, and the verifier                 |
 | `provenance/`                        | Source-file digests, tool pins, Go dependency, Zig reference      |

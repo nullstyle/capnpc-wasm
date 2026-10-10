@@ -194,7 +194,8 @@ function codeBlocks(markdown: string, info: string): string[] {
  */
 async function runReadmeExamples(
   extracted: string,
-  expected: { ts?: RegExp; sh?: string[] },
+  // sh: the files each `sh example` block must write, one list per block.
+  expected: { ts?: RegExp; sh?: string[][] },
 ): Promise<string[]> {
   const readme = await Deno.readTextFile(`${extracted}/README.md`);
   const checks: string[] = [];
@@ -203,7 +204,7 @@ async function runReadmeExamples(
   if ((expected.ts !== undefined) !== (tsBlocks.length > 0)) {
     throw new Error(`${extracted}: unexpected number of ts example blocks`);
   }
-  if ((expected.sh !== undefined) !== (shBlocks.length > 0)) {
+  if ((expected.sh?.length ?? 0) !== shBlocks.length) {
     throw new Error(`${extracted}: unexpected number of sh example blocks`);
   }
   for (const [index, block] of tsBlocks.entries()) {
@@ -235,7 +236,7 @@ async function runReadmeExamples(
       "@0xece4bf9c1f867623; struct Example { value @0 :Text; }\n",
     );
     await command(["bash", "-euo", "pipefail", "-c", block], { cwd: parent });
-    for (const path of expected.sh!) {
+    for (const path of expected.sh![index]) {
       const stat = await Deno.stat(`${parent}/${path}`).catch(() => undefined);
       if (!stat?.isFile || stat.size === 0) {
         throw new Error(`README shell example ${index} did not write ${path}`);
@@ -818,7 +819,10 @@ try {
   }
   const exampleChecks = await runReadmeExamples(extracted, {
     ts: /pub mod person/,
-    sh: ["work/request.bin", "work/output/example.capnp.h"],
+    sh: [
+      ["work/request.bin", "work/gen/example.zig"],
+      ["work/request.bin", "work/output/example.capnp.h"],
+    ],
   });
   const manifestPath = `${extracted}/manifest.json`;
   const manifestBytes = await Deno.readFile(manifestPath);
@@ -881,7 +885,7 @@ try {
     ) || toolsReadme.includes("{{")
   ) throw new Error("packaged tools README is not the rendered template");
   const toolsExampleChecks = await runReadmeExamples(toolsInstalled, {
-    sh: ["work/request.bin"],
+    sh: [["work/request.bin"], ["work/request.bin"]],
   });
   await checkLauncher(toolsInstalled, installed);
   await Deno.copyFile("tests/package/consumer.ts", `${consumer}/consumer.ts`);

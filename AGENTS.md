@@ -132,8 +132,8 @@ SDK bounds inside the pages keep their values.
   Studio's Content-Security-Policy and fails on any axe-core violation. Keep the
   CSP hash in `examples/browser/index.html` in step with its inline boot script;
   `build:studio` fails otherwise.
-- Release scripts, `scripts/templates/`, `bin/capnp-wasm`, or packaged docs:
-  `mise run test:package` and `mise run test:launcher`;
+- Release scripts, `scripts/templates/`, `bin/capnp-wasm`, `bin/capnp-wasm.py`,
+  or packaged docs: `mise run test:package` and `mise run test:launcher`;
   `mise run test:compiler-host-package` for the compiler-host flavor.
 - Release evidence (`docs/release-evidence/`, `scripts/check-evidence.ts`,
   `scripts/audit-nightly.ts`): `mise run check:evidence`, part of `lint`,

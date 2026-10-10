@@ -94,6 +94,25 @@ jobs:
           retention-days: 7
       - name: Verify release archive and external package consumers
         run: mise run test:package
+      # The windows-launcher job runs the portable launcher on these
+      # Linux-built bytes: a tools candidate prepared from this clean
+      # checkout, and the Zig generator module.
+      - name: Stage the portable launcher inputs for Windows
+        if: matrix.os == 'ubuntu-24.04'
+        run: |
+          mise exec -- deno run --allow-read --allow-write=build --allow-run=git,go \
+            scripts/release.ts --tools-only --out build/ci-windows
+          mkdir -p build/ci-windows/inputs/modules
+          cp -R build/ci-windows/capnp-wasm-tools-*/package build/ci-windows/inputs/package
+          cp dist/wasm/capnpc-zig.wasm build/ci-windows/inputs/modules/
+      - name: Upload the portable launcher inputs
+        if: matrix.os == 'ubuntu-24.04'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: windows-launcher-inputs
+          path: build/ci-windows/inputs/
+          if-no-files-found: error
+          retention-days: 7
       - name: Run the Go SDK concurrency tests under the race detector
         run: mise run test:sdk-go-race
       - name: Verify checks leave the tree unchanged
@@ -112,6 +131,61 @@ jobs:
           path: build/test/
           if-no-files-found: ignore
           retention-days: 7
+
+  # The portable launcher (bin/capnp-wasm.py), the supported way to run the
+  # tools archive on Windows, against the candidate and module the Linux check
+  # job built: package verification, compiler and generator modes, the capnp
+  # and generate modes with Windows paths, exit statuses, and traps. mise has
+  # no Windows lock entries, so the job installs the pinned Wasmtime itself.
+  windows-launcher:
+    name: Portable launcher (windows-latest)
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      # wasmtime-v<version>-x86_64-windows.zip of bytecodealliance/wasmtime,
+      # with the sha256 GitHub records for that release asset. Change both
+      # with the wasmtime pin in mise.toml; the install step checks the pin.
+      WASMTIME_VERSION: 48.0.1
+      WASMTIME_SHA256: a9cb78e5f2705b35192052026138ee14eeb6983fe2d2aefed6b0c797f01d1a0f
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: windows-launcher-inputs
+          path: ${{ runner.temp }}/inputs
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Install the pinned Wasmtime
+        shell: pwsh
+        run: |
+          $pinned = (Select-String -Path mise.toml -Pattern '^wasmtime = "(.*)"$').Matches[0].Groups[1].Value
+          if ($pinned -ne $env:WASMTIME_VERSION) {
+            Write-Output "::error::mise.toml pins wasmtime $pinned; update WASMTIME_VERSION and WASMTIME_SHA256 in this job"
+            exit 1
+          }
+          $name = "wasmtime-v$($env:WASMTIME_VERSION)-x86_64-windows"
+          $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
+          Invoke-WebRequest -Uri "https://github.com/bytecodealliance/wasmtime/releases/download/v$($env:WASMTIME_VERSION)/$name.zip" -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($actual -ne $env:WASMTIME_SHA256) {
+            Write-Output "::error::$name.zip has sha256 $actual, not the pinned $($env:WASMTIME_SHA256)"
+            exit 1
+          }
+          Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:RUNNER_TEMP $name)
+      - name: Test the portable launcher on Windows
+        shell: pwsh
+        env:
+          CAPNP_WASM_TEST_PACKAGE: ${{ runner.temp }}\inputs\package
+          CAPNP_WASM_TEST_MODULES: ${{ runner.temp }}\inputs\modules
+        run: |
+          wasmtime --version
+          python --version
+          python -B -m unittest -v tests/package/portable_launcher_test.py
 
   # Report-only: are the Wasm modules byte-identical between the Linux and
   # macOS builds? Each host checks its own modules against the artifact

@@ -81,7 +81,8 @@ checkout. Initial installation and reference fetching need network access.
 
 Prerequisites, on macOS and Linux, arm64 and x64 (CI tests Linux x64 and macOS
 arm64 on every push; the nightly workflow, on `main` since 2026-10-07, runs the
-other two daily; Windows supports only the Go SDK, not development):
+other two daily; on Windows the Go SDK and the portable launcher are supported,
+not development):
 
 - Run `mise trust` once in every new clone or worktree; mise refuses untrusted
   configuration, and a non-interactive session stops there.
@@ -216,21 +217,21 @@ Evidence as of 2026-10-07. "Tested" means a CI check runs on every push to
 workflow reached `main` on 2026-10-07 and runs daily at 11:17 UTC (see
 [release readiness](docs/release-readiness.md)).
 
-| Host or runtime                                                                      | Status                                                                                                                                                  | Evidence                                                         |
-| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Linux x64 (ubuntu-24.04 with `g++-14` and `pkg-config`)                              | Tested on every push: build, tests, packaging                                                                                                           | CI job `check`                                                   |
-| macOS arm64 (macos-15 with Xcode Command Line Tools)                                 | Tested on every push: build, tests, packaging                                                                                                           | CI job `check`                                                   |
-| Linux arm64 (ubuntu-24.04-arm), macOS x64 (macos-15-intel)                           | Supported; tested nightly, not per push: cold bootstrap, `check`, packaging                                                                             | Nightly job `bootstrap` (scheduled since 2026-10-07)             |
-| Windows: the Go SDK only (windows-latest)                                            | Supported for the Go SDK; tested nightly against Linux-built modules, native comparisons skipped. No build, launcher, or tooling support                | Nightly job `windows-go-sdk` (scheduled since 2026-10-07)        |
-| Wasmtime 48.0.1                                                                      | Tested; the packaged launcher accepts this version, newer 48.0.x patch releases (warning), or one version named by `CAPNP_WASM_WASMTIME_ACCEPT_VERSION` | `test:package`, `test:launcher`, `tests/toolchain_test.ts`       |
-| wazero `v1.12.1-0.20260908083515-451613caac44`, compiler engine with experimental EH | Tested                                                                                                                                                  | `sdk/go` tests, `test:package`, `tests/toolchain_test.ts`        |
-| Deno 2.9.6, direct execution                                                         | Tested                                                                                                                                                  | `mise run test` (`test:sdk-ts`)                                  |
-| Deno 2.9.6, worker execution                                                         | Tested; `createWorkerCompiler` admits every Deno release with Wasm exception handling                                                                   | `mise run test` (`test:sdk-ts`), worker tests on the pinned Deno |
-| Chromium 153.0.8010.12 (r1243), Firefox 155.0 (r1543), WebKit 26.6 (r2359) on Linux  | Tested: offline SDK parity, cancellation, Schema Studio                                                                                                 | CI job `browsers`                                                |
-| Chromium, Firefox, WebKit on macOS (macos-15)                                        | Tested nightly: SDK parity, cancellation, Studio, soak; all three engines passed two verification runs before the workflow reached `main`               | [Recorded runs](tests/browser/README.md#termination-acceptance)  |
-| Node.js and Bun, direct execution (`createCompiler`)                                 | Best effort, with no support guarantee: Bun 1.3.14 verified locally, not in CI; Node.js untested                                                        | A local run on Bun 1.3.14                                        |
-| Node.js and Bun, worker execution (`createWorkerCompiler`)                           | Bun: admitted, verified locally on Bun 1.3.14, not run in CI. Node.js: rejected, it has no Web `Worker`; use direct execution                           | `test:sdk-ts` (simulated runtimes); local runs on Bun 1.3.14     |
-| Other browser versions                                                               | Untested; no support claimed                                                                                                                            | None                                                             |
+| Host or runtime                                                                      | Status                                                                                                                                                                                                                                                        | Evidence                                                         |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Linux x64 (ubuntu-24.04 with `g++-14` and `pkg-config`)                              | Tested on every push: build, tests, packaging                                                                                                                                                                                                                 | CI job `check`                                                   |
+| macOS arm64 (macos-15 with Xcode Command Line Tools)                                 | Tested on every push: build, tests, packaging                                                                                                                                                                                                                 | CI job `check`                                                   |
+| Linux arm64 (ubuntu-24.04-arm), macOS x64 (macos-15-intel)                           | Supported; tested nightly, not per push: cold bootstrap, `check`, packaging                                                                                                                                                                                   | Nightly job `bootstrap` (scheduled since 2026-10-07)             |
+| Windows (windows-latest): the Go SDK and the portable launcher                       | Supported for the Go SDK, tested nightly against Linux-built modules with native comparisons skipped; the portable launcher (`bin/capnp-wasm.py`, Python 3.13) is tested on every push against a Linux-built tools candidate. No build or development tooling | Nightly job `windows-go-sdk`; CI job `windows-launcher`          |
+| Wasmtime 48.0.1                                                                      | Tested; the packaged launcher accepts this version, newer 48.0.x patch releases (warning), or one version named by `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`                                                                                                       | `test:package`, `test:launcher`, `tests/toolchain_test.ts`       |
+| wazero `v1.12.1-0.20260908083515-451613caac44`, compiler engine with experimental EH | Tested                                                                                                                                                                                                                                                        | `sdk/go` tests, `test:package`, `tests/toolchain_test.ts`        |
+| Deno 2.9.6, direct execution                                                         | Tested                                                                                                                                                                                                                                                        | `mise run test` (`test:sdk-ts`)                                  |
+| Deno 2.9.6, worker execution                                                         | Tested; `createWorkerCompiler` admits every Deno release with Wasm exception handling                                                                                                                                                                         | `mise run test` (`test:sdk-ts`), worker tests on the pinned Deno |
+| Chromium 153.0.8010.12 (r1243), Firefox 155.0 (r1543), WebKit 26.6 (r2359) on Linux  | Tested: offline SDK parity, cancellation, Schema Studio                                                                                                                                                                                                       | CI job `browsers`                                                |
+| Chromium, Firefox, WebKit on macOS (macos-15)                                        | Tested nightly: SDK parity, cancellation, Studio, soak; all three engines passed two verification runs before the workflow reached `main`                                                                                                                     | [Recorded runs](tests/browser/README.md#termination-acceptance)  |
+| Node.js and Bun, direct execution (`createCompiler`)                                 | Best effort, with no support guarantee: Bun 1.3.14 verified locally, not in CI; Node.js untested                                                                                                                                                              | A local run on Bun 1.3.14                                        |
+| Node.js and Bun, worker execution (`createWorkerCompiler`)                           | Bun: admitted, verified locally on Bun 1.3.14, not run in CI. Node.js: rejected, it has no Web `Worker`; use direct execution                                                                                                                                 | `test:sdk-ts` (simulated runtimes); local runs on Bun 1.3.14     |
+| Other browser versions                                                               | Untested; no support claimed                                                                                                                                                                                                                                  | None                                                             |
 
 ## Generated code runtime requirements
 
@@ -247,13 +248,18 @@ pinned generator. Consumption details, including package manifests, are in the
 
 ## Repository toolchain integration
 
-The release archives include a small Bash/Wasmtime launcher for build systems.
-It runs schema compilation, binary conversion, and separately built WASI
-language generators with explicit filesystem roots, preserving binary streams
-and exit statuses. `mise run release:tools` prepares a compiler-only candidate
-for consumers that pin their own generators; `mise run test:package` checks both
-archive variants with real external consumers, and `mise run test:launcher`
-checks the launcher alone. From now on, only the
+The tools and full SDK archives include two Wasmtime launchers for build
+systems: `bin/capnp-wasm.py`, the portable launcher for Linux, macOS, and
+Windows (Python 3.9 or newer, standard library only), and `bin/capnp-wasm`, a
+Bash launcher for Linux and macOS. They run schema compilation, binary
+conversion, and separately built WASI language generators with explicit
+filesystem roots, preserving binary streams and exit statuses; the portable
+launcher also verifies the package before every run and takes paths relative to
+the current directory in its `capnp` and `generate` modes.
+`mise run release:tools` prepares a compiler-only candidate for consumers that
+pin their own generators; `mise run test:package` checks both archive variants
+with real external consumers, and `mise run test:launcher` checks both launchers
+alone. From now on, only the
 [release workflow](docs/releases.md#release-process) builds releases; the three
 published prereleases were built by hand before it existed. Each archive flavor
 has its own version in `release.json`, and the

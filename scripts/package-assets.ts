@@ -534,6 +534,11 @@ const artifacts: Artifact[] = [
     description: "the Wasmtime launcher",
     components: [project],
   },
+  {
+    path: "bin/capnp-wasm.py",
+    description: "the portable Wasmtime launcher (Python)",
+    components: [project],
+  },
 ];
 for (const artifact of artifacts) {
   if (artifact.components.length === 0) {
@@ -549,7 +554,12 @@ const flavors: Record<string, { title: string; artifacts: Artifact[] }> = {
   },
   "capnp-wasm-tools": {
     title: "capnp-wasm-tools (compiler and Wasmtime launcher)",
-    artifacts: flavor(["wasm/capnp.wasm", "include/", "bin/capnp-wasm"]),
+    artifacts: flavor([
+      "wasm/capnp.wasm",
+      "include/",
+      "bin/capnp-wasm",
+      "bin/capnp-wasm.py",
+    ]),
   },
   "capnp-wasm-compiler-host": {
     title: "capnp-wasm-compiler-host (compiler and TypeScript host)",

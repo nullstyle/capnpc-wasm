@@ -151,6 +151,34 @@ guest's own validation.
   directory next to `--output` or a `capnp-wasm.*` workspace copy under
   `$TMPDIR`.
 
+### Portable launcher (`bin/capnp-wasm.py`)
+
+- Its `compiler` and `generator` modes run the same Wasmtime command with the
+  same roots, bounds, staging, and publication checks as `bin/capnp-wasm`, and
+  the launcher test suite runs every check against both launchers.
+- Before every run it verifies the package against `manifest.json` (every file's
+  length and SHA-256, no other file), and `CAPNP_WASM_EXPECT_MANIFEST_SHA256`
+  (trusted, validated) ties it to a published digest. A party that can rewrite
+  the package can also rewrite the launcher, so this detects corruption and
+  local edits after a verified download; the archive digest from the published
+  releases row remains the trust anchor.
+- The `capnp` and `generate` modes map the deepest common directory of the
+  current directory and every path argument as guest `/`, not a copy, so the
+  compiler can read, and with host permissions write, that whole tree. The
+  compiler module is the verified packaged one, which writes nothing for
+  `compile -o-`, `encode`, `decode`, `eval`, or `convert`; use the `compiler`
+  mode with a workspace copy when the tree must stay out of reach. When the
+  package lies outside that directory, the bundled schemas are copied into a
+  temporary `.capnp-wasm-include.*` directory in the current directory, which a
+  killed process can leave behind.
+- `generate --plugin` runs a native executable that the caller names, with the
+  caller's environment and a staging directory as its working directory; it is
+  as trusted as any program the caller runs. Its output passes the generator
+  mode's publication checks.
+- On Windows the workspace copy's files are read-only but its directories are
+  not, and Wasmtime's trap status (3) is told apart from a guest exit 3 by its
+  standard error.
+
 ### Development runners (`tests/hosts/`)
 
 Trusted staging directories only. The wazero runner's `--dir` grants are

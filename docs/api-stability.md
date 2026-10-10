@@ -89,10 +89,13 @@ limit names and defaults, stage names, error classes, and guest command lines.
 Raising a default limit is compatible; lowering one is a break.
 
 Archives: the package layout (`wasm/`, `include/`, `typescript/`, `sdk/go/`,
-`bin/capnp-wasm`, `runtime/wasmtime-version`, `manifest.json` in format 1, and
-`verify-release.ts` with its options), and the launcher's modes, options, and
-exit statuses in the
-[launcher contract](releases.md#repository-toolchain-launcher).
+`bin/capnp-wasm`, `bin/capnp-wasm.py`, `runtime/wasmtime-version`,
+`manifest.json` in format 1, and `verify-release.ts` with its options), and the
+launchers' modes, options, and exit statuses in the
+[launcher contract](releases.md#repository-toolchain-launcher), including the
+portable launcher's `capnp`, `generate`, and `verify` modes and its exit status
+74. The Python version floor of `bin/capnp-wasm.py` (3.9) rises only in a minor
+release.
 
 These changes are compatible: a new optional field in a request or options type,
 a new field in a result or error, a new export, option, stage, or `Language`
@@ -111,18 +114,41 @@ may change them.
 An experimental interface may change or disappear in any release, including a
 patch release, with a CHANGELOG bullet and without a deprecation period.
 
-- The launcher's environment overrides: `CAPNP_WASM_WASMTIME`,
+- The launchers' environment overrides: `CAPNP_WASM_WASMTIME`,
   `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`, `CAPNP_WASM_MAX_MEMORY`,
-  `CAPNP_WASM_TIMEOUT`, and `CAPNP_WASM_MAX_WORKSPACE`.
+  `CAPNP_WASM_TIMEOUT`, `CAPNP_WASM_MAX_WORKSPACE`, and
+  `CAPNP_WASM_EXPECT_MANIFEST_SHA256`.
 - Timing: worker start-up and restart, the engine's termination grace, and how
   long a cancelled job takes to settle.
 - Generation from a saved `CodeGeneratorRequest` that a different version
-  compiled. `generate` and `Generate` are stable for requests from the same
-  version; key a cache of requests by package version and workspace.
+  compiled. See [saved requests](#saved-requests) for the supported pattern.
 - The `globals` argument of `isBoundedWorkerSupported`, and constructing a
   `CompileError` in application code.
 - Schema Studio (`examples/browser/`): its interface, saved state, and workspace
   ZIP layout.
+
+## Saved requests
+
+Projects often commit a compiled `CodeGeneratorRequest` (`request.bin`), so that
+a build runs only the generator and needs no schema compiler. That is supported,
+on these terms:
+
+- Compile the request and generate from it with the same archive version: the
+  same `capnp-wasm-tools`, `capnpc-wasm`, or `capnp-wasm-compiler-host` release,
+  or the same SDK version. `generate` and `Generate`, and every launcher mode,
+  are stable for requests from their own version.
+- Key a cache of requests, or the committed files, by that package version and
+  the workspace contents, and record the version next to the files, for example
+  in the pin that downloads the archive. When the pin changes, compile every
+  request again and review the diff together with the regenerated code.
+- A request is a standard Cap'n Proto message, and an older one usually still
+  generates. The compiler's output is not covered by these rules (see below), so
+  a new version may add or change schema node fields; regenerating keeps the
+  committed request equal to what that version's compiler writes.
+
+A generator built from a capnp-zig release, such as the native `capnpc-zig` that
+a `build.zig.zon` dependency builds, reads requests from any of these archives;
+its own output follows that capnp-zig release.
 
 ## Not covered
 

@@ -24,19 +24,19 @@ changes. Examples from history:
 
 ## Verifying a change
 
-| Changed area                                                                                                            | Run before committing                                                                           |
-| ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| C++ port: `patches/capnproto/`, `cmake/`, `scripts/build-wasm.sh`                                                       | `mise run test`                                                                                 |
-| Generator wrappers and consumers: `generators/`, `tests/consumers/`                                                     | `mise run test`                                                                                 |
-| Zig reference or mirrored fixtures: `ref/capnp-zig`, `generators/zig/sync.json`                                         | `mise run build:zig` (runs `check:zig-sync`), then `mise run test`                              |
-| TypeScript SDK: `sdk/typescript/`                                                                                       | `mise run test` and `mise run test:browser`                                                     |
-| Go SDK: `sdk/go/`                                                                                                       | `mise run test:sdk-go` and `mise run test:sdk-go-race` (`mise run lint` runs the vet)           |
-| Schema Studio: `examples/browser/`, `scripts/build-studio.ts`, `scripts/serve-example.ts`                               | `mise run test:studio-unit`, then `mise run test:studio`                                        |
-| Packaging: `scripts/release.ts`, `scripts/templates/`, `bin/capnp-wasm`, `sdk/typescript/README.md`, `sdk/go/README.md` | `mise run test:package`, `mise run test:launcher`, `mise run test:compiler-host-package`        |
-| Release evidence: `docs/release-evidence/`, `scripts/check-evidence.ts`, and `audit-nightly.ts`                         | `mise run test:evidence` and `mise run check:evidence` (`lint` runs it)                         |
-| Development runners: `tests/hosts/`                                                                                     | `mise run test`                                                                                 |
-| Markdown                                                                                                                | `mise run check:links` and `mise exec -- deno fmt --check <files>`; `mise run lint` covers both |
-| Anything, before a pull request                                                                                         | `mise run check`, then `git diff --exit-code`                                                   |
+| Changed area                                                                                                                                 | Run before committing                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| C++ port: `patches/capnproto/`, `cmake/`, `scripts/build-wasm.sh`                                                                            | `mise run test`                                                                                 |
+| Generator wrappers and consumers: `generators/`, `tests/consumers/`                                                                          | `mise run test`                                                                                 |
+| Zig reference or mirrored fixtures: `ref/capnp-zig`, `generators/zig/sync.json`                                                              | `mise run build:zig` (runs `check:zig-sync`), then `mise run test`                              |
+| TypeScript SDK: `sdk/typescript/`                                                                                                            | `mise run test` and `mise run test:browser`                                                     |
+| Go SDK: `sdk/go/`                                                                                                                            | `mise run test:sdk-go` and `mise run test:sdk-go-race` (`mise run lint` runs the vet)           |
+| Schema Studio: `examples/browser/`, `scripts/build-studio.ts`, `scripts/serve-example.ts`                                                    | `mise run test:studio-unit`, then `mise run test:studio`                                        |
+| Packaging: `scripts/release.ts`, `scripts/templates/`, `bin/capnp-wasm`, `bin/capnp-wasm.py`, `sdk/typescript/README.md`, `sdk/go/README.md` | `mise run test:package`, `mise run test:launcher`, `mise run test:compiler-host-package`        |
+| Release evidence: `docs/release-evidence/`, `scripts/check-evidence.ts`, and `audit-nightly.ts`                                              | `mise run test:evidence` and `mise run check:evidence` (`lint` runs it)                         |
+| Development runners: `tests/hosts/`                                                                                                          | `mise run test`                                                                                 |
+| Markdown                                                                                                                                     | `mise run check:links` and `mise exec -- deno fmt --check <files>`; `mise run lint` covers both |
+| Anything, before a pull request                                                                                                              | `mise run check`, then `git diff --exit-code`                                                   |
 
 `mise run check` runs `lint`, `doctor`, and `test`. `test` fans out to one
 `test:<suite>` task per suite (`mise tasks ls` lists them), each depending only

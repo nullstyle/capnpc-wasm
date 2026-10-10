@@ -379,7 +379,7 @@ description = "Verify reproducible candidate packaging and clean external Deno/G
 # --allow-dirty), so it runs on a dirty tree and never touches dist/releases;
 # build:native is for the compiler-host gate it follows.
 depends = ["build:native", "build:sdk", "test:compiler-host-package"]
-run = "deno run --allow-read --allow-write=build --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts"
+run = "deno run --allow-read --allow-write=build --allow-run=deno,go,cmake,bash,python3,wasmtime scripts/test-package.ts"
 
 [tasks."test:launcher"]
 description = "Check the packaged Wasmtime launcher (binary streams, filesystem roots, failures, and the conformance corpus) in a candidate prepared under build/test/launcher"
@@ -388,7 +388,7 @@ description = "Check the packaged Wasmtime launcher (binary streams, filesystem 
 depends = ["build:sdk"]
 run = [
   "deno run --allow-read --allow-write=build --allow-run=git,go scripts/release.ts --out build/test/launcher --allow-dirty --allow-existing-tag",
-  "deno run --allow-read --allow-write=build --allow-run=bash,wasmtime tests/package/launcher.ts",
+  "deno run --allow-read --allow-write=build --allow-run=bash,python3,wasmtime tests/package/launcher.ts",
 ]
 
 [tasks."release:tools"]

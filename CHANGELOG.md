@@ -272,6 +272,20 @@ every flavor it applies to has shipped it.
   `--output-dir=` option, and its size budget rises to 2,200,000 bytes
   (1,917,601 bytes at v0.24.0, from 1,668,492 in the full SDK rc.5).
 
+- Launcher: `bin/capnp-wasm.py`, a portable launcher for Linux, macOS, and
+  Windows (Python 3.9 or newer, standard library only), ships next to the Bash
+  launcher in the tools and full SDK archives. It implements the same `compiler`
+  and `generator` contract, checks every packaged file against `manifest.json`
+  before each run (exit 74; `CAPNP_WASM_EXPECT_MANIFEST_SHA256` and `verify` pin
+  the published digest), and adds the `capnp` and `generate` modes, ported from
+  capnp-zig's `tools/capnp_tool.py`, which take paths relative to the current
+  directory, add the bundled schemas, and compile and run a Wasm (`--module`) or
+  native (`--plugin`) generator in one step. A new CI job tests it on
+  `windows-latest`.
+- Documentation: `docs/api-stability.md` states the supported pattern for saved
+  requests (compile and generate with one archive version, and key cached or
+  committed requests by it).
+
 ## capnp-wasm-compiler-host
 
 Compiler and TypeScript host for Deno and browser workers: `wasm/capnp.wasm`,
