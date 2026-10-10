@@ -3,19 +3,40 @@
  * pages of memory and asks the host for far more: iovec arrays, random
  * bytes, descriptors, or writes at pointers outside memory. The SDK must
  * answer each request with an errno (or a clean CompileError) in well under a
- * second and without allocating in proportion to the guest's arguments.
+ * second of work and without allocating in proportion to the guest's
+ * arguments.
  */
+import process from "node:process";
 import { CompileError, type CompileResult, createCompiler } from "./mod.ts";
 import { hostileGuests } from "./testdata/hostile_guests.ts";
 import { assert, equalBytes, rejects } from "./testdata/support.ts";
 
 const rssBudget = 256 * 1024 * 1024;
 
+/**
+ * The work bound is on the CPU this thread spent: a direct job runs its
+ * guest and every WASI import it calls on the calling thread, so host work in
+ * proportion to a guest's request would spend it there, while a loaded host
+ * only stretches the wall time and the engine's helper threads (compilation,
+ * parallel collection) are not that work. The wall-clock bound only catches a
+ * hang. Without process.threadCpuUsage, the whole process's CPU.
+ */
+const workMs = 1000;
+const hangMs = 30_000;
+
+function cpuMs(): number {
+  const { user, system } = typeof process.threadCpuUsage === "function"
+    ? process.threadCpuUsage()
+    : process.cpuUsage();
+  return (user + system) / 1000;
+}
+
 Deno.test("SDK bounds guest-sized WASI imports on one-page guests", async (t) => {
   for (const [guestName, guest] of Object.entries(hostileGuests)) {
     await t.step(guestName, async () => {
       const rssBefore = Deno.memoryUsage().rss;
       const started = performance.now();
+      const spent = cpuMs();
       const compiler = await createCompiler({
         compiler: guest.bytes,
         generators: guest.stage === "generator" ? { cpp: guest.bytes } : {},
@@ -76,7 +97,14 @@ Deno.test("SDK bounds guest-sized WASI imports on one-page guests", async (t) =>
         }
       }
       const elapsed = performance.now() - started;
-      assert(elapsed < 1000, `${guestName} took ${elapsed.toFixed(0)} ms`);
+      const cpu = cpuMs() - spent;
+      assert(
+        cpu < workMs,
+        `${guestName} took ${cpu.toFixed(0)} ms of CPU (${
+          elapsed.toFixed(0)
+        } ms)`,
+      );
+      assert(elapsed < hangMs, `${guestName} took ${elapsed.toFixed(0)} ms`);
       const growth = Deno.memoryUsage().rss - rssBefore;
       assert(
         growth < rssBudget,
