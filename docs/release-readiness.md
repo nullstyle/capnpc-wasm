@@ -8,14 +8,16 @@ published; the [changelog](../CHANGELOG.md) records what shipped; the
 [history narrative](history/release-confidence-2026-09.md) keeps the September
 2026 evidence trail that this page replaced.
 
-Published: four GitHub prereleases — tools rc.2, compiler-host rc.2 and rc.3
-(2026-09-15), and the full SDK rc.5 (2026-10-07, the first release built by the
-release workflow, with build-provenance and SBOM attestations) — listed with
-their digests under [published releases](releases.md#published-releases).
-`release.json` holds one version per flavor (`capnpc-wasm` 0.1.0-rc.6,
-`capnp-wasm-tools` 0.1.0-rc.3, `capnp-wasm-compiler-host` 0.1.0-rc.4), and
-`scripts/release.ts` refuses to package anything that is not a private release
-candidate.
+Published: six GitHub prereleases — tools rc.2, compiler-host rc.2 and rc.3
+(2026-09-15), the full SDK rc.5 (2026-10-07, the first release built by the
+release workflow, with build-provenance and SBOM attestations), and tools rc.3
+and the full SDK rc.6 (2026-10-10, the first with the Deno launcher; the full
+SDK no longer ships the Zig generator) — listed with their digests under
+[published releases](releases.md#published-releases). `release.json` holds one
+version per flavor (`capnpc-wasm` 0.1.0-rc.6, `capnp-wasm-tools` 0.1.0-rc.3,
+`capnp-wasm-compiler-host` 0.1.0-rc.4) until the two releases are published and
+their entries move on, and `scripts/release.ts` refuses to package anything that
+is not a private release candidate.
 
 ## Gates
 

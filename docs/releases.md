@@ -20,24 +20,28 @@ and tags are named.
 
 ## Public compiler downloads
 
-| Package                        | Release                                                                                                  | Host runtime           |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------- | ---------------------- |
-| Full SDK (TypeScript and Go)   | [0.1.0-rc.5](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnpc-wasm-v0.1.0-rc.5)              | Deno, browser, Go 1.25 |
-| Compiler and Wasmtime launcher | [0.1.0-rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.2)         | Wasmtime 48.0.1        |
-| Compiler and TypeScript host   | [0.1.0-rc.3](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.3) | Deno worker: 2.6.8     |
+| Package                        | Release                                                                                                  | Host runtime                                                    |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Full SDK (TypeScript and Go)   | [0.1.0-rc.6](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnpc-wasm-v0.1.0-rc.6)              | Deno, browser, Go 1.25, Wasmtime 48.0.x                         |
+| Compiler and Wasmtime launcher | [0.1.0-rc.3](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.3)         | Wasmtime 48.0.x and Deno 2.4.5 or newer (Linux, macOS, Windows) |
+| Compiler and TypeScript host   | [0.1.0-rc.3](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.3) | Deno worker: 2.6.8                                              |
 
 The earlier
+[full SDK rc.5](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnpc-wasm-v0.1.0-rc.5),
+[tools rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.2),
+and
 [compiler host rc.2](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-compiler-host-v0.1.0-rc.2)
-is also available. All three archives and their `SHA256SUMS` files were first
-published on 2026-09-15 on the maintainer's former release host, the
-`nullstyle/slcp-zig` repository (SLCP is a consuming application project), and
-copied byte for byte to this repository the same day. Versions, archive hashes,
-manifests, and embedded provenance are unchanged; the original download URLs on
-that host remain available for consumers that already pin them. These archives
-were built by hand before the release workflow existed, and they predate the
-launcher contract below (bounds, exit statuses, `--help`, and `--version`) and
-the Wasm artifact changes (path-independent bytes, DWARF stripped); the next
-release of each flavor is the first to carry them.
+are also available. Tools rc.2 and both compiler-host archives and their
+`SHA256SUMS` files were first published on 2026-09-15 on the maintainer's former
+release host, the `nullstyle/slcp-zig` repository (SLCP is a consuming
+application project), and copied byte for byte to this repository the same day.
+Versions, archive hashes, manifests, and embedded provenance are unchanged; the
+original download URLs on that host remain available for consumers that already
+pin them. These archives were built by hand before the release workflow existed,
+and they predate the launcher contract below (bounds, exit statuses, `--help`,
+and `--version`) and the Wasm artifact changes (path-independent bytes, DWARF
+stripped). Tools rc.3 and the full SDK carry them, and the next compiler-host
+release will.
 
 Published assets are immutable: changed bytes need a new version. GitHub's
 generated source archives are separate from the release assets.
@@ -66,6 +70,8 @@ changed afterwards.
 | Compiler host rc.2, 2026-09-15 | `capnp-wasm-compiler-host-0.1.0-rc.2.tgz`, 944,201 bytes | `5f99f8756070c9eb267160b1af41efe227175ace3e5f751b3a35bb5bb2470b24` | `e84125596f6d26818529f1315ca10875ae99910e35c47f97a27e97a0a2db7bc6`                                  | `97508128435afcc502aab63f1f08a3aa8090a1b7` | Not green: the macos-15 `mise run check` step failed and the other jobs were cancelled by the next push ([run 34933604007](https://github.com/nullstyle/capnpc-wasm/actions/runs/34933604007))                                   |
 | Compiler host rc.3, 2026-09-15 | `capnp-wasm-compiler-host-0.1.0-rc.3.tgz`, 945,229 bytes | `ca8dfa0033e417e1db0522f2d1c28ccfeda4d42c18ae160de3a26d8a763521ec` | `322fa3148ec3cb7e31454b910a5e8d831a3bf1ec2635b5a8c5794c10a66077ce`                                  | `a5ccaae128665914d3878d83908bd5ddbece58ea` | Failed only at `git diff --exit-code` after every check passed on both hosts ([run 34934841115](https://github.com/nullstyle/capnpc-wasm/actions/runs/34934841115)); fixed by `672679a`                                          |
 | Full SDK rc.5, 2026-10-07      | `capnpc-wasm-0.1.0-rc.5.tgz`, 3,944,974 bytes            | `84c80737cdd26d2ff3d8725da52cf16b9313d24d0d93d379ced0a2bb8066b911` | `6e439c23cfc7a0478a0a02007274b66a91a092d4c6a1a72a93670d5e1b55d25e`                                  | `f6a9509211ff1782a954b51538a77ae5b30e7330` | Passed ([run 37571913174](https://github.com/nullstyle/capnpc-wasm/actions/runs/37571913174)); built and attested by the release workflow ([run 37573044236](https://github.com/nullstyle/capnpc-wasm/actions/runs/37573044236)) |
+| Tools rc.3, 2026-10-10         | `capnp-wasm-tools-0.1.0-rc.3.tgz`, 568,157 bytes         | `66d996add5170a859617eb460f2f6a3251fd82211b11333aab349c075e62fd8b` | `5fb0a16e4226e83c36abdc59341bce54c463e2b6f0339294a83a6f59bb0dbb46`                                  | `db54a68f8bff5b89e4a5b7a689bea65f672d32bd` | Passed ([run 38027556712](https://github.com/nullstyle/capnpc-wasm/actions/runs/38027556712)); built and attested by the release workflow ([run 38030426803](https://github.com/nullstyle/capnpc-wasm/actions/runs/38030426803)) |
+| Full SDK rc.6, 2026-10-10      | `capnpc-wasm-0.1.0-rc.6.tgz`, 3,610,805 bytes            | `f05cdc24bc7ac94e80351bab0f9e8843aebeb4bbedf5f6a824ba78722c122acf` | `d47a05edafc6bce3c180ef397eda9b7020e285f000eb8e644712fd44db52c9a7`                                  | `db54a68f8bff5b89e4a5b7a689bea65f672d32bd` | Passed ([run 38027556712](https://github.com/nullstyle/capnpc-wasm/actions/runs/38027556712)); built and attested by the release workflow ([run 38030426800](https://github.com/nullstyle/capnpc-wasm/actions/runs/38030426800)) |
 
 ## Release process
 

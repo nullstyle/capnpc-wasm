@@ -14,10 +14,10 @@ requests, diagnostics, and outputs. Zig code generation belongs to
 [capnp-zig](https://github.com/nullstyle/capnp-zig); its `capnpc-zig` plugin
 reads the requests this compiler writes ([Zig](#zig)).
 
-Status: three compiler prereleases are published on this repository's
-[releases page](https://github.com/nullstyle/capnpc-wasm/releases): the compiler
-with a Wasmtime launcher (rc.2) and the compiler with the TypeScript host (rc.2
-and rc.3). The full SDK archive, registry packages, and a stable SDK interface
+Status: prereleases are published on this repository's
+[releases page](https://github.com/nullstyle/capnpc-wasm/releases): the full SDK
+(rc.6), the compiler with its Wasmtime launcher (tools rc.3), and the compiler
+with the TypeScript host (rc.3). Registry packages and a stable SDK interface
 are unreleased; [release readiness](docs/release-readiness.md) records every
 gate. The [docs index](docs/README.md) lists current documents and history,
 [CONTRIBUTING.md](CONTRIBUTING.md) the contributor workflow, and
@@ -25,38 +25,39 @@ gate. The [docs index](docs/README.md) lists current documents and history,
 
 ## Use the published compiler
 
-The compiler-only archive runs the Cap'n Proto compiler under a pinned Wasmtime
-through a small Bash launcher; no source build is needed. Download
-`capnp-wasm-tools-0.1.0-rc.2.tgz` and `SHA256SUMS` from the
-[tools rc.2 release](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.2),
+The compiler-only archive runs the Cap'n Proto compiler under Wasmtime 48.0.1
+(or a newer 48.0.x) through its launcher; no source build is needed. On Linux,
+macOS, and Windows, the launcher `bin/capnp-wasm.ts` needs Deno 2.4.5 or newer.
+Download `capnp-wasm-tools-0.1.0-rc.3.tgz` and `SHA256SUMS` from the
+[tools rc.3 release](https://github.com/nullstyle/capnpc-wasm/releases/tag/capnp-wasm-tools-v0.1.0-rc.3),
 compare the archive digest with the value recorded under
-[published releases](docs/releases.md#published-releases), then verify the
-extracted inventory and compile a schema:
+[published releases](docs/releases.md#published-releases), then extract it and
+compile a schema from your project directory:
 
 ```sh
-shasum -a 256 --ignore-missing -c SHA256SUMS
-tar -xzf capnp-wasm-tools-0.1.0-rc.2.tgz
-deno run --allow-read ./package/verify-release.ts ./package
-mkdir -p "$PWD/work/input/include" "$PWD/work/output"
-cp -R package/include/. "$PWD/work/input/include/"
-cp example.capnp "$PWD/work/input/"
-package/bin/capnp-wasm compiler --workspace "$PWD/work/input" -- \
-  compile --no-standard-import -I/include --src-prefix=/ -o- /example.capnp \
-  > "$PWD/work/request.bin"
+sha256sum -c SHA256SUMS
+tar -xzf capnp-wasm-tools-0.1.0-rc.3.tgz
+deno run --allow-all --no-config package/bin/capnp-wasm.ts verify \
+  --expect-manifest-sha256 5fb0a16e4226e83c36abdc59341bce54c463e2b6f0339294a83a6f59bb0dbb46
+deno run --allow-all --no-config package/bin/capnp-wasm.ts capnp -- \
+  compile -o- --src-prefix=schema schema/example.capnp > request.bin
 ```
 
-The launcher requires Wasmtime 48.0.1 or a newer 48.0.x patch release (recorded
-in `package/runtime/wasmtime-version`) on `PATH` or in `CAPNP_WASM_WASMTIME`; it
-runs the compiler against a read-only copy of the workspace with memory and time
-bounds. `request.bin` is a standard unpacked `CodeGeneratorRequest`; feed it to
-a generator built against your own runtime pin with `capnp-wasm generator`, as
-the [launcher contract](docs/releases.md#repository-toolchain-launcher) shows.
-Deno and browser applications use the
+The launcher checks every packaged file before each run, adds the bundled
+schemas after your own `-I` paths (so imports such as `/capnp/c++.capnp`
+resolve), and keeps requested file names relative to the current directory. On
+Windows run it from `cmd.exe`, Git Bash, or PowerShell 7.4 or newer, and check
+the archive with `Get-FileHash`. `request.bin` is a standard unpacked
+`CodeGeneratorRequest`; the launcher's `generate` mode compiles and runs a WASI
+or native generator in one step, as the
+[launcher contract](docs/releases.md#repository-toolchain-launcher) shows, along
+with its staged-workspace modes. Use the same archive version to compile a
+request and to generate from it. Deno and browser applications use the
 [compiler-host archive](docs/releases.md#compiler-and-typescript-host-package)
 instead: it bundles the compiler with the TypeScript SDK and needs no Wasmtime.
-Releases after these are built only by the tag-triggered
-[release workflow](docs/releases.md#release-process): their `SHA256SUMS` lists
-the archive, its manifest, and an SPDX SBOM (no `--ignore-missing` needed), and
+Releases are built only by the tag-triggered
+[release workflow](docs/releases.md#release-process): `SHA256SUMS` lists the
+archive, its manifest, and an SPDX SBOM, and
 `gh attestation verify <archive> --repo nullstyle/capnpc-wasm` checks the build
 provenance.
 

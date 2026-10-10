@@ -268,7 +268,7 @@ the Wasmtime launcher (`bin/capnp-wasm.ts` for Deno from 0.1.0-rc.3, the Bash
 `bin/capnp-wasm` before), licenses, manifest, and provenance. No SDK code or
 generator modules.
 
-### 0.1.0-rc.3
+### 0.1.0-rc.3 (2026-10-10)
 
 - First tools archive built and attested by the release workflow; it carries the
   launcher contract and the path-independent, DWARF-stripped compiler that rc.2
@@ -397,7 +397,7 @@ were prepared locally at `0.1.0-rc.1` (commit `94ba6b2`; receipt in
 used. The Go module tag `sdk/go/v<version>` takes the same version and is
 created by hand after the SDK API freeze. No `sdk/go/v*` tag exists.
 
-### 0.1.0-rc.6
+### 0.1.0-rc.6 (2026-10-10)
 
 - Zig generator, breaking: removed. capnp-zig owns the Zig generator and its
   runtime, so the archive no longer ships `wasm/capnpc-zig.wasm`, its notices,
