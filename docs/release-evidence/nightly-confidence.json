@@ -14,10 +14,10 @@
   "lastQualifyingScheduledDateUtc": null,
   "cycles": [],
   "streakEnd": {
-    "scheduledDateUtc": "2026-10-09",
+    "scheduledDateUtc": "2026-10-10",
     "kind": "conclusion",
-    "detail": "run 37923718435 concluded failure",
-    "runUrl": "https://github.com/nullstyle/capnpc-wasm/actions/runs/37923718435"
+    "detail": "run 38048300416 concluded failure",
+    "runUrl": "https://github.com/nullstyle/capnpc-wasm/actions/runs/38048300416"
   },
   "rules": [
     "A cycle is a run of the workflow named in workflow, triggered by schedule; GitHub runs scheduled workflows on the default branch only.",
