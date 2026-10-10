@@ -90,7 +90,7 @@ export const modules: Record<string, ModuleContract> = {
   "capnpc-capnp": { class: "cpp", budget: 900_000 },
   "capnpc-rust": { class: "generator", budget: 500_000 },
   "capnpc-go": { class: "generator", budget: 10_000_000 },
-  "capnpc-zig": { class: "generator", budget: 1_900_000 },
+  "capnpc-zig": { class: "generator", budget: 2_200_000 },
 };
 
 /** The `--features` argument for `wasm-tools validate`. */

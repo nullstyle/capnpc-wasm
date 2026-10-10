@@ -35,13 +35,27 @@ the pinned runtime alongside the generator. It applies no Zig patches and does
 not modify the reference checkout. See the
 [synchronization history](../../patches/capnp-zig/README.md).
 
-The upstream command options remain available, including `--verbose`,
-`--no-manifest`, `--api-profile=compact`, `--shape-sharing`, and the
-`max-codegen-*=N` budget tokens. Defaults emit the full API, binary reflection
-metadata, and the JSON export manifest. `--no-reflection` omits the binary
-metadata and generated schema references. The generated APIs still require the
-matching pinned runtime when reflection is disabled. `--no-manifest`
-independently omits the JSON export manifest. The command does not invoke
+The upstream command options of capnp-zig v0.24.0 remain available. Defaults
+emit the full API, binary reflection metadata, and the JSON export manifest.
+
+| Option                                                                 | Effect                                                                                                   |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `--output-dir=DIR`                                                     | Write beneath `DIR` (created if missing) instead of the working directory; ignore `CAPNPC_ZIG_*` options |
+| `--api-profile=compact`, `--api-profile=full`                          | Select the compact or the full (default) generated API                                                   |
+| `--shape-sharing`, `--no-shape-sharing`                                | Share generated struct shapes between identical layouts (off by default)                                 |
+| `--no-reflection`, `--reflection`                                      | Omit or keep the binary metadata and generated schema references                                         |
+| `--no-manifest`, `--manifest`                                          | Omit or keep the JSON export manifest, independently of reflection                                       |
+| `--verbose`                                                            | Log each generated file on stderr                                                                        |
+| `max-codegen-nodes=N`, `max-codegen-imports=N`, `max-codegen-fields=N` | Bound the request's nodes, imports, and fields                                                           |
+| `max-codegen-name-bytes=N`, `max-codegen-default-bytes=N`              | Bound name and default-value bytes                                                                       |
+| `max-schema-manifest-bytes=N`, `max-codegen-output-bytes=N`            | Bound the manifest and each generated file                                                               |
+| `max-codegen-brand-specializations=N`                                  | Bound generic brand specializations                                                                      |
+
+An argument may also hold several of these tokens separated by commas, except
+`--output-dir=`, whose path is taken whole. The generated APIs still require the
+matching pinned runtime when reflection is disabled. Under the packaged launcher
+the guest root is the staging directory, so pass the host directory with the
+launcher's `--output` and leave `--output-dir=` out. The command does not invoke
 another process or an external formatter. The host runs it with an empty
 environment, so environment-based upstream options do not affect SDK builds.
 

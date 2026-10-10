@@ -38,6 +38,14 @@ suite.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming",
   ];
   const work = await suite.workDir();
   const schemas = `${root}/tests/rpc_codegen/schemas`;
+  // The full runtime (lib.zig) reads capnp-zig's build options module in its
+  // fd-passing gate on Linux and macOS; a raw zig command passes it by hand
+  // with the default, as capnp-zig's build-integration guide says.
+  const buildOptions = `${work}/capnp_build_options.zig`;
+  await Deno.writeTextFile(
+    buildOptions,
+    "pub const fd_passing: bool = true;\n",
+  );
   for (const profile of ["full", "compact"]) {
     for (const fixture of cases) {
       const directory = `${work}/${profile}/${fixture.name}`;
@@ -116,7 +124,10 @@ suite.test("Zig RPC APIs: native/WASI paths, inherited dispatch, and streaming",
               `-Mroot=${directory}/${fixture.consumer}`,
               "--dep",
               "capnpc-zig",
+              "--dep",
+              "capnp_build_options",
               `-Mcapnpc-zig=${zigRuntime}/lib.zig`,
+              `-Mcapnp_build_options=${buildOptions}`,
               `-femit-bin=${executable}`,
             ], {
               label: `${target} consumer build`,

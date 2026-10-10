@@ -7,15 +7,20 @@
     "event": "schedule"
   },
   "nativeReference": "ref/capnp-zig",
-  "nativeRevision": "295ff5ea766bea3383485847a89b81884c61f969",
+  "nativeRevision": "a37ff29726173babbb9341ed5563d1da8a62ec82",
   "requiredConsecutiveScheduledRuns": 7,
-  "status": "no_scheduled_runs",
-  "statusDetail": "no completed scheduled run of .github/workflows/nightly.yml in nullstyle/capnpc-wasm yet; GitHub schedules the workflow only from the default branch, and the streak starts with its first scheduled run there",
+  "status": "measured",
+  "statusDetail": null,
   "currentConsecutiveScheduledRuns": 0,
   "firstQualifyingScheduledDateUtc": null,
   "lastQualifyingScheduledDateUtc": null,
   "cycles": [],
-  "streakEnd": null,
+  "streakEnd": {
+    "scheduledDateUtc": "2026-10-09",
+    "kind": "conclusion",
+    "detail": "run 37923718435 concluded failure",
+    "runUrl": "https://github.com/nullstyle/capnpc-wasm/actions/runs/37923718435"
+  },
   "rules": [
     "A cycle is a run of the workflow named in workflow, triggered by schedule; GitHub runs scheduled workflows on the default branch only.",
     "A cycle qualifies when the run concluded success on its first attempt and was never re-run, so every job without continue-on-error succeeded, and the ref/capnp-zig gitlink at the run's head commit equals nativeRevision, the gitlink the index pins when the ledger is computed.",

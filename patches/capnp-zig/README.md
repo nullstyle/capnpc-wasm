@@ -8,7 +8,14 @@ and the mirrored conformance fixtures against the `ref/capnp-zig` gitlink;
 `generators/zig/sync.json` only maps each mirrored fixture to its native path.
 The September 2026 advance from `0fb8df4` to `295ff5e` needed no patch; its only
 generator change is upstream's failure isolation for interfaces with streaming
-methods, and one mirrored fixture gained the tests for it.
+methods, and one mirrored fixture gained the tests for it. The October 2026
+advance from `295ff5e` to the release tag `v0.24.0` (`a37ff29`, tagged Zig
+0.17.0) also needed no patch. It brings the plugin's `--output-dir=` option,
+local-name shadowing fixes, interface slot error sets, and the codegen ABI check
+that generated files run against their runtime; three mirrored RPC fixtures
+gained upstream's tests, and the full runtime (`src/lib.zig`) now reads the
+`capnp_build_options` module on Linux and macOS, which the RPC codegen suite
+passes to its raw `zig test` command.
 
 Those changes covered workspace imports and generated-name collisions, canonical
 double-far list writing, lossless binary schema reflection, generated Builder

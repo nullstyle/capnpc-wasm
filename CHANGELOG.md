@@ -263,6 +263,15 @@ every flavor it applies to has shipped it.
   `url_replacements` rule, `mise run mirror:zig`, and `check:zig-lock` are
   retired; `check:lock-urls` still checks every Zig tarball and `.minisig`.
 
+- Zig generator, breaking for generated Zig: `ref/capnp-zig` advances from
+  `295ff5e` (0.18.0-era, untagged) to the release tag `v0.24.0` (`a37ff29`, Zig
+  0.17.0). Generated Zig now needs the capnp-zig v0.24.0 runtime (fetch
+  `git+https://github.com/nullstyle/capnp-zig.git#v0.24.0` and import its
+  `capnpc-zig-core` or `capnpc-zig` module as `capnpc-zig`); each file checks
+  the runtime's codegen ABI when it compiles. `capnpc-zig.wasm` gains upstream's
+  `--output-dir=` option, and its size budget rises to 2,200,000 bytes
+  (1,917,601 bytes at v0.24.0, from 1,668,492 in the full SDK rc.5).
+
 ## capnp-wasm-compiler-host
 
 Compiler and TypeScript host for Deno and browser workers: `wasm/capnp.wasm`,
