@@ -177,10 +177,11 @@ engines and Studio, the Windows launcher, and the Wasm digest report. The
 passed all 12 jobs on the same commit. Linux and macOS each completed five
 browser soak rounds and five SDK soak rounds; every SDK round passed 79 tests
 and 122 steps. Both browser jobs' logs show no stall warnings. The Intel Mac
-also passed the direct guest CPU regression and the full SDK suite. These are
-verification-branch results; `main` remains at `4f3c381`, and this change has
-not been merged. The manual runs do not count toward the scheduled streak of 0
-of 7. The macOS WebKit page-crash cause remains open, and successful scheduled
+also passed the direct guest CPU regression and the full SDK suite. These
+results were collected on a verification branch based on `main` at `4f3c381`. On
+2026-10-10 the maintainer approved fast-forwarding the revived code and its
+evidence to `main`. The manual runs do not count toward the scheduled streak of
+0 of 7. The macOS WebKit page-crash cause remains open, and successful scheduled
 runs with the revived code remain pending.
 
 Rules, from the JSON: a cycle is a scheduled run of the workflow. It qualifies
