@@ -10,6 +10,11 @@ every flavor it applies to has shipped it.
 
 ## Unreleased
 
+- Packaging, breaking: bundled TypeScript declarations now export only the SDK
+  entrypoint's public symbols. They previously advertised four internal helper
+  functions absent from the JavaScript bundle and the internal `WorkerRuntime`
+  type. Use the documented runtime probes and compiler factories.
+
 - Documentation: consumer quick start, support matrix, generated-code runtime
   requirements, published-release digests, security policy, threat model,
   contributor guide, architecture overview, and a dated release-readiness gate

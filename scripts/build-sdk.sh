@@ -27,6 +27,8 @@ mkdir -p "$staging/typescript"
 deno bundle --config sdk/typescript/deno.json --unstable-sloppy-imports \
   --platform browser --format esm --declaration \
   -o "$staging/typescript/mod.js" sdk/typescript/mod.ts
+deno run --allow-read --allow-write=dist --allow-run=deno \
+  scripts/fix-sdk-declarations.ts "$staging/typescript/mod.d.ts"
 deno bundle --config sdk/typescript/deno.json --unstable-sloppy-imports \
   --platform browser --format esm \
   -o "$staging/typescript/worker.js" sdk/typescript/worker.ts
