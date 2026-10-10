@@ -5,7 +5,7 @@ own copies of the subprocess, comparison, and directory helpers.
 
 | Module       | Exports                                                                                                                                                                                  |
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `paths.ts`   | `root`, `nativeBin`, `wasmBin`, `wazeroRun`, `buildTest`, `zigCacheDir`, `zigRuntime`                                                                                                    |
+| `paths.ts`   | `root`, `nativeBin`, `wasmBin`, `wazeroRun`, `buildTest`                                                                                                                                 |
 | `process.ts` | `run`, `mustSucceed`, `expectSuccess`, `describeExit`, `decodeText`, `childEnv`, `envGranted`, `envValue`, `ldflags`, `ENV_PASSTHROUGH`, `RunOptions`, `RunResult`, `MustSucceedOptions` |
 | `fs.ts`      | `copyTree`, `readTree`, `writeTree`, `asTree`, `Tree`, `TreeLike`                                                                                                                        |
 | `assert.ts`  | `assert`, `assertBytesEqual`, `assertTextEqual`, `assertTreesEqual`, `firstDifference`, `hexWindow`, `textOf`, `unifiedDiff`, `treePaths`                                                |
@@ -20,7 +20,7 @@ own copies of the subprocess, comparison, and directory helpers.
 child that exits before reading all of its input. After `timeoutMs` (60 s by
 default) the direct child receives SIGTERM, then SIGKILL 5 s later if it ignores
 that; once it has exited, `run` stops waiting for stdout and stderr, so a
-grandchild that inherited the pipes (a `cargo test` or `zig test` binary) cannot
+grandchild that inherited the pipes (a `cargo test` or `go test` binary) cannot
 hold the call open, and the output captured until then is returned with
 `timedOut` set. A step that compiles code (a consumer, probe, or oracle build)
 passes `buildTimeoutMs`, ten minutes, since cold compiler caches on a loaded

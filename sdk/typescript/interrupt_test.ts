@@ -497,7 +497,6 @@ Deno.test("SDK instruments every built toolchain module", async () => {
       "capnpc-capnp",
       "capnpc-go",
       "capnpc-rust",
-      "capnpc-zig",
     ]
   ) {
     const bytes = await read(`build/wasm/bin/${module}.wasm`);

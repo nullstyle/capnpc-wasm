@@ -8,7 +8,7 @@
 // launcher.
 //
 //   CAPNP_WASM_TEST_PACKAGE=/abs/package \
-//   CAPNP_WASM_TEST_MODULES=/abs/dir/with/capnpc-zig.wasm \
+//   CAPNP_WASM_TEST_MODULES=/abs/dir/with/capnpc-rust.wasm \
 //   deno test --allow-all --no-config tests/package/portable_launcher_test.ts
 //
 // Without CAPNP_WASM_TEST_PACKAGE only the unit tests run, against
@@ -605,7 +605,7 @@ endToEnd(
   async (scratch) => {
     const project = join(scratch, "project");
     await write(join(project, "schema", "checkpoint.capnp"), SCHEMA);
-    const module = join(MODULES!, "capnpc-zig.wasm");
+    const module = join(MODULES!, "capnpc-rust.wasm");
     const generated = await runLauncher([
       "generate",
       "--module",
@@ -617,10 +617,12 @@ endToEnd(
       "schema/checkpoint.capnp",
     ], { cwd: project });
     assertStatus(generated, 0, "generate");
-    const first = await Deno.readFile(join(project, "gen", "checkpoint.zig"));
+    const first = await Deno.readFile(
+      join(project, "gen", "checkpoint_capnp.rs"),
+    );
     assert(
-      text.decode(first).includes("pub const Checkpoint = struct"),
-      "no Checkpoint struct",
+      text.decode(first).includes("pub mod checkpoint {"),
+      "no checkpoint module",
     );
     const request = await runLauncher(
       [
@@ -648,7 +650,7 @@ endToEnd(
     });
     assertStatus(direct, 0, "generator mode");
     assertEquals(
-      await sha256(await Deno.readFile(join(output, "checkpoint.zig"))),
+      await sha256(await Deno.readFile(join(output, "checkpoint_capnp.rs"))),
       await sha256(first),
       "generated file digest",
     );
@@ -658,16 +660,20 @@ endToEnd(
       module,
       "--output",
       "compact",
-      "--plugin-arg=--api-profile=compact",
+      "--plugin-arg=--output-directory",
+      "--plugin-arg=/nested",
       "--",
       "--src-prefix=schema",
       "schema/checkpoint.capnp",
     ], { cwd: project });
     assertStatus(compact, 0, "compact");
-    assert(
+    assertEquals(
       await sha256(
-        await Deno.readFile(join(project, "compact", "checkpoint.zig")),
-      ) !== await sha256(first),
+        await Deno.readFile(
+          join(project, "compact", "nested", "checkpoint_capnp.rs"),
+        ),
+      ),
+      await sha256(first),
       "--plugin-arg did not reach the generator",
     );
     const failed = await runLauncher(

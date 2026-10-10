@@ -49,20 +49,6 @@ check_tool_version() {
   fi
 }
 
-check_zig_pin() {
-  # usage: check_zig_pin <pinned zig version> <reference mise.toml>
-  local pin="$1" file="$2" upstream
-  upstream="$(sed -n 's/^zig = "\(.*\)"$/\1/p' "$file" 2> /dev/null | head -n 1)"
-  if [[ -z "$upstream" ]]; then
-    echo "no zig pin found in $file"
-    return 1
-  fi
-  if [[ "$upstream" != "$pin" ]]; then
-    echo "mise.toml pins zig $pin but $file pins $upstream"
-    return 1
-  fi
-}
-
 check_wasi_sdk_pin() {
   # usage: check_wasi_sdk_pin <pinned wasi-sdk version> <reference dir>
   local pin="$1" dir="$2" tag
@@ -101,20 +87,6 @@ check_wazero_pin() {
   replace="$(awk '$1 == "replace" && $2 == "github.com/tetratelabs/wazero" && $3 == "=>" { print $4 }' "$host_mod" 2> /dev/null | head -n 1)"
   if [[ "$replace" != "../../../ref/wazero" ]]; then
     echo "$host_mod must replace github.com/tetratelabs/wazero with ../../../ref/wazero (found '${replace:-none}')"
-    return 1
-  fi
-}
-
-check_historical_commit() {
-  # usage: check_historical_commit <reference dir> <historical-reference file>
-  local dir="$1" file="$2" revision
-  revision="$(cat "$file" 2> /dev/null || true)"
-  if [[ ! "$revision" =~ ^[0-9a-f]{40}$ ]]; then
-    echo "$file does not contain a commit id"
-    return 1
-  fi
-  if ! git -C "$dir" cat-file -e "$revision^{commit}" 2> /dev/null; then
-    echo "$dir does not contain the historical commit $revision; run mise run refs:sync"
     return 1
   fi
 }

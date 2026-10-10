@@ -14,10 +14,10 @@ Include the archive name and version (or the commit), the host you used (the
 launcher with its Wasmtime version, the Deno version, the browser, or the Go
 SDK), the schema or request that triggers the problem, and what you observed.
 Problems that turn out to be in an upstream component (Cap'n Proto,
-capnproto-rust, go-capnp, capnp-zig, wazero, browser_wasi_shim, Wasmtime) are
-forwarded upstream after triage. The pinned revisions are the gitlinks under
-`ref/` (mapped in [ref/README.md](ref/README.md); `mise run refs:status` prints
-them) and the Wasmtime pin in `mise.toml`.
+capnproto-rust, go-capnp, wazero, browser_wasi_shim, Wasmtime) are forwarded
+upstream after triage. The pinned revisions are the gitlinks under `ref/`
+(mapped in [ref/README.md](ref/README.md); `mise run refs:status` prints them)
+and the Wasmtime pin in `mise.toml`.
 
 This is a single-maintainer project. Responses are best effort; there is no
 security team, service-level commitment, or bounty program.

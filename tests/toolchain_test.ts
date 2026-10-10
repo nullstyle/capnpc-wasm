@@ -24,7 +24,7 @@ import {
   normalizeDiagnostic,
   stageStandardIncludes,
 } from "./lib/oracle.ts";
-import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
+import { nativeBin, root, wasmBin } from "./lib/paths.ts";
 import {
   buildTimeoutMs,
   decodeText,
@@ -45,7 +45,7 @@ const invalidSchemas = [
   "missing-id",
   "unknown-type",
 ];
-const generators = ["c++", "capnp", "rust", "go", "zig"];
+const generators = ["c++", "capnp", "rust", "go"];
 const nativeUsageArgs = ["compile", "--bogus"];
 // The plan's `-promises=false -schemas=false` alone is rejected by upstream
 // capnpc-go (String() methods need embedded schemas); that rejection is
@@ -127,7 +127,7 @@ async function prepare() {
     (await readTree(expected)).size === 4,
     "expected two generated header/source pairs",
   );
-  for (const language of ["rust", "go", "zig"]) {
+  for (const language of ["rust", "go"]) {
     const directory = `${work}/native-${language}`;
     await Deno.mkdir(directory);
     await mustSucceed([`${nativeBin}/capnpc-${language}`], {
@@ -139,33 +139,6 @@ async function prepare() {
       (await readTree(directory)).size === 2,
       `expected two ${language} files`,
     );
-    if (language === "zig") {
-      // The maintained Zig generator now intentionally adds typed Builder and
-      // RPC APIs. --no-reflection disables descriptors, not those improvements;
-      // byte identity with the older pristine generator is no longer a contract.
-      const withoutReflection = `${work}/zig-without-reflection`;
-      await Deno.mkdir(withoutReflection);
-      await mustSucceed([`${nativeBin}/capnpc-zig`, "--no-reflection"], {
-        stdin: request,
-        cwd: withoutReflection,
-        label: "Zig generator without reflection metadata",
-      });
-      const plainFiles = await readTree(withoutReflection);
-      const reflectedFiles = await readTree(directory);
-      assert(
-        JSON.stringify([...plainFiles.keys()]) ===
-          JSON.stringify([...reflectedFiles.keys()]),
-        "--no-reflection changed generated Zig paths",
-      );
-      for (const [path, bytes] of plainFiles) {
-        const source = decodeText(bytes);
-        assert(
-          !source.includes("pub const CAPNP_SCHEMA_REQUEST") &&
-            !source.includes("pub const capnpSchema"),
-          `${path}: --no-reflection retained binary metadata`,
-        );
-      }
-    }
   }
   const inspection = await mustSucceed([`${nativeBin}/capnpc-capnp`], {
     stdin: request,
@@ -501,7 +474,7 @@ for (const host of wasmHosts) {
       );
     }
 
-    for (const language of ["rust", "go", "zig"]) {
+    for (const language of ["rust", "go"]) {
       for (
         const [source, request] of [["native", data.request], [
           "wasm",
@@ -526,27 +499,6 @@ for (const host of wasmHosts) {
               output,
               nativeOutput(language),
               `generated ${language}`,
-            );
-          },
-        );
-      }
-      if (language === "zig") {
-        await step(
-          "Zig without reflection remains byte-identical to native",
-          async () => {
-            const output = `${data.work}/${host.name}-zig-without-reflection`;
-            await Deno.mkdir(output);
-            await mustSucceed(
-              guest("capnpc-zig", output, ["--no-reflection"]),
-              {
-                stdin: data.request,
-                label: `${host.name} Zig without reflection`,
-              },
-            );
-            await assertTreesEqual(
-              output,
-              `${data.work}/zig-without-reflection`,
-              "Zig without reflection",
             );
           },
         );
@@ -578,7 +530,7 @@ for (const host of wasmHosts) {
               env,
               label: "generated Rust roundtrip",
             });
-          } else if (language === "go") {
+          } else {
             // Preserve the byte-comparison tree; the consumer owns a separate copy.
             const consumer = `${data.work}/${host.name}-go-consumer`;
             await copyTree(output, consumer);
@@ -602,31 +554,6 @@ for (const host of wasmHosts) {
             await mustSucceed([...goTest, "./..."], {
               env: offline,
               label: "generated Go roundtrip",
-            });
-          } else {
-            const executable = `${data.work}/${host.name}-zig-roundtrip`;
-            await mustSucceed([
-              "zig",
-              "test",
-              "--cache-dir",
-              zigCacheDir,
-              "--test-no-exec",
-              "--dep",
-              "capnpc-zig",
-              "--dep",
-              "generated",
-              `-Mroot=${root}/tests/consumers/zig/roundtrip.zig`,
-              "--dep",
-              "capnpc-zig",
-              `-Mgenerated=${output}/person.zig`,
-              `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
-              `-femit-bin=${executable}`,
-            ], {
-              label: "generated Zig roundtrip build",
-              timeoutMs: buildTimeoutMs,
-            });
-            await mustSucceed([executable], {
-              label: "generated Zig roundtrip",
             });
           }
         },
@@ -704,7 +631,7 @@ for (const host of wasmHosts) {
       "generators read a regular-file stdin like a pipe",
       async () => {
         const stdinFile = `${data.work}/native-request.bin`;
-        for (const language of ["c++", "rust", "go", "zig"]) {
+        for (const language of ["c++", "rust", "go"]) {
           const output = `${data.work}/${host.name}-${language}-file-stdin`;
           await Deno.mkdir(output);
           await mustSucceed(guest(`capnpc-${language}`, output), {

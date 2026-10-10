@@ -75,7 +75,7 @@ if (Deno.args.length < 1 || Deno.args.length > 2 || Deno.args[0] === "all") {
 }
 const engine = selectedEngines(Deno.args.slice(0, 1))[0];
 const browserType = { chromium, firefox, webkit }[engine];
-const languages = ["cpp", "rust", "go", "zig"] as const;
+const languages = ["cpp", "rust", "go"] as const;
 type FileMap = Record<string, string | Uint8Array>;
 /** A complete compile request: every scenario names its includes and generators. */
 type Input = CompileRequest & { includeFiles: FileMap; generators: Language[] };
@@ -508,28 +508,6 @@ async function prepare() {
       },
     });
   }
-  for (
-    const [name, entrypoints] of [
-      ["generic-rpc", ["generic_rpc.capnp", "generic_rpc_external.capnp"]],
-      ["streaming-rpc", ["streaming.capnp"]],
-    ] as const
-  ) {
-    const rpcFiles: FileMap = {};
-    for (const path of entrypoints) {
-      rpcFiles[path] = await Deno.readFile(
-        `${root}/tests/rpc_codegen/schemas/${path}`,
-      );
-    }
-    inputs.push({
-      name,
-      input: {
-        files: rpcFiles,
-        includeFiles: includes,
-        entrypoints: [...entrypoints],
-        generators: ["zig"],
-      },
-    });
-  }
   const scenarios = [];
   for (const { name, input } of inputs) {
     const directory = `${work}/${name}`;
@@ -606,7 +584,6 @@ for (
     "capnpc-c++",
     "capnpc-rust",
     "capnpc-go",
-    "capnpc-zig",
   ]
 ) {
   const bytes = await Deno.readFile(`${root}/dist/wasm/${name}.wasm`);
@@ -739,7 +716,6 @@ try {
           cpp: await read("capnpc-c++"),
           rust: await read("capnpc-rust"),
           go: await read("capnpc-go"),
-          zig: await read("capnpc-zig"),
         },
       };
       const workerSource = await (await fetch("/sdk/worker.js")).text();
@@ -1018,7 +994,7 @@ try {
       );
     }
 
-    for (const language of ["cpp", "zig"] as const) {
+    for (const language of ["cpp", "rust"] as const) {
       for (
         const [name, request] of [
           ["invalid segment table", new Uint8Array([255, 255, 255, 255])],
@@ -1146,8 +1122,8 @@ try {
             () => workspace.compile(input, job),
           );
           await timed(
-            "workspace-limited zig generation",
-            () => workspace.generate({ request, generators: ["zig"] }, job),
+            "workspace-limited rust generation",
+            () => workspace.generate({ request, generators: ["rust"] }, job),
           );
         } finally {
           close(workspace);
@@ -1158,8 +1134,8 @@ try {
         let outputFailure;
         try {
           outputFailure = await rejected(
-            "output-limited zig generation",
-            () => output.generate({ request, generators: ["zig"] }, job),
+            "output-limited rust generation",
+            () => output.generate({ request, generators: ["rust"] }, job),
           );
           await timed(
             "output-limited compile",

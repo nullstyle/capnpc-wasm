@@ -1393,35 +1393,6 @@ async function checkGeneratorRefusals(context: Context, twoFiles: Uint8Array) {
     "malformed generator request succeeded",
   );
   sameSnapshot(beforeMalformed, await snapshot(temporary), "malformed request");
-  // The guest environment is empty: CAPNPC_ZIG_* does not change output.
-  const zig = `${generatorPackage}/wasm/capnpc-zig.wasm`;
-  const zigRun = async (output: string, env?: Record<string, string>) => {
-    await Deno.mkdir(output);
-    return await run([
-      ...launcher,
-      "generator",
-      "--module",
-      zig,
-      "--output",
-      output,
-      "--",
-    ], { input: twoFiles, env });
-  };
-  success(await zigRun(`${temporary}/zig plain`));
-  const compact = await zigRun(`${temporary}/zig env`, {
-    CAPNPC_ZIG_API_PROFILE: "compact",
-  });
-  assert(
-    compact.success && stderrOf(compact).includes("CAPNPC_ZIG_"),
-    `no warning for CAPNPC_ZIG_* in the environment: ${stderrOf(compact)}`,
-  );
-  const plainTree = await snapshot(`${temporary}/zig plain`);
-  sameSnapshot(
-    plainTree,
-    await snapshot(`${temporary}/zig env`),
-    "capnpc-zig output with CAPNPC_ZIG_* set",
-  );
-  assert(plainTree.size > 0, "capnpc-zig produced no files");
 }
 
 /** Exercise the installed launcher and real compiler/generator, outside the package. */
@@ -1500,7 +1471,7 @@ export async function checkLauncher(
       request.includes(0),
       "compiler request does not contain binary NULs",
     );
-    for (const generator of ["capnpc-c++", "capnpc-zig"]) {
+    for (const generator of ["capnpc-c++", "capnpc-rust"]) {
       const module = `${generatorPackage}/wasm/${generator}.wasm`;
       success(
         await run([
@@ -1531,7 +1502,7 @@ export async function checkLauncher(
       const file of [
         "schema with spaces.capnp.h",
         "schema with spaces.capnp.c++",
-        "schema with spaces.zig",
+        "schema with spaces_capnp.rs",
       ]
     ) {
       equal(

@@ -100,7 +100,7 @@ deno run --allow-all --no-config package/bin/capnp-wasm.ts compiler \
 
 ```sh
 deno run --allow-all --no-config package/bin/capnp-wasm.ts generator \
-  --module /path/to/capnpc-zig.wasm --output "$PWD/work/output" -- \
+  --module /path/to/generator.wasm --output "$PWD/work/output" -- \
   < "$PWD/work/request.bin"
 ```
 

@@ -130,7 +130,7 @@ if (
   manifest.files.some((file) =>
     file.path.startsWith("sdk/") || file.path.startsWith("wasm/capnpc-") ||
     file.path.startsWith("bin/") || file.path.startsWith("runtime/") ||
-    file.path === "licenses/zig-LICENSE" || file.path === "licenses/go-LICENSE"
+    file.path === "licenses/go-LICENSE"
   )
 ) throw new Error("compiler-host package contains unrelated tools or SDKs");
 const manifestHash = await sha256(

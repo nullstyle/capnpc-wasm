@@ -6,12 +6,11 @@ import { countNodes, limits } from "./workspace.js";
 
 export { supportsWasmExceptions };
 
-export const languages = { cpp: "C++", rust: "Rust", go: "Go", zig: "Zig" };
+export const languages = { cpp: "C++", rust: "Rust", go: "Go" };
 export const commands = {
   cpp: "capnpc-c++",
   rust: "capnpc-rust",
   go: "capnpc-go",
-  zig: "capnpc-zig",
 };
 // build-studio.ts replaces this sentinel with a content hash of the staged
 // site, so every asset URL changes with the build and a cached main.js can

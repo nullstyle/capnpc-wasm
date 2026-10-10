@@ -41,10 +41,12 @@ file.
 
 ## Languages and commands
 
-`Language` is one of `cpp`, `rust`, `go`, and `zig`. The set may grow in a later
-release: handle unknown values as data (a map lookup, a default branch) rather
-than exhausting them in a switch or a `Record<Language, ...>`. Both SDKs reject
-a generator that was not supplied to the factory before any guest runs.
+`Language` is one of `cpp`, `rust`, `go`, and `zig`. capnpc-wasm ships and tests
+the `cpp`, `rust`, and `go` modules; a `zig` module comes from capnp-zig. The
+set may grow in a later release: handle unknown values as data (a map lookup, a
+default branch) rather than exhausting them in a switch or a
+`Record<Language, ...>`. Both SDKs reject a generator that was not supplied to
+the factory before any guest runs.
 
 Every guest is a WASI preview 1 command that exports `memory` and `_start`. The
 SDKs run the compiler as
@@ -61,9 +63,9 @@ unpacked `CodeGeneratorRequest`.
 
 Generators receive that request on stdin, an empty writable root, and exactly
 one argument, their command name: `capnpc-c++`, `capnpc-rust`, `capnpc-go`, or
-`capnpc-zig`. No generator options are passed; `--no-reflection`,
-`--api-profile=compact`, and similar flags are reachable only through a command
-host such as the launcher. A generator that writes to stdout fails the job.
+`capnpc-zig`. No generator options are passed; Rust's `--output-directory`, Go's
+`-promises`, and similar flags are reachable only through a command host such as
+the launcher. A generator that writes to stdout fails the job.
 
 The schema-inspection generator `capnpc-capnp` is built and shipped but is not a
 `Language`: it writes its output to stdout, which the SDKs reject. Run it

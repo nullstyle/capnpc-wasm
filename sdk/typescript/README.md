@@ -1,11 +1,12 @@
 # Browser and Deno SDK
 
-The SDK compiles schemas and generates C++, Rust, Go, and Zig from supplied Wasm
-modules. It performs no filesystem or network operations. Build it with
-`mise run build:sdk`: `dist/typescript/mod.js` is a standalone ES module with
-TypeScript declarations, and `worker.js` is its bundled worker entrypoint.
-`dist/wasm/` contains the same command binaries used by the native host tests;
-`dist/include/` contains pinned standard schemas and language annotations.
+The SDK compiles schemas and generates C++, Rust, and Go (and Zig, with a module
+from capnp-zig) from supplied Wasm modules. It performs no filesystem or network
+operations. Build it with `mise run build:sdk`: `dist/typescript/mod.js` is a
+standalone ES module with TypeScript declarations, and `worker.js` is its
+bundled worker entrypoint. `dist/wasm/` contains the same command binaries used
+by the native host tests; `dist/include/` contains pinned standard schemas and
+language annotations.
 
 The caller loads only the generators it needs, using its own asset URLs,
 embedded bytes, or cache. Supply original `Uint8Array` module bytes. The SDK
@@ -134,10 +135,10 @@ imports and binary embeds, without copying entire include directories or
 rewriting schema contents. The caller supplies all referenced files; the SDK
 does not discover host paths.
 
-For Zig, supply `generators: { zig: moduleBytes }` with `capnpc-zig.wasm` and
-request `generators: ["zig"]`. Output uses `.zig` filenames and imports the
-`capnpc-zig` runtime module. Bind that name to the pinned library, as shown in
-[the Zig generator guide](../../generators/zig/README.md).
+For Zig, supply `generators: { zig: moduleBytes }` with a `capnpc-zig.wasm` that
+capnp-zig builds, and request `generators: ["zig"]`. capnpc-wasm does not ship
+or test that module: its output, and the runtime it imports as `capnpc-zig`,
+follow the capnp-zig release that built it.
 
 Each generator receives a fresh writable in-memory root and the compiler's
 unpacked `CodeGeneratorRequest` on stdin. Results contain `request` bytes,

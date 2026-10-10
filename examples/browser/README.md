@@ -1,7 +1,7 @@
 # Schema Studio
 
 A browser workbench for editing Cap’n Proto schemas and generating C++, Rust,
-Go, and Zig with the real Wasm compiler and generators.
+and Go with the real Wasm compiler and generators.
 
 From the repository root:
 
@@ -94,7 +94,7 @@ on demand: one worker holds the compiler and every generator requested so far,
 and it is replaced only when a new language is needed, so switching between
 loaded languages never rebuilds a worker or fetches a module again. Studio keeps
 its copy of a module only while the worker could still grow (growing needs every
-module again); once all four languages are loaded the copies are released and
+module again); once all three languages are loaded the copies are released and
 each module's bytes are held once, inside the SDK client. Runtime assets and the
 editor do not use a CDN.
 
@@ -139,8 +139,8 @@ mise run test:studio chromium
 
 The Studio driver is separate from the SDK's offline permission-revoking driver.
 It exercises the actual page under its Content-Security-Policy, compares
-downloaded C++/Rust/Go/Zig output with fresh native output, and checks editing,
-undo across file changes, the new-file template with Generate all, the failure
+downloaded C++/Rust/Go output with fresh native output, and checks editing, undo
+across file changes, the new-file template with Generate all, the failure
 header, cancellation (asserting the cancelled state) and recovery, a 503 on a
 generator asset, a keyboard-only flow that asserts `document.activeElement`,
 imports including a ZIP round trip and a folder with `.git/` and `.DS_Store`,

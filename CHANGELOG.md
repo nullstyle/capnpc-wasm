@@ -40,12 +40,11 @@ every flavor it applies to has shipped it.
   beside the pinned `deno`), and `test:deno-worker` reads the required version
   from `sdk/typescript/environment.ts`, where wave 1 moved it.
 - Verification tasks for the scheduled workflows: `check:lock-urls`
-  (reachability of every locked download, with the Zig community mirrors as the
-  fallback), `test:browser-soak` and `test:deno-worker-soak` (repeated
-  cancellation and recovery), `test:sdk-go-floor` (the go.mod floor toolchain),
-  `test:sdk-go-wazero-latest` (drift against newer wazero), `audit:osv`,
-  `audit:govulncheck`, and `audit:advisories` (OSV.dev for the runtime pins and
-  the Deno lockfiles).
+  (reachability of every locked download), `test:browser-soak` and
+  `test:deno-worker-soak` (repeated cancellation and recovery),
+  `test:sdk-go-floor` (the go.mod floor toolchain), `test:sdk-go-wazero-latest`
+  (drift against newer wazero), `audit:osv`, `audit:govulncheck`, and
+  `audit:advisories` (OSV.dev for the runtime pins and the Deno lockfiles).
 - Wasm modules: byte-identical from any checkout path for a given WASI SDK
   platform tarball (C++ `-ffile-prefix-map`, Rust `--remap-path-prefix` and a
   staged workspace; the sysroot bakes its own build root into two libc++abi
@@ -118,11 +117,11 @@ every flavor it applies to has shipped it.
 - Release evidence: every receipt in `docs/release-evidence/` carries a schema
   version and validates against its type's JSON Schema in `schemas/`
   (`mise run check:evidence`, part of `lint`, which also checks the ledger's
-  counters against its cycles and its gitlink against the index); the
-  nightly-confidence ledger measures this repository's scheduled `nightly.yml`
-  at the `ref/capnp-zig` gitlink (decision D5 = A), ends the streak on any
-  re-run, and is regenerated from the GitHub API by `mise run audit:nightly`
-  (streak 0 until the first scheduled run from `main`, 2026-10-07);
+  counters against its cycles); the nightly-confidence ledger measures this
+  repository's scheduled `nightly.yml` (decision D5 = A; until 2026-10-09 only
+  runs at the `ref/capnp-zig` gitlink counted), ends the streak on any re-run,
+  and is regenerated from the GitHub API by `mise run audit:nightly` (streak 0
+  until the first scheduled run from `main`, 2026-10-07);
   `mise run test:evidence` tests both scripts; the capnp-zig-based ledger is
   kept as `capnp-zig-nightly-confidence.json`.
 - Support matrix: per-push claims name only the tested hosts, Linux x64 and
@@ -389,9 +388,10 @@ generator modules.
 
 ## capnpc-wasm (full SDK archive and Go module)
 
-The archive bundles all six Wasm commands, the TypeScript SDK, the Go SDK
-source, standard includes, the launcher, licenses, manifest, and provenance.
-Candidates were prepared locally at `0.1.0-rc.1` (commit `94ba6b2`; receipt in
+The archive bundles the Wasm commands (six through `0.1.0-rc.5`, five from
+`0.1.0-rc.6`, without `capnpc-zig.wasm`), the TypeScript SDK, the Go SDK source,
+standard includes, the launcher, licenses, manifest, and provenance. Candidates
+were prepared locally at `0.1.0-rc.1` (commit `94ba6b2`; receipt in
 `docs/release-evidence/94ba6b2-private-package.json`) and at `0.1.0-rc.2` and
 `0.1.0-rc.3`, while one version covered every flavor; `0.1.0-rc.4` was never
 used. The Go module tag `sdk/go/v<version>` takes the same version and is
@@ -399,19 +399,12 @@ created by hand after the SDK API freeze. No `sdk/go/v*` tag exists.
 
 ### 0.1.0-rc.6
 
-- Zig generator, breaking for generated Zig: `ref/capnp-zig` advances from
-  `295ff5e` (0.18.0-era, untagged) to the release tag `v0.24.0` (`a37ff29`, Zig
-  0.17.0). Generated Zig now needs the capnp-zig v0.24.0 runtime (fetch
-  `git+https://github.com/nullstyle/capnp-zig.git#v0.24.0` and import its
-  `capnpc-zig-core` or `capnpc-zig` module as `capnpc-zig`); each file checks
-  the runtime's codegen ABI when it compiles. `capnpc-zig.wasm` gains upstream's
-  `--output-dir=` option, and its size budget rises to 2,200,000 bytes
-  (1,917,601 bytes at v0.24.0, from 1,668,492 in the full SDK rc.5).
-- Toolchain: Zig is the tagged release 0.17.0, downloaded from ziglang.org with
-  the community mirrors off and verified against its minisign signature and the
-  sha256 in `mise.lock`. The project's Zig mirror release, its
-  `url_replacements` rule, `mise run mirror:zig`, and `check:zig-lock` are
-  retired; `check:lock-urls` still checks every Zig tarball and `.minisig`.
+- Zig generator, breaking: removed. capnp-zig owns the Zig generator and its
+  runtime, so the archive no longer ships `wasm/capnpc-zig.wasm`, its notices,
+  or the Zig historical reference, and the repository no longer pins capnp-zig
+  or Zig. Build `capnpc-zig` from your capnp-zig dependency and run it with the
+  launcher's `generate --plugin` mode, or pass a `capnpc-zig.wasm` that
+  capnp-zig builds to the SDKs as the `zig` module; `Language` keeps `zig`.
 - Launcher, breaking: `bin/capnp-wasm.ts` replaces the Bash `bin/capnp-wasm`
   that rc.5 shipped. It needs Deno 2.4.5 or newer, imports nothing, and runs on
   Linux, macOS, and Windows as

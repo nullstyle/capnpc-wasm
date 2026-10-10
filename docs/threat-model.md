@@ -20,12 +20,12 @@ produces: generated file names and contents, stdout, stderr, and exit codes.
 Diagnostics are raw upstream stderr and can contain any bytes a schema author
 places in a schema.
 
-Compromised-guest assumption. The guests are upstream C++, Rust, Go, and Zig
-programs compiled to Wasm. A malicious schema or request may corrupt a guest's
-own linear memory or drive it into any behavior its WASI imports allow. Hosts
-therefore treat every guest as hostile from the moment it starts: the sandbox is
-the Wasm module boundary plus the WASI surface each host exposes, never the
-guest's own validation.
+Compromised-guest assumption. The guests are upstream C++, Rust, and Go programs
+compiled to Wasm, and any generator module a caller supplies to an SDK. A
+malicious schema or request may corrupt a guest's own linear memory or drive it
+into any behavior its WASI imports allow. Hosts therefore treat every guest as
+hostile from the moment it starts: the sandbox is the Wasm module boundary plus
+the WASI surface each host exposes, never the guest's own validation.
 
 ## Boundaries per host
 
@@ -134,11 +134,10 @@ guest's own validation.
   home directory warns, the copy is bounded); a generator's root is an empty
   staging directory whose files move into `--output` only after exit 0, refusing
   directory conflicts, read-only files, and symlinks at any destination or
-  parent. Wasmtime gives the guest no network and the guest environment is empty
-  (`CAPNPC_ZIG_*` produces a warning). `CAPNP_WASM_WASMTIME` and
-  `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`, which select and accept the runtime, are
-  trusted; `CAPNP_WASM_TIMEOUT`, `CAPNP_WASM_MAX_MEMORY`, and
-  `CAPNP_WASM_MAX_WORKSPACE` are validated.
+  parent. Wasmtime gives the guest no network and the guest environment is
+  empty. `CAPNP_WASM_WASMTIME` and `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`, which
+  select and accept the runtime, are trusted; `CAPNP_WASM_TIMEOUT`,
+  `CAPNP_WASM_MAX_MEMORY`, and `CAPNP_WASM_MAX_WORKSPACE` are validated.
 - The launcher runs under Deno 2.4.5 or newer with `--allow-all`. It starts
   Wasmtime and native generators, so Deno's permission checks would add no
   boundary; the guest's confinement comes from Wasmtime. It imports nothing, so

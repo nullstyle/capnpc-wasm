@@ -51,7 +51,7 @@ export interface Flavor {
   readonly description: string;
   /** Ships typescript/ (mod.js, mod.d.ts, worker.js) and docs/typescript.md. */
   readonly typescript: boolean;
-  /** Ships every Wasm command and the Zig historical reference, not only capnp.wasm. */
+  /** Ships every Wasm command, not only capnp.wasm. */
   readonly generators: boolean;
   /** Ships bin/capnp-wasm.ts and runtime/wasmtime-version. */
   readonly launcher: boolean;
@@ -771,7 +771,7 @@ function componentIdentity(
   if ((match = /^go(\d\S*)$/.exec(origin))) {
     return { versionInfo: match[1], downloadLocation: "NOASSERTION" };
   }
-  if ((match = /^(?:rustc|Zig) (\S+)/.exec(origin))) {
+  if ((match = /^rustc (\S+)/.exec(origin))) {
     return { versionInfo: match[1], downloadLocation: "NOASSERTION" };
   }
   return { versionInfo: origin, downloadLocation: "NOASSERTION" };
@@ -1115,12 +1115,6 @@ export async function prepareRelease(
     await copy("scripts/verify-release.ts", "verify-release.ts");
     await copy("mise.toml", "provenance/mise.toml");
     await copy("mise.lock", "provenance/mise.lock");
-    if (flavor.generators) {
-      await copy(
-        "generators/zig/historical-reference",
-        "provenance/zig-historical-reference",
-      );
-    }
 
     // Documents: a usage README generated per flavor, and the SDK guide with
     // its links pointed at the repository at this commit.

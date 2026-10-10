@@ -657,7 +657,7 @@ func TestConformanceCheck(t *testing.T) {
 		Expect:      expect("ok", "trap:stack"),
 		Stage:       text("compiler"),
 		Diagnostics: count(0),
-		Outputs:     map[string]int{"cpp": 2, "rust": 1, "zig": 1},
+		Outputs:     map[string]int{"cpp": 2, "rust": 1, "go": 1},
 	}
 	for _, test := range []struct {
 		name       string
@@ -669,7 +669,7 @@ func TestConformanceCheck(t *testing.T) {
 		{"New rejects the memory ceiling", expectation{Expect: expect("validation:memoryPages")}, observation{outcome: "validation:memoryPages", phase: "factory"}, 0},
 		{"message pinned and present", expectation{Expect: expect("validation"), Message: text("is not a directory in files")}, observation{outcome: "validation", message: "importPath is not a directory in files: nope"}, 0},
 		{"message pinned and absent", expectation{Expect: expect("validation"), Message: text("is not a directory in files")}, observation{outcome: "validation", message: "some other input error"}, 1},
-		{"depth ok with every output", depth, observation{outcome: "ok", outputs: map[string]int{"cpp": 2, "rust": 1, "zig": 1}}, 0},
+		{"depth ok with every output", depth, observation{outcome: "ok", outputs: map[string]int{"cpp": 2, "rust": 1, "go": 1}}, 0},
 		{"depth ok that published nothing", depth, observation{outcome: "ok", outputs: map[string]int{}, diagnostics: 3}, 2},
 		{"depth trap:stack at the compiler", depth, observation{outcome: "trap:stack", stage: "compiler"}, 0},
 		{"depth trap:stack in a generator", depth, observation{outcome: "trap:stack", stage: "cpp"}, 1},

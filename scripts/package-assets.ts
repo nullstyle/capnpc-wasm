@@ -3,7 +3,7 @@
 //
 // Notices are derived per artifact from a component map: the reference
 // checkouts under ref/, the toolchains whose standard libraries are linked
-// (Go, Rust, Zig), the WASI SDK sysroot's wasi-libc and LLVM runtimes (texts
+// (Go, Rust), the WASI SDK sysroot's wasi-libc and LLVM runtimes (texts
 // vendored under third_party/wasi-sdk-34 and verified against ref/wasi-sdk's
 // nested gitlinks), the Go modules `go list -deps` reports for the wasip1
 // build, and the crates `cargo metadata` resolves for wasm32-wasip1. A
@@ -59,7 +59,6 @@ const modules = [
   "capnpc-capnp",
   "capnpc-rust",
   "capnpc-go",
-  "capnpc-zig",
 ];
 const schemas = [
   "c++.capnp",
@@ -163,7 +162,6 @@ const goCapnp = await reference(
   "MIT",
   ["LICENSE"],
 );
-const capnpZig = await reference("capnp-zig", "capnp-zig", "MIT", ["LICENSE"]);
 const browserWasiShim = await reference(
   "browser_wasi_shim",
   "@bjorn3/browser_wasi_shim",
@@ -181,8 +179,6 @@ const goRoot = await command(["go", "env", "GOROOT"]);
 const goVersion = await command(["go", "env", "GOVERSION"]);
 const rustSysroot = await command(["rustc", "--print", "sysroot"]);
 const rustVersion = await command(["rustc", "--version"]);
-const zigRoot = await command(["mise", "where", "zig"]);
-const zigVersion = zigRoot.slice(zigRoot.lastIndexOf("/") + 1);
 const goStd: Component = {
   name: "Go standard library and runtime",
   origin: goVersion,
@@ -199,12 +195,6 @@ const rustStd: Component = {
     source: `${rustSysroot}/share/doc/rust/COPYRIGHT-library.html`,
     target: "rust-COPYRIGHT-library.html",
   }],
-};
-const zigStd: Component = {
-  name: "Zig standard library",
-  origin: `Zig ${zigVersion}`,
-  license: "MIT",
-  files: [{ source: `${zigRoot}/LICENSE`, target: "zig-LICENSE" }],
 };
 
 // The sysroot's runtimes ship no license texts; the vendored copies are the
@@ -508,11 +498,6 @@ const artifacts: Artifact[] = [
     path: "wasm/capnpc-go.wasm",
     description: "the Go generator",
     components: [goCapnp, ...generatorGoModules, goStd],
-  },
-  {
-    path: "wasm/capnpc-zig.wasm",
-    description: "the Zig generator",
-    components: [capnpZig, zigStd],
   },
   {
     path: "include/",

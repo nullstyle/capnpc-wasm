@@ -28,7 +28,6 @@ changes. Examples from history:
 | -------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | C++ port: `patches/capnproto/`, `cmake/`, `scripts/build-wasm.sh`                                                          | `mise run test`                                                                                 |
 | Generator wrappers and consumers: `generators/`, `tests/consumers/`                                                        | `mise run test`                                                                                 |
-| Zig reference or mirrored fixtures: `ref/capnp-zig`, `generators/zig/sync.json`                                            | `mise run build:zig` (runs `check:zig-sync`), then `mise run test`                              |
 | TypeScript SDK: `sdk/typescript/`                                                                                          | `mise run test` and `mise run test:browser`                                                     |
 | Go SDK: `sdk/go/`                                                                                                          | `mise run test:sdk-go` and `mise run test:sdk-go-race` (`mise run lint` runs the vet)           |
 | Schema Studio: `examples/browser/`, `scripts/build-studio.ts`, `scripts/serve-example.ts`                                  | `mise run test:studio-unit`, then `mise run test:studio`                                        |
@@ -88,29 +87,16 @@ mise run test:studio chromium firefox webkit
    (`mise --cd`) and CI installs the pinned tools with `--locked`.
 3. Run `mise run check`.
 
-Zig must equal the `zig` line of `ref/capnp-zig/mise.toml` (both are `0.17.0`
-today; `doctor` checks it). Pin tagged Zig releases only. ziglang.org keeps
-every tagged release, and deletes development builds within weeks, after which a
-cold install fails. `mise.toml` turns the Zig community mirrors off, so core:zig
-downloads the tarball and its `.minisig` from ziglang.org itself; mise verifies
-the Zig Software Foundation's minisign signature and the sha256 that `mise.lock`
-records. A Zig bump is the tool-pin procedure above: `mise lock zig`, a review
-of the four platform entries against the `shasum` values in
-<https://ziglang.org/download/index.json>, and `mise run check`.
-`mise run check:lock-urls` confirms that every locked file is served.
-
-Until 2026-10, the pin was a development build that ziglang.org had deleted, and
-the project served it from its own release
-`toolchain-zig-0.17.0-dev.1683+5ceec001b` through a `url_replacements` rule and
-the `mirror:zig` and `check:zig-lock` tasks. That machinery is gone; the release
-stays published, because the producer provenance of earlier archives names it.
-If capnp-zig ever pins a development build again, restore it from Git history
-(`scripts/mirror-zig.ts` before the Zig 0.17.0 bump) rather than pinning a build
-that ziglang.org will delete.
+`mise run check:lock-urls` confirms that every locked file is served. The Zig
+pin, its locked tarballs, and the project's Zig mirror release were retired on
+2026-10-09, when the Zig generator moved to capnp-zig.
 
 The Wasmtime pin is copied into every tools archive as the required runtime
 version, so bumping it changes the launcher contract for consumers. The Deno pin
-is the version for direct and worker execution.
+is the version for direct and worker execution and for the launcher's tests. The
+`windows-launcher` job in `.github/workflows/ci.yml` installs Deno and Wasmtime
+itself: bump its `DENO_VERSION`, `DENO_SHA256`, `WASMTIME_VERSION`, and
+`WASMTIME_SHA256` with the pins, or the job fails.
 
 ### Reference bump checklist
 
@@ -151,24 +137,6 @@ Per reference:
   new commit follows a newer upstream tag, then run
   `mise exec -- go -C <dir> mod tidy` in both directories so `go.sum` matches;
   builds use `-mod=readonly`.
-- `capnp-zig`, in this order: (a) if `ref/capnp-zig/mise.toml` changed its `zig`
-  line, bump the tool pin with the Zig steps above (`mise lock zig`); (b) run
-  `mise run build:zig`, which exports the tree at the gitlink and fails in
-  `check-zig-sync.ts` for every mirrored fixture that differs from its native
-  file; (c) refresh the mirrors from the gitlink and review the diff:
-
-  ```sh
-  mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \
-    scripts/check-zig-sync.ts --update-fixtures
-  ```
-
-  `generators/zig/sync.json` only maps native fixture paths to their mirrors
-  (add an entry for a new fixture); every expectation comes from the reference
-  commit itself; (d) run `mise run test` (the reflection, generator API, RPC
-  codegen, wire, feature corpus, SDK, and browser suites all consume Zig
-  output), and `mise run test:browser`; (e) leave
-  `generators/zig/historical-reference` unchanged; it pins the wire suite's
-  oracle.
 - `wazero`: `sdk/go/go.mod` must require the pseudo-version of the new gitlink
   (`mise exec -- go -C sdk/go get github.com/tetratelabs/wazero@<commit>` then
   `mise exec -- go -C sdk/go mod tidy`); `tests/hosts/wazero` replaces the

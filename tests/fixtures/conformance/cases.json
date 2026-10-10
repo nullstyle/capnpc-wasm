@@ -75,8 +75,7 @@
     ],
     "generators": [
       "cpp",
-      "rust",
-      "zig"
+      "rust"
     ],
     "sha256": "f49abd711d86e667e90ef451236cff1887318ae635fff2938ed67b223b22035f"
   },
@@ -169,8 +168,7 @@
     ],
     "generators": [
       "cpp",
-      "rust",
-      "zig"
+      "rust"
     ],
     "sha256": "60ebc9f3302757c4ffab57e1f445632bb7f1532eb789a89de2233208e7679a67"
   },
@@ -201,8 +199,7 @@
     ],
     "generators": [
       "cpp",
-      "rust",
-      "zig"
+      "rust"
     ],
     "sha256": "64f2b31068300aada26d8ea8fb5cd543174cf3bc7ebaec8b5383bb360945eb06"
   },
@@ -734,38 +731,6 @@
     "request": "pattern4k",
     "generators": [
       "go"
-    ]
-  },
-  {
-    "name": "request-half-zig",
-    "op": "generate",
-    "request": "half",
-    "generators": [
-      "zig"
-    ]
-  },
-  {
-    "name": "request-one-zig",
-    "op": "generate",
-    "request": "one",
-    "generators": [
-      "zig"
-    ]
-  },
-  {
-    "name": "request-zeros8-zig",
-    "op": "generate",
-    "request": "zeros8",
-    "generators": [
-      "zig"
-    ]
-  },
-  {
-    "name": "request-pattern4k-zig",
-    "op": "generate",
-    "request": "pattern4k",
-    "generators": [
-      "zig"
     ]
   }
 ]

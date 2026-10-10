@@ -50,7 +50,7 @@ func TestGenerate(t *testing.T) {
 	})
 
 	t.Run("compile once and generate target sets", func(t *testing.T) {
-		for _, languages := range [][]capnpcwasm.Language{{"cpp"}, {"rust", "go"}, {"zig"}, {"cpp", "rust", "go", "zig"}} {
+		for _, languages := range [][]capnpcwasm.Language{{"cpp"}, {"rust", "go"}, {"cpp", "rust", "go"}} {
 			got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: compiled.Request, Generators: languages})
 			if err != nil {
 				t.Fatal(err)
@@ -119,7 +119,7 @@ func TestGenerate(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: request.Request, Generators: []capnpcwasm.Language{"cpp", "rust", "zig", "go"}})
+		got, err := generator.Generate(t.Context(), capnpcwasm.GenerationRequest{Request: request.Request, Generators: []capnpcwasm.Language{"cpp", "rust", "go"}})
 		var failure *capnpcwasm.Error
 		if !errors.As(err, &failure) || failure.Stage != "go" || failure.Language != "go" || failure.Stderr == "" {
 			t.Fatalf("missing later generator diagnostic: %v", err)

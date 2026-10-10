@@ -96,7 +96,7 @@ jobs:
         run: mise run test:package
       # The windows-launcher job runs the launcher on these Linux-built
       # bytes: a tools candidate prepared from this clean checkout, and the
-      # Zig generator module.
+      # Rust generator module.
       - name: Stage the launcher inputs for Windows
         if: matrix.os == 'ubuntu-24.04'
         run: |
@@ -104,7 +104,7 @@ jobs:
             scripts/release.ts --tools-only --out build/ci-windows
           mkdir -p build/ci-windows/inputs/modules
           cp -R build/ci-windows/capnp-wasm-tools-*/package build/ci-windows/inputs/package
-          cp dist/wasm/capnpc-zig.wasm build/ci-windows/inputs/modules/
+          cp dist/wasm/capnpc-rust.wasm build/ci-windows/inputs/modules/
       - name: Upload the launcher inputs
         if: matrix.os == 'ubuntu-24.04'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

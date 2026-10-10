@@ -277,7 +277,7 @@ function renderOutput() {
   const entries = currentEntries();
   const paths = Object.keys(entries).sort();
   if (!paths.includes(selectedOutput)) {
-    selectedOutput = paths.find((path) => /\.(h|rs|go|zig)$/.test(path)) ??
+    selectedOutput = paths.find((path) => /\.(h|rs|go)$/.test(path)) ??
       paths[0] ?? "";
   }
   const picker = $("#output-files");

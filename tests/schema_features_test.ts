@@ -7,7 +7,7 @@ import { assert, assertBytesEqual, assertTreesEqual } from "./lib/assert.ts";
 import { readTree, writeTree } from "./lib/fs.ts";
 import { guestCommand, wasmHosts } from "./lib/hosts.ts";
 import { canonicalRequest, clangxx, nativeCompile } from "./lib/oracle.ts";
-import { nativeBin, root, wasmBin, zigCacheDir } from "./lib/paths.ts";
+import { nativeBin, root, wasmBin } from "./lib/paths.ts";
 import { buildTimeoutMs, mustSucceed } from "./lib/process.ts";
 import { testSuite } from "./lib/workdir.ts";
 
@@ -17,7 +17,6 @@ const tools = {
   cpp: "capnpc-c++",
   rust: "capnpc-rust",
   go: "capnpc-go",
-  zig: "capnpc-zig",
 };
 const manifest: {
   files: string[];
@@ -33,7 +32,6 @@ function compiler() {
         cpp: await Deno.readFile(`${wasmBin}/capnpc-c++.wasm`),
         rust: await Deno.readFile(`${wasmBin}/capnpc-rust.wasm`),
         go: await Deno.readFile(`${wasmBin}/capnpc-go.wasm`),
-        zig: await Deno.readFile(`${wasmBin}/capnpc-zig.wasm`),
       },
     });
   })();
@@ -91,8 +89,6 @@ for (const scenario of manifest.scenarios) {
         assert(stdout.length === 0, `${language}: unexpected native stdout`);
         const expected = await readTree(nativeOutput);
         // Compare complete outputs against the maintained native command.
-        // Zig's additive typed APIs intentionally differ from the pinned
-        // pristine generator, even when binary reflection metadata is disabled.
         assert(
           expected.size ===
             scenario.entrypoints.length * (language === "cpp" ? 2 : 1),
@@ -153,47 +149,5 @@ for (const scenario of manifest.scenarios) {
       );
       await mustSucceed([executable], { cwd: work, label: "C++ consumer" });
     });
-
-    if (scenario.generators.includes("zig")) {
-      await t.step(
-        "generated Zig defaults and pointers roundtrip",
-        async () => {
-          const output = `${work}/sdk-zig`;
-          await writeTree(output, result.outputs.zig!);
-          // Keep nested generated imports inside the Zig module's root.
-          await Deno.writeTextFile(
-            `${output}/root.zig`,
-            `pub const schema = @import("${
-              scenario.entrypoints[0].replace(/\.capnp$/, ".zig")
-            }");\n`,
-          );
-          // Build only, under buildTimeoutMs; the tests then run as their
-          // own step under run()'s default.
-          const executable = `${work}/zig-consumer`;
-          await mustSucceed([
-            "zig",
-            "test",
-            "--cache-dir",
-            zigCacheDir,
-            "--test-no-exec",
-            "--dep",
-            "capnpc-zig",
-            "--dep",
-            "generated",
-            `-Mroot=${root}/tests/consumers/zig/${scenario.name}.zig`,
-            "--dep",
-            "capnpc-zig",
-            `-Mgenerated=${
-              scenario.name === "values"
-                ? `${output}/values.zig`
-                : `${output}/root.zig`
-            }`,
-            `-Mcapnpc-zig=${root}/build/src/capnp-zig/src/lib_core.zig`,
-            `-femit-bin=${executable}`,
-          ], { label: "Zig consumer build", timeoutMs: buildTimeoutMs });
-          await mustSucceed([executable], { label: "Zig consumer" });
-        },
-      );
-    }
   });
 }

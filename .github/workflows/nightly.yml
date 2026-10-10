@@ -9,7 +9,7 @@ name: Nightly
 
 on:
   schedule:
-    # Daily at 11:17 UTC, two hours after capnp-zig's nightly (09:17 UTC).
+    # Daily at 11:17 UTC.
     - cron: "17 11 * * *"
   workflow_dispatch:
     inputs:
@@ -62,9 +62,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++-14 pkg-config
       # cache: false: unlike CI, no tool cache is restored, so every tool is
-      # downloaded from its locked URL (Zig from ziglang.org)
-      # and verified against mise.lock by `mise install --locked`, which never
-      # rewrites the lock. The token is confined to this step.
+      # downloaded from its locked URL and verified against mise.lock by
+      # `mise install --locked`, which never rewrites the lock. The token is
+      # confined to this step.
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
@@ -73,16 +73,16 @@ jobs:
           cache: false
       - name: Initialize only pinned top-level references
         run: mise run setup
-      # The Intel runner (four x86_64 CPUs) is the slowest host, and each
-      # load failure so far came from it running mise's default of eight tasks
-      # at once: the harness's SIGTERM race (nightly 36120138448), an SDK
-      # cancellation grace (36132427000), and a cold Zig consumer build past
-      # its timeout (36141746707). With two tasks at once its check, about 17
-      # minutes now, should take roughly 25 to 45 minutes. That is an
-      # estimate: the tasks' durations, logged under full contention, sum to
-      # 78 to 94 minutes, so two at once finish within half that plus half the
-      # longest dependency chain, about 56 minutes, inside the job's 90; the
-      # whole job took 26.5 minutes in nightly 36149851301.
+      # The Intel runner (four x86_64 CPUs) is the slowest host, and each load
+      # failure so far came from it running mise's default of eight tasks at
+      # once: the harness's SIGTERM race (nightly 36120138448), an SDK
+      # cancellation grace (36132427000), and a cold Zig consumer build (since
+      # removed with the Zig generator) past its timeout (36141746707). With two
+      # tasks at once its check, about 17 minutes now, should take roughly 25 to
+      # 45 minutes. That is an estimate: the tasks' durations, logged under full
+      # contention, sum to 78 to 94 minutes, so two at once finish within half
+      # that plus half the longest dependency chain, about 56 minutes, inside
+      # the job's 90; the whole job took 26.5 minutes in nightly 36149851301.
       # The check's test timeouts also run at three times their length
       # (CAPNP_TEST_TIMEOUT_SCALE, tests/lib/timeout-scale.ts): a wazero
       # conversion in test:cli-parity outlasted run()'s 60-second default
@@ -96,8 +96,8 @@ jobs:
       # conversions and test:toolchain each spend one 3-minute case before
       # they stop that host, so the job ends by about 47 of its 90 minutes. A
       # regression that hangs every run of one tool across a suite's steps
-      # (every wasmtime run in the Zig suites' fixture steps, or every Zig
-      # build) is not stopped early and outlasts this job at any scale; the
+      # (every wasmtime run in a suite's fixture steps, or every consumer build)
+      # is not stopped early and outlasts this job at any scale; the
       # job timeout ends it. The other hosts, whose logs show no near-miss
       # (41 wazero conversions take 77 to 155 s against Intel's 141 to 281),
       # keep the scale at 1, as per-push CI does.
@@ -378,7 +378,6 @@ jobs:
             dist/wasm/capnpc-c++.wasm
             dist/wasm/capnpc-rust.wasm
             dist/wasm/capnpc-go.wasm
-            dist/wasm/capnpc-zig.wasm
           if-no-files-found: error
           retention-days: 7
 

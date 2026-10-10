@@ -1,6 +1,6 @@
 # Working in capnpc-wasm
 
-capnpc-wasm ports the Cap'n Proto compiler and the C++, Rust, Go, Zig, and
+capnpc-wasm ports the Cap'n Proto compiler and the C++, Rust, Go, and
 schema-inspection generators to WASI Preview 1 command modules, and ships
 TypeScript and Go SDKs that run them in browsers, Deno, and wazero.
 [docs/release-readiness.md](docs/release-readiness.md) is the single record of
@@ -17,9 +17,8 @@ release status; update it instead of restating status here.
   [docs/threat-model.md](docs/threat-model.md) states the trust boundaries.
 - Area guides, read before touching the area:
   [patches/capnproto/README.md](patches/capnproto/README.md) for the C++ port
-  and Wasm feature profile; [generators/README.md](generators/README.md) and
-  [generators/zig/README.md](generators/zig/README.md) for generators;
-  [sdk/typescript/README.md](sdk/typescript/README.md) and
+  and Wasm feature profile; [generators/README.md](generators/README.md) for
+  generators; [sdk/typescript/README.md](sdk/typescript/README.md) and
   [sdk/go/README.md](sdk/go/README.md) for host integration;
   [tests/browser/README.md](tests/browser/README.md) for browser setup;
   [examples/browser/README.md](examples/browser/README.md) for Schema Studio;
@@ -39,12 +38,8 @@ release status; update it instead of restating status here.
   `lockfile_version = 1` (CI's mise 2026.9.1 cannot read version 2), and run
   `mise run check`. Native Clang builds native tools; the WASI SDK Clang stays
   off `PATH`.
-- Keep the Zig pin equal to `ref/capnp-zig/mise.toml`, a tagged release
-  (`0.17.0`). ziglang.org keeps tagged releases and deletes development builds;
-  with the community mirrors off, mise downloads Zig from ziglang.org and checks
-  the ZSF minisign signature and the sha256 that `mise.lock` records. A Zig bump
-  is `mise lock zig` plus a review of the four entries; CONTRIBUTING.md, "Tool
-  pins", lists the steps and the retired mirror release.
+- capnp-zig owns the Zig generator and its runtime; this repository builds,
+  ships, and tests neither (the SDKs still accept a caller's `zig` module).
 - Preserve the standard binary `CodeGeneratorRequest` boundary with host
   orchestration of generators, WASI Preview 1 command modules (`wasm32-wasip1`),
   standardized Wasm exception handling, and error propagation. Hosts keep
@@ -98,7 +93,7 @@ release status; update it instead of restating status here.
 ## Verification by area
 
 `mise run check` runs `lint` (static checks with no build, actionlint included),
-`doctor`, and `test`: the parity, Zig, SDK, and feature-corpus suites, the
+`doctor`, and `test`: the parity, SDK, and feature-corpus suites, the
 conformance corpus (`test:conformance`), and `test:studio-unit`, one
 `test:<suite>` task each, building only what it reads. `test:browser`,
 `test:studio`, `test:package`, and `test:launcher` are separate and run only
@@ -120,8 +115,8 @@ SDK bounds inside the pages keep their values.
 
 - C++ port, Wasm feature profile, or `scripts/check-wasm-artifacts.ts`:
   `mise run test` (includes `check:wasm-artifacts`).
-- Rust, Go, or Zig generators: `mise run test`; generated-code consumers
-  exercise the pinned runtimes as well as comparing source output.
+- Rust or Go generators: `mise run test`; generated-code consumers exercise the
+  pinned runtimes as well as comparing source output.
 - TypeScript runtime or bundle: `mise run test`, then `mise run test:browser`
   (after `mise run browser:install` once).
 - Go SDK: `mise run test:sdk-go` and `mise run test:sdk-go-race` (`lint` runs
@@ -151,36 +146,34 @@ SDK bounds inside the pages keep their values.
 Run the narrowest task that covers the change: every `test:<suite>` builds only
 what it reads, and `mise run --skip-deps test:<suite>` reruns one without the
 build check. Arguments after `--` reach the suite: `--filter <name>` selects a
-host or fixture in the Deno suites, `test:sdk-go` takes `-run <name>`, and
-`test:zig-unit` fixes its own filters. Warm suites take 1 to 40 s,
-`mise run test` about two minutes, `mise run lint` seconds with no build. Then
-run the area's gate from Verification by area. The scheduled checks `audit:osv`,
-`audit:govulncheck`, `audit:advisories`, and `check:lock-urls`, the soak and
-floor tasks `test:browser-soak`, `test:sdk-ts-soak`, and `test:sdk-go-floor`,
-the drift signal `test:sdk-go-wazero-latest`, and the canary
-`test:termination-canary` need the network and run only when named; the drift
-signal and the canary are not gates. `audit:nightly` also needs the network
-(read-only `gh`): it rewrites `docs/release-evidence/nightly-confidence.json`,
-and `-- --check` only compares.
+host or fixture in the Deno suites, and `test:sdk-go` takes `-run <name>`. Warm
+suites take 1 to 40 s, `mise run test` about two minutes, `mise run lint`
+seconds with no build. Then run the area's gate from Verification by area. The
+scheduled checks `audit:osv`, `audit:govulncheck`, `audit:advisories`, and
+`check:lock-urls`, the soak and floor tasks `test:browser-soak`,
+`test:sdk-ts-soak`, and `test:sdk-go-floor`, the drift signal
+`test:sdk-go-wazero-latest`, and the canary `test:termination-canary` need the
+network and run only when named; the drift signal and the canary are not gates.
+`audit:nightly` also needs the network (read-only `gh`): it rewrites
+`docs/release-evidence/nightly-confidence.json`, and `-- --check` only compares.
 
-| Change                                     | Fastest check                                                                                  |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
-| `patches/`, `cmake/`, `scripts/build-*.sh` | `test:toolchain` (`-- --filter wasmtime` for one host)                                         |
-| `generators/rust`, `generators/go`         | `test:toolchain`, `test:features`                                                              |
-| `generators/zig`, Zig fixtures             | `test:zig-unit`, then `test:wire`, `test:reflection`, `test:generator-api`, `test:rpc-codegen` |
-| `sdk/typescript/`                          | `test:sdk-ts` (direct and worker paths), `test:features`, `test:conformance`                   |
-| `sdk/go/`                                  | `test:sdk-go`                                                                                  |
-| `scripts/*.ts`, `bin/`, `release.json`     | `lint`, then `test:package`                                                                    |
-| `examples/browser/`, Studio scripts        | `test:studio-unit`, `build:studio`, then `test:studio`                                         |
-| Markdown, `mise.toml`, workflows           | `lint`, then `ci`                                                                              |
+| Change                                     | Fastest check                                                                |
+| ------------------------------------------ | ---------------------------------------------------------------------------- |
+| `patches/`, `cmake/`, `scripts/build-*.sh` | `test:toolchain` (`-- --filter wasmtime` for one host)                       |
+| `generators/rust`, `generators/go`         | `test:toolchain`, `test:features`                                            |
+| `sdk/typescript/`                          | `test:sdk-ts` (direct and worker paths), `test:features`, `test:conformance` |
+| `sdk/go/`                                  | `test:sdk-go`                                                                |
+| `scripts/*.ts`, `bin/`, `release.json`     | `lint`, then `test:package`                                                  |
+| `examples/browser/`, Studio scripts        | `test:studio-unit`, `build:studio`, then `test:studio`                       |
+| Markdown, `mise.toml`, workflows           | `lint`, then `ci`                                                            |
 
 Probes and logs go in `build/scratch/<name>/`; `mise run clean` removes them
 with the rest of `build/` and `dist/`, `clean:test` prunes suite work
-directories and the Zig test scratch, and `clean:all` also drops `.cache/`. When
-other work shares the machine, set `jobs` and the build caps in an ignored
-`mise.local.toml`; `MISE_JOBS=1` serializes tasks for a readable log. Commit
-each task on its own in the conventional style CONTRIBUTING.md defines, and
-finish with `mise run ci` before a rebase or hand-off.
+directories, and `clean:all` also drops `.cache/`. When other work shares the
+machine, set `jobs` and the build caps in an ignored `mise.local.toml`;
+`MISE_JOBS=1` serializes tasks for a readable log. Commit each task on its own
+in the conventional style CONTRIBUTING.md defines, and finish with `mise run ci`
+before a rebase or hand-off.
 
 ## Release and packaging
 
@@ -205,24 +198,6 @@ finish with `mise run ci` before a rebase or hand-off.
   archive and manifest digests to the published releases table in
   `docs/releases.md` before publishing the draft, and bump only that flavor's
   entry in `release.json` right after publishing it.
-
-## Zig synchronization
-
-- The `ref/capnp-zig` gitlink is the source of truth. `generators/zig/sync.json`
-  only maps the 36 mirrored fixtures to their native paths and records no
-  hashes. `mise run check:zig-sync` (part of every `build:zig`) compares the
-  prepared sources and the mirrored fixtures with the gitlink; drift fails it.
-- Bump `ref/capnp-zig` with the checklist in `CONTRIBUTING.md`: stage the
-  gitlink, refresh the mirrors from it and review the diff, then align the Zig
-  pin in `mise.toml` and `mise.lock`:
-
-  ```sh
-  mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \
-    scripts/check-zig-sync.ts --update-fixtures
-  ```
-- `generators/zig/historical-reference` pins the audited revision `08a3e3d` that
-  the wire tests use as an oracle; `refs:sync` fetches it. It stays fixed across
-  bumps.
 
 ## Deno versions
 

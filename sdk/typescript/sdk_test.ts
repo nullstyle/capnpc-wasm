@@ -79,9 +79,8 @@ Deno.test("SDK generates all languages from one workspace", async () => {
     ],
     rust: ["person_capnp.rs", "types/common_capnp.rs"],
     go: ["person.capnp.go", "types/common.capnp.go"],
-    zig: ["person.zig", "types/common.zig"],
   };
-  for (const language of ["cpp", "rust", "go", "zig"] as const) {
+  for (const language of ["cpp", "rust", "go"] as const) {
     const files = result.outputs[language]!;
     assert(
       JSON.stringify(Object.keys(files).sort()) ===
@@ -292,7 +291,7 @@ Deno.test("SDK reports compiler, generator, and trap failures without outputs", 
     "CompileError",
     "unexpectedly wrote to stdout",
   );
-  for (const language of ["cpp", "rust", "go", "zig"] as const) {
+  for (const language of ["cpp", "rust", "go"] as const) {
     const malformed = await createCompiler({
       ...modules,
       compiler: malformedRequestGuest,
@@ -1528,7 +1527,7 @@ Deno.test("SDK reports malformed requests as generator exit 1 without outputs", 
     ["truncated", valid.slice(0, 12)],
     ["invalid segment table", new Uint8Array([255, 255, 255, 255, 0, 0, 0, 0])],
   ];
-  for (const language of ["cpp", "rust", "go", "zig"] as const) {
+  for (const language of ["cpp", "rust", "go"] as const) {
     // An empty request never reaches a generator: it is invalid caller input.
     await rejectsWith(
       () =>

@@ -1,9 +1,8 @@
-# Rust, Go, and Zig generators
+# Rust and Go generators
 
-`mise run build:rust`, `mise run build:go`, and `mise run build:zig` build
-native reference commands under `build/native/bin/` and WASI Preview 1 commands
-under `build/wasm/bin/`. All are also part of `mise run build` and
-`mise run test`.
+`mise run build:rust` and `mise run build:go` build native reference commands
+under `build/native/bin/` and WASI Preview 1 commands under `build/wasm/bin/`.
+All are also part of `mise run build` and `mise run test`.
 
 Each generator reads an unpacked `CodeGeneratorRequest` from stdin and writes
 source files beneath its working directory. The host stages a fresh output
@@ -11,23 +10,23 @@ directory and publishes files only after a successful exit. Generators do not
 invoke the compiler or external formatters.
 
 The TypeScript and Go SDKs always run each generator with its default options:
-the guest `argv` holds only the command name. Options such as `--no-reflection`,
-`--api-profile=compact`, or Go's `-promises` are reachable only through a
-command host such as the packaged launcher, Wasmtime, or the development runners
-under `tests/hosts/`.
+the guest `argv` holds only the command name. Options such as Rust's
+`--output-directory` or Go's `-promises` are reachable only through a command
+host such as the packaged launcher, Wasmtime, or the development runners under
+`tests/hosts/`.
 
 ## Generated code runtime requirements
 
 Generated source compiles only against the runtime revision that matches the
 pinned generator. The pins are the Git submodule entries under `ref/`; of the
-four runtimes below, capnproto-rust and capnp-zig sit on upstream release tags.
+three runtimes below, capnproto-rust sits on an upstream release tag. The Zig
+generator and its runtime belong to capnp-zig ([README](../README.md#zig)).
 
-| Generator     | Runtime the output needs                                                                                                                                                                                               | How to consume it                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `capnpc-c++`  | Cap'n Proto v2 at `851c45bb39c34c3f20f9d9ebe9f34a7e39109b6f` (branch `v2`, reported as `2.0-dev`, `CAPNP_VERSION` 2000000). Generated headers `#error` against any other `CAPNP_VERSION`, including every released 1.x | Build the C++ runtime from that commit of `ref/capnproto`; there is no matching upstream release                                                                                                                                                                                                                                                                                                                                          |
-| `capnpc-rust` | `capnp` 0.27.2 and `capnpc` 0.27.0 at `81bc1b815d0f450c9114f9cc2e2274182d210df2` (tag `capnp-v0.27.2`)                                                                                                                 | Pin `capnp = "=0.27.2"`; the tests use a path dependency on `ref/capnproto-rust`, and a git dependency at that revision is equivalent                                                                                                                                                                                                                                                                                                     |
-| `capnpc-go`   | go-capnp at `5d74edb9db427bb8776c7da5d14c6dba314eb156` (`v3.1.0-alpha.2-124-g5d74edb`, untagged)                                                                                                                       | `go get capnproto.org/go/capnp/v3@v3.1.0-alpha.2.0.20260727122444-5d74edb9db42`, or a `replace` directive to a checkout as `tests/consumers/go/go.mod` does; schemas need `$Go.package` and `$Go.import` from `ref/go-capnp/std/go.capnp`                                                                                                                                                                                                 |
-| `capnpc-zig`  | capnp-zig release v0.24.0 at `a37ff29726173babbb9341ed5563d1da8a62ec82` (tag `v0.24.0`; `build.zig.zon` package `capnpc_zig` 0.24.0, minimum Zig 0.17.0; this repository pins Zig 0.17.0)                              | Add `git+https://github.com/nullstyle/capnp-zig.git#v0.24.0` with `zig fetch --save` and import the package's `capnpc-zig-core` module (serialization) or `capnpc-zig` module (RPC) under the name `capnpc-zig`. Inside this repository, `mise run build:zig` exports the runtime to `build/src/capnp-zig/src/`; a raw `zig` command that binds the full `lib.zig` on Linux or macOS also passes capnp-zig's `capnp_build_options` module |
+| Generator     | Runtime the output needs                                                                                                                                                                                               | How to consume it                                                                                                                                                                                                                         |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `capnpc-c++`  | Cap'n Proto v2 at `851c45bb39c34c3f20f9d9ebe9f34a7e39109b6f` (branch `v2`, reported as `2.0-dev`, `CAPNP_VERSION` 2000000). Generated headers `#error` against any other `CAPNP_VERSION`, including every released 1.x | Build the C++ runtime from that commit of `ref/capnproto`; there is no matching upstream release                                                                                                                                          |
+| `capnpc-rust` | `capnp` 0.27.2 and `capnpc` 0.27.0 at `81bc1b815d0f450c9114f9cc2e2274182d210df2` (tag `capnp-v0.27.2`)                                                                                                                 | Pin `capnp = "=0.27.2"`; the tests use a path dependency on `ref/capnproto-rust`, and a git dependency at that revision is equivalent                                                                                                     |
+| `capnpc-go`   | go-capnp at `5d74edb9db427bb8776c7da5d14c6dba314eb156` (`v3.1.0-alpha.2-124-g5d74edb`, untagged)                                                                                                                       | `go get capnproto.org/go/capnp/v3@v3.1.0-alpha.2.0.20260727122444-5d74edb9db42`, or a `replace` directive to a checkout as `tests/consumers/go/go.mod` does; schemas need `$Go.package` and `$Go.import` from `ref/go-capnp/std/go.capnp` |
 
 ## Rust
 
@@ -63,24 +62,11 @@ even though the generator does not use networking. Artifact checks allow those
 two imports only for this command; the development hosts grant no socket file
 descriptors.
 
-## Zig
-
-The [Zig command](zig/README.md) builds the pinned `capnp-zig` generator for
-native and WASI hosts with the exact upstream Zig pin. Generated `name.zig`
-files import the `capnpc-zig` module. Bind that name to
-`build/src/capnp-zig/src/lib_core.zig`, the pinned runtime exported without
-modification, which includes [reflection support](zig/README.md#reflection).
-Generated binary nodes support schema lookup and dynamic message access;
-`--no-reflection` omits that metadata while retaining the typed APIs and their
-dependency on the matching pinned runtime. No language annotations are required.
-The generator's defaults emit the full API, binary reflection metadata, and the
-JSON export manifest, and the SDKs always use those defaults.
-
 ## Verification
 
 `tests/toolchain_test.ts` compares native and Wasm generation from both native
 and Wasm compiler requests in Wasmtime, wazero's compiler and interpreter, and
-Deno with the browser WASI shim. Rust, Go, and Zig output must match the native
+Deno with the browser WASI shim. Rust and Go output must match the native
 generator byte for byte. Malformed requests must fail without output files.
 
 The consumer fixtures under `tests/consumers/` compile Wasm-generated source

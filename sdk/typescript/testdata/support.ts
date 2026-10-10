@@ -34,7 +34,7 @@ export function equalOutputs(
       JSON.stringify(Object.keys(expected.outputs).sort()),
     "output languages differ",
   );
-  for (const language of ["cpp", "rust", "go", "zig"] as const) {
+  for (const language of ["cpp", "rust", "go"] as const) {
     const actualFiles = actual.outputs[language];
     const expectedFiles = expected.outputs[language];
     if (!actualFiles || !expectedFiles) continue;
@@ -149,7 +149,6 @@ export function fixture() {
       cpp,
       rust,
       go,
-      zig,
       person,
       common,
       cxxAnnotations,
@@ -159,14 +158,13 @@ export function fixture() {
       read("build/wasm/bin/capnpc-c++.wasm"),
       read("build/wasm/bin/capnpc-rust.wasm"),
       read("build/wasm/bin/capnpc-go.wasm"),
-      read("build/wasm/bin/capnpc-zig.wasm"),
       read("tests/fixtures/schemas/person.capnp"),
       read("tests/fixtures/schemas/types/common.capnp"),
       read("ref/capnproto/c++/src/capnp/c++.capnp"),
       read("ref/go-capnp/std/go.capnp"),
     ]);
     return {
-      modules: { compiler, generators: { cpp, rust, go, zig } },
+      modules: { compiler, generators: { cpp, rust, go } },
       request: {
         files: { "person.capnp": person, "types/common.capnp": common },
         includeFiles: {
@@ -174,7 +172,7 @@ export function fixture() {
           "go.capnp": goAnnotations,
         },
         entrypoints: ["person.capnp", "types/common.capnp"],
-        generators: ["cpp", "rust", "go", "zig"],
+        generators: ["cpp", "rust", "go"],
       },
     };
   })();

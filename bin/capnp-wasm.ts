@@ -1201,18 +1201,6 @@ function checkModule(
   };
 }
 
-function warnZigEnvironment() {
-  if (
-    Object.keys(Deno.env.toObject()).some((name) =>
-      name.startsWith("CAPNPC_ZIG_")
-    )
-  ) {
-    warn(
-      "CAPNPC_ZIG_* variables are not passed to the guest; use capnpc-zig command-line options instead",
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Publishing staged generator output. The check pass refuses symlinks produced
 // by the guest, directory conflicts, read-only destinations, and symlinks at
@@ -1486,7 +1474,6 @@ async function generate(
   let plugin: string | undefined;
   if (options.has("--module")) {
     module = checkModule(options.get("--module")![0], true);
-    warnZigEnvironment();
   } else {
     plugin = normalizePath(join(Deno.cwd(), options.get("--plugin")![0]));
     if (
@@ -1681,7 +1668,6 @@ export async function main(argv: string[]): Promise<number> {
         [dirname(output), output],
         ".capnp-wasm.",
       );
-      warnZigEnvironment();
       const { status } = await runGuest(
         runtime,
         settings,

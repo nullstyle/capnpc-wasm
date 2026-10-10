@@ -121,7 +121,7 @@ func readModules() (capnpcwasm.Modules, error) {
 		return capnpcwasm.Modules{}, err
 	}
 	modules := capnpcwasm.Modules{Generators: map[capnpcwasm.Language][]byte{}}
-	for language, file := range map[capnpcwasm.Language]string{"": "capnp.wasm", "cpp": "capnpc-c++.wasm", "rust": "capnpc-rust.wasm", "go": "capnpc-go.wasm", "zig": "capnpc-zig.wasm"} {
+	for language, file := range map[capnpcwasm.Language]string{"": "capnp.wasm", "cpp": "capnpc-c++.wasm", "rust": "capnpc-rust.wasm", "go": "capnpc-go.wasm"} {
 		data, err := os.ReadFile(dir + "/" + file)
 		if err != nil {
 			return capnpcwasm.Modules{}, err

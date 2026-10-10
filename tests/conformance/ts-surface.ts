@@ -47,14 +47,13 @@ let corpusPromise: Promise<Corpus> | undefined;
 export function loadCorpus(): Promise<Corpus> {
   return corpusPromise ??= (async () => {
     const read = (path: string) => Deno.readFile(new URL(path, root));
-    const [compiler, cpp, rust, go, zig] = await Promise.all([
+    const [compiler, cpp, rust, go] = await Promise.all([
       read("build/wasm/bin/capnp.wasm"),
       read("build/wasm/bin/capnpc-c++.wasm"),
       read("build/wasm/bin/capnpc-rust.wasm"),
       read("build/wasm/bin/capnpc-go.wasm"),
-      read("build/wasm/bin/capnpc-zig.wasm"),
     ]);
-    const modules: Modules = { compiler, generators: { cpp, rust, go, zig } };
+    const modules: Modules = { compiler, generators: { cpp, rust, go } };
     const direct = await createCompiler({ compiler, generators: {} });
     const { request } = await direct.compile({
       files: { "a.capnp": simpleSchema },

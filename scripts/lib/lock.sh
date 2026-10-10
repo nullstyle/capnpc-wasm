@@ -24,7 +24,7 @@
 #   passes --no-trap and calls release_build_lock from that trap. Call it
 #   from the script's main shell, not from a subshell. A SIGTERM or SIGINT
 #   delivered to the script's shell alone runs that EXIT trap and releases
-#   the lock while a foreground child (zig, cmake, cargo) may keep running.
+#   the lock while a foreground child (cmake, cargo, go) may keep running.
 # release_build_lock
 #   Removes the lock this process owns, if any. Ignored in a subshell, so a
 #   background job can never release its parent's lock (bash does not run a

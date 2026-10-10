@@ -7,9 +7,6 @@
 [submodule "ref/go-capnp"]
 	path = ref/go-capnp
 	url = https://github.com/capnproto/go-capnp.git
-[submodule "ref/capnp-zig"]
-	path = ref/capnp-zig
-	url = https://github.com/nullstyle/capnp-zig.git
 [submodule "ref/wazero"]
 	path = ref/wazero
 	url = https://github.com/wazero/wazero.git

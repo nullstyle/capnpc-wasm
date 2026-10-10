@@ -14,33 +14,26 @@ their pinned references as include files.
   workspace, nested generic parameters, bound and unbound brands, aliases,
   AnyPointer, AnyStruct, AnyList, and typed pointer constants and defaults.
 - `helper-names` covers legal schema structs named `WhichTag`, `EnumOrdinals`,
-  `NestedLists`, and `PointerKinds`. Its Zig consumer exercises union
-  discriminants and guards, Reader and Builder enum ordinal views (including an
-  unknown ordinal), typed nested UInt32 lists, and constrained AnyStruct
-  initialization, reopening, and reading. These names collided with generated
-  helpers in the originally audited capnp-zig revision (finding 1 of the
+  `NestedLists`, and `PointerKinds`, and an `enumOrdinals` group. These names
+  collided with generated helpers in an early capnp-zig generator (finding 1 of
+  the
   [compatibility audit](../../../docs/history/capnp-zig-compatibility-audit.md));
-  the pinned generator qualifies its helper views. The scenario also
-  distinguishes an `enumOrdinals` group from the parent's generated enum ordinal
-  view.
+  the scenario keeps them in the corpus for every generator.
 
-All scenarios generate with the pinned native and Wasm C++, Rust, Go, and Zig
+All scenarios generate with the pinned native and Wasm C++, Rust, and Go
 generators. Go represents generic parameters as dynamic pointers in its upstream
 API; the test compares that actual upstream output. No generator is skipped.
 
 Each host compares the complete canonical binary `CodeGeneratorRequest` and
 every generated source byte against fresh output from the same pinned generators
-built natively. The TypeScript test also compiles its generated C++ and Zig and
-runs consumers in `consumers/` and `tests/consumers/zig/`, checking defaults,
-generated helper APIs, and serialization roundtrips against the pinned native
-runtimes. The binary fixture `workspace/assets/bytes.bin` is exactly the byte
-sequence 0–255; it is read as bytes throughout, without text decoding.
+built natively. The TypeScript test also compiles its generated C++ and runs the
+consumers in `consumers/`, checking defaults, generated helper APIs, and
+serialization roundtrips against the pinned native runtime. The binary fixture
+`workspace/assets/bytes.bin` is exactly the byte sequence 0–255; it is read as
+bytes throughout, without text decoding.
 
-The oracle is the pinned generator itself. No test compares Zig output with the
-historical pristine generator: the pinned capnp-zig generator intentionally
-emits additional typed APIs, so byte identity with that older revision is not a
-contract. The historical revision remains an oracle only in the
-[wire conformance suite](../../wire/README.md).
+The oracle is the pinned generator itself. The Zig generator and its tests live
+in capnp-zig.
 
 Run `mise run test:features` for the TypeScript side and `mise run test:sdk-go`
 for the Go side; both are part of `mise run test` and build what they need. To

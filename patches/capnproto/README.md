@@ -59,8 +59,8 @@ DWARF are kept under `build/wasm/unstripped/`.
   `-fwasm-exceptions -lunwind`, which is the standardized WebAssembly exception
   handling proposal (`try_table`, `exnref`), not the legacy one. LTO is off
   because SDK 34 documents a known exception handling issue with it. Only the
-  three C++ modules carry a tag section; `capnpc-rust.wasm`, `capnpc-go.wasm`,
-  and `capnpc-zig.wasm` do not need exception support.
+  three C++ modules carry a tag section; `capnpc-rust.wasm` and `capnpc-go.wasm`
+  do not need exception support.
 - RTTI is off (`-fno-rtti`, `KJ_NO_RTTI=1`). kj describes a non-kj exception as
   `unknown non-KJ exception` without its type name.
 - Stack and memory: the linker reserves an 8 MiB linear stack

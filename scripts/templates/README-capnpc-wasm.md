@@ -3,7 +3,7 @@
 # {{name}} {{version}}
 
 The complete Cap'n Proto toolchain for WebAssembly hosts: the schema compiler
-and the C++, schema-inspection, Rust, Go, and Zig generators as WASI commands
+and the C++, schema-inspection, Rust, and Go generators as WASI commands
 (`wasm/`), the standard schemas (`include/`), the TypeScript host for Deno and
 browser workers (`typescript/`), the Go SDK source for wazero (`sdk/go/`), and
 `bin/capnp-wasm.ts`, a launcher for Wasmtime {{wasmtime}} on Linux, macOS, and
@@ -66,7 +66,9 @@ const result = await compiler.compile({
 console.log(new TextDecoder().decode(result.outputs.rust!["person_capnp.rs"]));
 ```
 
-Generators are `cpp`, `rust`, `go`, and `zig`; load only the modules you use.
+Generators are `cpp`, `rust`, and `go`; load only the modules you use. The
+`zig` key takes a Zig generator module that you supply: capnp-zig owns that
+generator, and this package does not ship it.
 Installed through a package manager, import from `{{name}}` and load the worker
 script from `{{name}}/worker`; the package has no JavaScript dependencies. The
 complete API (workspace rules, import roots, errors, resource limits,
@@ -107,12 +109,12 @@ cd work
 deno run --allow-all --no-config ../package/bin/capnp-wasm.ts capnp -- \
   compile -o- --src-prefix=schema schema/example.capnp > request.bin
 deno run --allow-all --no-config ../package/bin/capnp-wasm.ts generate \
-  --module ../package/wasm/capnpc-zig.wasm --output gen -- \
+  --module ../package/wasm/capnpc-rust.wasm --output gen -- \
   --src-prefix=schema schema/example.capnp
 ```
 
 On Windows, run it from `cmd.exe`, Git Bash, or PowerShell 7.4 or newer: Windows
-PowerShell 5.1 re-encodes redirected binary output. The Zig output needs the capnp-zig runtime that the
+PowerShell 5.1 re-encodes redirected binary output. The Rust output needs the `capnp` crate that the
 [runtime requirements](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/README.md#generated-code-runtime-requirements)
 name for this commit.
 
@@ -142,14 +144,14 @@ overrides, and exit statuses. The launcher checks every packaged file against
 
 | Path                                 | Contents                                                          |
 | ------------------------------------ | ----------------------------------------------------------------- |
-| `wasm/`                              | `capnp`, `capnpc-c++`, `capnpc-capnp`, `capnpc-rust`, `capnpc-go`, `capnpc-zig` |
+| `wasm/`                              | `capnp`, `capnpc-c++`, `capnpc-capnp`, `capnpc-rust`, `capnpc-go` |
 | `include/`                           | The standard schemas and `go.capnp`                               |
 | `typescript/`                        | `mod.js`, `mod.d.ts`, and `worker.js`                             |
 | `sdk/go/`                            | The Go SDK module source                                          |
 | `bin/`, `runtime/`                   | The Deno launcher and the Wasmtime version it accepts             |
 | `docs/typescript.md`                 | The TypeScript SDK guide at the producer commit                   |
 | `manifest.json`, `verify-release.ts` | Every file's length and SHA-256, and the verifier                 |
-| `provenance/`                        | Source-file digests, tool pins, Go dependency, Zig reference      |
+| `provenance/`                        | Source-file digests, tool pins, Go dependency                     |
 | `LICENSE`, `THIRD_PARTY_NOTICES.md`  | Apache-2.0 for this project; component notices (`licenses/`)      |
 
 ## More
@@ -157,7 +159,6 @@ overrides, and exit statuses. The launcher checks every packaged file against
 Documentation for this commit: the
 [release and package notes](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/docs/releases.md), the
 [API stability policy](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/docs/api-stability.md) (stable and experimental interfaces, version rules), the
-[Zig generator guide](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/generators/zig/README.md), the
 [changelog](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/CHANGELOG.md), and the
 [security policy](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/SECURITY.md). The
 [repository README](https://github.com/nullstyle/capnpc-wasm/blob/{{commit}}/README.md) describes the current state of the

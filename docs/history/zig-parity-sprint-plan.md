@@ -3,8 +3,10 @@
 > Historical document. This plan was written before the sprint and marked
 > implemented on 2026-09-08. It was moved here and renamed from
 > `zig-parity-next-sprint.md` on 2026-09-22. The "likely native files" it names
-> are files in the capnp-zig repository. Current Zig behavior is documented in
-> the [Zig generator guide](../../generators/zig/README.md).
+> are files in the capnp-zig repository. Note added 2026-10-09: capnp-zig now
+> owns the Zig generator and documents its current behavior; the former
+> [Zig generator guide](https://github.com/nullstyle/capnpc-wasm/blob/b0ff3f3ef8d540daef570e5e0a6258aa1722c1f6/generators/zig/README.md)
+> is a permalink at `b0ff3f3`.
 
 Status: implemented with local acceptance completed, 2026-09-08. This document
 retains the acceptance plan;

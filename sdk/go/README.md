@@ -1,12 +1,12 @@
 # Go host SDK
 
-`capnpcwasm` compiles schema workspaces and runs C++, Rust, Go, and Zig
-generators in wazero. The API accepts module bytes and schema bytes and returns
-the standard unpacked `CodeGeneratorRequest`, generated file bytes, and stderr
-diagnostics. Execution needs no native compiler, network access, or host
-filesystem access. The request fields, limits, stage names, and error model are
-shared with the TypeScript SDK and defined in the
-[SDK contract](../../docs/sdk-contract.md).
+`capnpcwasm` compiles schema workspaces and runs C++, Rust, and Go generators
+(and Zig, with a module from capnp-zig) in wazero. The API accepts module bytes
+and schema bytes and returns the standard unpacked `CodeGeneratorRequest`,
+generated file bytes, and stderr diagnostics. Execution needs no native
+compiler, network access, or host filesystem access. The request fields, limits,
+stage names, and error model are shared with the TypeScript SDK and defined in
+the [SDK contract](../../docs/sdk-contract.md).
 
 ```go
 compiler, err := capnpcwasm.New(ctx, capnpcwasm.Modules{
@@ -15,7 +15,6 @@ compiler, err := capnpcwasm.New(ctx, capnpcwasm.Modules{
 		"cpp": cppGeneratorWasm,
 		"rust": rustGeneratorWasm,
 		"go": goGeneratorWasm,
-		"zig": zigGeneratorWasm,
 	},
 })
 if err != nil {
@@ -30,7 +29,7 @@ result, err := compiler.Compile(ctx, capnpcwasm.Request{
 		"go.capnp": goAnnotationBytes,
 	},
 	Entrypoints: []string{"person.capnp"},
-	Generators: []capnpcwasm.Language{"cpp", "rust", "go", "zig"},
+	Generators: []capnpcwasm.Language{"cpp", "rust", "go"},
 })
 if err != nil {
 	return err
@@ -62,9 +61,8 @@ and `$Go.import` annotations, as shown in the repository fixtures. An empty
 `Generators` list runs only the compiler. `Language` may gain members in later
 releases; treat unknown values as data rather than exhausting them in a switch.
 
-The `zig` generator emits source for the pinned `ref/capnp-zig` runtime. Its
-module is `build/wasm/bin/capnpc-zig.wasm`; generated files retain schema paths
-with the `.capnp` suffix replaced by `.zig`.
+The `zig` language runs a `capnpc-zig.wasm` that capnp-zig builds; capnpc-wasm
+does not ship or test it. Its output follows that capnp-zig release.
 
 Keep that request to generate additional languages without compiling the
 workspace again:

@@ -7,14 +7,13 @@ import { compilerPathFixture } from "./compiler-path-fixture.ts";
 
 const root = new URL("./node_modules/@nullstyle/capnpc-wasm/", import.meta.url);
 const read = (path: string) => Deno.readFile(new URL(path, root));
-const languages = ["cpp", "rust", "go", "zig"] as const;
+const languages = ["cpp", "rust", "go"] as const;
 const modules = {
   compiler: await read("wasm/capnp.wasm"),
   generators: {
     cpp: await read("wasm/capnpc-c++.wasm"),
     rust: await read("wasm/capnpc-rust.wasm"),
     go: await read("wasm/capnpc-go.wasm"),
-    zig: await read("wasm/capnpc-zig.wasm"),
   },
 };
 const request = {
@@ -40,7 +39,6 @@ const expected: Record<string, string> = {
   cpp: "candidate.capnp.h",
   rust: "candidate_capnp.rs",
   go: "candidate.capnp.go",
-  zig: "candidate.zig",
 };
 async function digest(bytes: Uint8Array): Promise<string> {
   return [

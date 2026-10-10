@@ -6,13 +6,19 @@
 > numbers aligned with the findings table, and its untracked evidence marked as
 > local only. The remediation sections describe a patch layer that no longer
 > exists: every Zig patch has since been incorporated into capnp-zig, and the
-> generator builds from the pristine pinned reference. Current behavior is
-> documented in the [Zig generator guide](../../generators/zig/README.md) and
-> the [synchronization history](../../patches/capnp-zig/README.md). Note added
-> 2026-09-23: the pristine oracle binary `build/native/bin/capnpc-zig-upstream`
-> cited under "Scope and method" is no longer produced (`scripts/build-zig.sh`
-> removes stale copies); `build/native/bin/capnpc-zig` is built from the
-> pristine pinned reference and needs no separate oracle.
+> generator builds from the pristine pinned reference. The later behavior is
+> documented in the
+> [Zig generator guide](https://github.com/nullstyle/capnpc-wasm/blob/b0ff3f3ef8d540daef570e5e0a6258aa1722c1f6/generators/zig/README.md)
+> and the
+> [synchronization history](https://github.com/nullstyle/capnpc-wasm/blob/b0ff3f3ef8d540daef570e5e0a6258aa1722c1f6/patches/capnp-zig/README.md).
+> Note added 2026-09-23: the pristine oracle binary
+> `build/native/bin/capnpc-zig-upstream` cited under "Scope and method" is no
+> longer produced (`scripts/build-zig.sh` removes stale copies);
+> `build/native/bin/capnpc-zig` is built from the pristine pinned reference and
+> needs no separate oracle. Note added 2026-10-09: capnp-zig now owns the Zig
+> generator, and this repository no longer builds, ships, or tests it; links to
+> the removed files are permalinks at `b0ff3f3`, a `main` commit that still has
+> them.
 
 Status: complete. Audit window closed 2026-09-08 against capnpc-wasm `main` at
 `1e095b4`. Detailed evidence lived in three sub-reports under an untracked
@@ -41,14 +47,16 @@ patch. The audit harness now requires the four fixed probes to compile and
 permits only the exact documented 0002/0003 output deltas when comparing against
 the pristine generator.
 
-A durable [wire conformance suite](../../tests/wire/README.md) now cross-checks
-canonical cross-segment messages with the C++ reader. Project patch
+A durable
+[wire conformance suite](https://github.com/nullstyle/capnpc-wasm/blob/b0ff3f3ef8d540daef570e5e0a6258aa1722c1f6/tests/wire/README.md)
+now cross-checks canonical cross-segment messages with the C++ reader. Project
+patch
 [0004](https://github.com/nullstyle/capnpc-wasm/blob/81525d22d17d545f136da5803fe234a7f9c64fff/patches/capnp-zig/0004-standardize-double-far-lists.patch)
 fixes finding #2's distinct-segment writer to emit the reference LIST-kind
 landing tag and in-content element tag. Same-segment and single-far writing is
 unchanged; legacy Layout A reads remain supported. Consumers obtain this runtime
 fix by binding to the patched source copy, as described in the
-[Zig generator notes](../../generators/zig/README.md).
+[Zig generator notes](https://github.com/nullstyle/capnpc-wasm/blob/b0ff3f3ef8d540daef570e5e0a6258aa1722c1f6/generators/zig/README.md).
 
 The suite preserves the pristine runtime's Layout A rejection as an oracle and
 requires successful C++ decoding from the patched writer. Strict Text rejection

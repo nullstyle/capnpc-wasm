@@ -107,17 +107,12 @@ permissions. Chromium and Firefox also enable browser offline emulation.
 Playwright's WebKit offline emulation blocks even local Blob worker reloads;
 that engine uses request interception instead, allowing only preloaded Blob
 URLs. The task uses `--no-prompt` to prevent permissions from being requested
-again. Both browser paths must produce byte-identical C++, Rust, Go, and Zig
-files for ordinary and Unicode schema paths, preserve malformed-schema
-diagnostics, and make no new network requests. The shared feature corpus also
-covers binary/text embeds, generic brands, AnyPointer defaults, groups, integer
-limits, and parent-directory imports. Saved native requests generate identical
-source through the standalone `generate` API in both direct and worker
-execution. The Zig RPC scenarios also cover generic interfaces, imported and
-inherited bindings, method generics, and streaming methods with the shipped
-`capnp/stream.capnp` include. Both direct and worker compilation and
-saved-request generation compare every generated Zig file byte with fresh native
-output.
+again. Both browser paths must produce byte-identical C++, Rust, and Go files
+for ordinary and Unicode schema paths, preserve malformed-schema diagnostics,
+and make no new network requests. The shared feature corpus also covers
+binary/text embeds, generic brands, AnyPointer defaults, groups, integer limits,
+and parent-directory imports. Saved native requests generate identical source
+through the standalone `generate` API in both direct and worker execution.
 
 The driver saves every compiler request before exiting. Its parent then runs the
 native `normalize-request` oracle over those saved bytes and compares the entire
@@ -128,10 +123,10 @@ the parent. Missing direct/worker receipts, malformed requests, and byte
 differences fail the engine's result. Raw and canonical requests remain beside
 the generated fixtures for inspection.
 
-Malformed and truncated Zig requests must exit unsuccessfully with preserved
-diagnostics and no exposed output files. Native output and temporary browser
-profiles stay under `build/test/browser-*`; the output remains available for
-inspection.
+Malformed and truncated requests to the C++ and Rust generators must exit
+unsuccessfully with preserved diagnostics and no exposed output files. Native
+output and temporary browser profiles stay under `build/test/browser-*`; the
+output remains available for inspection.
 
 Direct and worker clients also reject aggregate workspace and output overages
 without returning partial output, then successfully execute another permitted
@@ -163,11 +158,11 @@ tests use.
 
 Twenty alternating worker abort and timeout operations must reject their jobs
 and let the same client then compile identical output. Each cancels a compile
-for a zig generator that spins forever (`spin-yield.wat`), so the job can never
-finish first; each recovery compiles the workspace with the real compiler and
-the C++, Rust, and Go generators, whose files are checked against the native
-oracle. On this page, which is not cross-origin isolated, each abort replaces
-the worker and each timeout keeps it.
+for a generator that spins forever (`spin-yield.wat`, loaded under the `zig`
+key), so the job can never finish first; each recovery compiles the workspace
+with the real compiler and the C++, Rust, and Go generators, whose files are
+checked against the native oracle. On this page, which is not cross-origin
+isolated, each abort replaces the worker and each timeout keeps it.
 
 Every soak worker is traced (`worker-trace.ts`): a module that loads before the
 SDK's `worker.js` reports the worker's start, each message it receives, each
@@ -414,7 +409,7 @@ mise exec -- deno run --config tests/browser/deno.json --frozen --no-prompt --al
 engines. Its separate driver, `studio.ts`, keeps the SDK driver's offline and
 permission-revocation guarantees unchanged. It uses the same static handler as
 the example server and compares downloaded generated files with fresh native
-C++/Rust/Go/Zig output. It also covers workspace editing, error recovery,
+C++/Rust/Go output. It also covers workspace editing, error recovery,
 cancellation, binary imports/exports, file management, and responsive layouts.
 Each navigation may take two minutes, not Playwright's 30-second default: on a
 loaded runner Firefox once timed out loading Studio right after Chromium passed

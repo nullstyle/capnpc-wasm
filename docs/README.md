@@ -24,17 +24,11 @@ matrix, generated-code runtime requirements, and layout;
 
 Area guides live beside their code:
 [patches/capnproto](../patches/capnproto/README.md),
-[patches/capnp-zig](../patches/capnp-zig/README.md),
 [generators](../generators/README.md),
-[generators/zig](../generators/zig/README.md),
 [sdk/typescript](../sdk/typescript/README.md), [sdk/go](../sdk/go/README.md),
 [examples/browser](../examples/browser/README.md),
 [tests/browser](../tests/browser/README.md),
 [tests/fixtures/features](../tests/fixtures/features/README.md),
-[tests/reflection](../tests/reflection/README.md),
-[tests/wire](../tests/wire/README.md),
-[tests/generator_api](../tests/generator_api/README.md),
-[tests/rpc_codegen](../tests/rpc_codegen/README.md),
 [tests/hosts/deno](../tests/hosts/deno/README.md),
 [tests/hosts/wazero](../tests/hosts/wazero/README.md), and
 [ref](../ref/README.md).

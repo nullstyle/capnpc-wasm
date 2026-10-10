@@ -820,7 +820,7 @@ try {
   const exampleChecks = await runReadmeExamples(extracted, {
     ts: /pub mod person/,
     sh: [
-      ["work/request.bin", "work/gen/example.zig"],
+      ["work/request.bin", "work/gen/example_capnp.rs"],
       ["work/request.bin", "work/output/example.capnp.h"],
     ],
   });
@@ -874,7 +874,6 @@ try {
   ) throw new Error("tools-only package contains SDK or generator modules");
   await checkNotices(toolsInstalled, [
     "licenses/browser_wasi_shim-LICENSE-MIT",
-    "licenses/zig-LICENSE",
     "licenses/go-LICENSE",
   ]);
   await checkLinks(toolsInstalled);
@@ -1007,7 +1006,7 @@ try {
           "packaged documents link only inside the package or to the repository at the producer commit",
           ...exampleChecks,
           ...toolsExampleChecks,
-          "external Wasmtime launcher compiler/C++/Zig and canonicalization",
+          "external Wasmtime launcher compiler/C++ and canonicalization",
           "launcher paths with spaces, argument failures, and runtime pin",
           "reproducible tools-only archive with external generator modules",
           "external npm-layout TypeScript declarations",

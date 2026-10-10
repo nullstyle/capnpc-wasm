@@ -29,7 +29,7 @@ func main() {
 	compiler, err := capnpcwasm.New(ctx, capnpcwasm.Modules{
 		Compiler: read("wasm/capnp.wasm"), Generators: map[capnpcwasm.Language][]byte{
 			"cpp": read("wasm/capnpc-c++.wasm"), "rust": read("wasm/capnpc-rust.wasm"),
-			"go": read("wasm/capnpc-go.wasm"), "zig": read("wasm/capnpc-zig.wasm"),
+			"go": read("wasm/capnpc-go.wasm"),
 		},
 	}, capnpcwasm.WithLimits(capnpcwasm.DefaultLimits()))
 	if err != nil {
@@ -40,7 +40,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	languages := []capnpcwasm.Language{"cpp", "rust", "go", "zig"}
+	languages := []capnpcwasm.Language{"cpp", "rust", "go"}
 	result, err := compiler.Compile(ctx, capnpcwasm.Request{
 		Files: map[string][]byte{"candidate.capnp": schema}, IncludeFiles: map[string][]byte{"go.capnp": read("include/go.capnp")},
 		Entrypoints: []string{"candidate.capnp"}, Generators: languages,
@@ -74,7 +74,7 @@ func main() {
 	if !reflect.DeepEqual(hashes, digests(regenerated.Outputs)) {
 		panic("replay produced a different file set or bytes")
 	}
-	expected := map[capnpcwasm.Language]string{"cpp": "candidate.capnp.h", "rust": "candidate_capnp.rs", "go": "candidate.capnp.go", "zig": "candidate.zig"}
+	expected := map[capnpcwasm.Language]string{"cpp": "candidate.capnp.h", "rust": "candidate_capnp.rs", "go": "candidate.capnp.go"}
 	if len(result.Outputs) != len(languages) {
 		panic(fmt.Sprintf("generated %d languages, want %d", len(result.Outputs), len(languages)))
 	}

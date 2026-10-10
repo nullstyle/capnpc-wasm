@@ -66,8 +66,7 @@
       "expect": "ok",
       "outputs": {
         "cpp": 2,
-        "rust": 1,
-        "zig": 1
+        "rust": 1
       },
       "diagnostics": 0
     },
@@ -100,8 +99,7 @@
       "expect": "ok",
       "outputs": {
         "cpp": 2,
-        "rust": 1,
-        "zig": 1
+        "rust": 1
       },
       "diagnostics": 0,
       "surfaces": {
@@ -114,8 +112,7 @@
           "diagnostics": 0,
           "outputs": {
             "cpp": 2,
-            "rust": 1,
-            "zig": 1
+            "rust": 1
           },
           "reason": "macOS WebKit 26.6 workers ran out of stack (trap:stack at the compiler) at about 34 const references, and outcomes near that limit vary between runs; on Linux both surfaces compiled this chain (measured on Linux CI, run 36099823012)",
           "finding": "GAP3-02"
@@ -129,8 +126,7 @@
           "diagnostics": 0,
           "outputs": {
             "cpp": 2,
-            "rust": 1,
-            "zig": 1
+            "rust": 1
           },
           "reason": "macOS WebKit 26.6 workers ran out of stack (trap:stack at the compiler) at about 34 const references, and outcomes near that limit vary between runs; on Linux both surfaces compiled this chain (measured on Linux CI, run 36099823012)",
           "finding": "GAP3-02"
@@ -153,8 +149,7 @@
       "expect": "ok",
       "outputs": {
         "cpp": 2,
-        "rust": 1,
-        "zig": 1
+        "rust": 1
       },
       "diagnostics": 0,
       "surfaces": {
@@ -167,8 +162,7 @@
           "diagnostics": 0,
           "outputs": {
             "cpp": 2,
-            "rust": 1,
-            "zig": 1
+            "rust": 1
           },
           "reason": "the outcome varies near the WebKit worker stack limit on macOS (about 90 nested imports): in one run the SDK worker failed with trap:stack at the compiler where Studio compiled the same chain with every output; on Linux both surfaces compiled it (measured on Linux CI, run 36099823012)",
           "finding": "GAP3-02"
@@ -182,8 +176,7 @@
           "diagnostics": 0,
           "outputs": {
             "cpp": 2,
-            "rust": 1,
-            "zig": 1
+            "rust": 1
           },
           "reason": "the outcome varies near the WebKit worker stack limit on macOS (about 90 nested imports): in one run the SDK worker failed with trap:stack at the compiler where Studio compiled the same chain with every output; on Linux both surfaces compiled it (measured on Linux CI, run 36099823012)",
           "finding": "GAP3-02"
@@ -607,26 +600,6 @@
     "request-pattern4k-go": {
       "expect": "exit(1)",
       "stage": "go",
-      "stderr": true
-    },
-    "request-half-zig": {
-      "expect": "exit(1)",
-      "stage": "zig",
-      "stderr": true
-    },
-    "request-one-zig": {
-      "expect": "exit(1)",
-      "stage": "zig",
-      "stderr": true
-    },
-    "request-zeros8-zig": {
-      "expect": "exit(1)",
-      "stage": "zig",
-      "stderr": true
-    },
-    "request-pattern4k-zig": {
-      "expect": "exit(1)",
-      "stage": "zig",
       "stderr": true
     }
   }

@@ -260,7 +260,7 @@ deno run --allow-all --no-config "$launcher" compiler \
   compile --no-standard-import -I/include --src-prefix=/ -o- /example.capnp \
   > /absolute/work/request.bin
 deno run --allow-all --no-config "$launcher" generator \
-  --module /absolute/path/to/matching-capnpc-zig.wasm \
+  --module /absolute/path/to/generator.wasm \
   --output /absolute/work/output -- < /absolute/work/request.bin
 deno run --allow-all --no-config "$launcher" compiler -- \
   convert binary:canonical \
@@ -269,7 +269,7 @@ deno run --allow-all --no-config "$launcher" compiler -- \
 
 The compiler runs the packaged `capnp.wasm` with `argv[0]` set to `capnp`, so
 its diagnostics suggest `capnp compile --help`; a generator runs with its module
-basename (`capnpc-c++`, `capnpc-zig`). Both use guest current directory `/`,
+basename (`capnpc-c++`, `capnpc-rust`). Both use guest current directory `/`,
 standardized Wasm exception handling, and an empty guest environment. Arguments
 after `--` and binary standard streams pass through unchanged. There is no
 native compiler fallback and no shell evaluation of arguments.
@@ -311,10 +311,7 @@ containing backslashes are ordinary characters here but rejected by the SDKs,
 and path length is bounded by the host `PATH_MAX`. Schemas that build here may
 fail in the SDKs or on another host for these reasons.
 
-The guest environment is always empty. `CAPNPC_ZIG_*` variables (for example
-`CAPNPC_ZIG_API_PROFILE`) are not forwarded; the launcher prints a one-line
-warning when any is set, and the same choices are available as `capnpc-zig`
-command-line options. Guests are bounded:
+The guest environment is always empty. Guests are bounded:
 
 | Bound              | Default                        | Override                                    |
 | ------------------ | ------------------------------ | ------------------------------------------- |
@@ -390,7 +387,7 @@ exits 3, so the launcher reads Wasmtime's standard error as it passes it through
 and reports a trap as 134. Ctrl+C stops the guest and the launcher removes its
 staging directories. The `windows-launcher` CI job runs
 `tests/package/portable_launcher_test.ts` on `windows-latest` with the pinned
-Deno against a tools candidate and the Zig generator built on Linux;
+Deno against a tools candidate and the Rust generator built on Linux;
 `test:launcher` and `test:package` run the same test and the full contract on
 Linux and macOS.
 
@@ -525,11 +522,11 @@ directory under `build/test/`, checks the packaged links, notices, and every
 non-test Go source, runs the README examples, then runs an actual Deno consumer
 through the installed package's npm-style exports with strict TypeScript
 checking, and runs a separate Go module against the included SDK. Both compile a
-schema and generate C++, Rust, Go, and Zig from the packaged assets. The Go
-consumer resolves wazero from its checksum-pinned public module version, with no
+schema and generate C++, Rust, and Go from the packaged assets. The Go consumer
+resolves wazero from its checksum-pinned public module version, with no
 replacement for that dependency. Negative controls modify a manifest digest and
 add a stale file; verification must reject both. The extracted launcher executes
-the real compiler and C++/Zig generators, preserves binary requests and
+the real compiler and C++/Rust generators, preserves binary requests and
 canonicalization bytes, accepts paths with spaces, and rejects malformed inputs,
 invalid roots, and missing or mismatched runtimes.
 

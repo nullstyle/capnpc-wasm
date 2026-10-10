@@ -44,7 +44,6 @@ export const ENV_PASSTHROUGH: readonly string[] = [
   "GOTOOLCHAIN",
   "GOFLAGS",
   "GOPROXY",
-  "ZIG_GLOBAL_CACHE_DIR",
 ];
 
 /** Whether this process may read the named environment variable. */
@@ -120,7 +119,7 @@ export interface RunOptions {
    * After this many milliseconds the direct child receives SIGTERM (and
    * SIGKILL `killAfterMs` later if it is still running). Once it has exited,
    * stdout and stderr are no longer awaited, so a grandchild that inherited
-   * the pipes (a `cargo test` or `zig test` binary, say) cannot hold the call
+   * the pipes (a `cargo test` or `go test` binary, say) cannot hold the call
    * open; the output captured until then is returned with `timedOut` set.
    * Defaults to defaultTimeoutMs (60 s times CAPNP_TEST_TIMEOUT_SCALE); a
    * step that compiles code uses buildTimeoutMs and runs what it built as a
@@ -135,10 +134,10 @@ export interface RunOptions {
  * The timeout for a step that builds code rather than exercising behavior (a
  * generated-code consumer, a probe, an oracle): cold compiler caches on a
  * loaded runner outlast run()'s 60-second default (nightly 36141746707: the
- * first cold Zig consumer build on macos-15-intel was killed at 60 s while
- * the suites ran in parallel; ledger row 139), and a hung compiler still
- * fails ten minutes in. Such a step only builds (`zig test --test-no-exec`,
- * `cargo test --no-run`, `go test -run '^$'`); the program it built runs as
+ * first cold consumer build on macos-15-intel was killed at 60 s while the
+ * suites ran in parallel; ledger row 139), and a hung compiler still fails ten
+ * minutes in. Such a step only builds (`cargo test --no-run`,
+ * `go test -run '^$'`); the program it built runs as
  * its own step under the default, so a hung program fails in 60 s and the
  * timeout stops that program, not the compiler that started it. Both
  * timeouts scale by CAPNP_TEST_TIMEOUT_SCALE (timeout-scale.ts): at 3, a hung

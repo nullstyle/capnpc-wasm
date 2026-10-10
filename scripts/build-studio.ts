@@ -15,7 +15,6 @@ const modules = [
   "capnpc-c++.wasm",
   "capnpc-rust.wasm",
   "capnpc-go.wasm",
-  "capnpc-zig.wasm",
 ];
 const sentinel = "__STUDIO_ASSET_VERSION__";
 const encoder = new TextEncoder();

@@ -266,7 +266,7 @@ suite.test("checkObservation holds the phase, the message pin, and each outcome'
     expect: ["ok", "trap:stack"],
     stage: "compiler",
     diagnostics: 0,
-    outputs: { cpp: 2, rust: 1, zig: 1 },
+    outputs: { cpp: 2, rust: 1 },
   };
   const pinned: Expectation = {
     expect: "validation",
@@ -308,7 +308,7 @@ suite.test("checkObservation holds the phase, the message pin, and each outcome'
     [
       "a depth row that compiled with every output",
       depth,
-      { outcome: "ok", diagnostics: 0, outputs: { cpp: 2, rust: 1, zig: 1 } },
+      { outcome: "ok", diagnostics: 0, outputs: { cpp: 2, rust: 1 } },
       0,
     ],
     [

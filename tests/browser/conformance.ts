@@ -183,7 +183,7 @@ export async function setupConformance(
       // Load every module and include into the adapter while the server is
       // up. Go generation needs the Go annotations, which the corpus schema
       // lacks, so the priming schema carries them.
-      const languages = ["cpp", "rust", "go", "zig"];
+      const languages = ["cpp", "rust", "go"];
       const signal = new AbortController().signal;
       const primed = await studio.compile(
         (standard) => ({

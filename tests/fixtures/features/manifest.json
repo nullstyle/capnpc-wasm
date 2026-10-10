@@ -11,17 +11,17 @@
     {
       "name": "values",
       "entrypoints": ["values.capnp", "shared/common.capnp"],
-      "generators": ["cpp", "rust", "go", "zig"]
+      "generators": ["cpp", "rust", "go"]
     },
     {
       "name": "brands",
       "entrypoints": ["nested/brands.capnp", "shared/common.capnp"],
-      "generators": ["cpp", "rust", "go", "zig"]
+      "generators": ["cpp", "rust", "go"]
     },
     {
       "name": "helper-names",
       "entrypoints": ["helper-names.capnp"],
-      "generators": ["cpp", "rust", "go", "zig"]
+      "generators": ["cpp", "rust", "go"]
     }
   ]
 }

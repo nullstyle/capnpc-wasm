@@ -13,7 +13,7 @@
 //
 // `mise run test:conformance` fails when the JSON no longer matches this file.
 
-export type Language = "cpp" | "rust" | "go" | "zig";
+export type Language = "cpp" | "rust" | "go";
 
 export type LimitName =
   | "memoryPages"
@@ -229,7 +229,7 @@ export const cases: CaseSpec[] = [
     op: "compile",
     files: { "d.capnp": { recipe: "nestedStructs", depth: 60 } },
     entrypoints: ["d.capnp"],
-    generators: ["cpp", "rust", "zig"],
+    generators: ["cpp", "rust"],
   },
   {
     name: "nested-structs-200",
@@ -275,7 +275,7 @@ export const cases: CaseSpec[] = [
       "c.capnp": { recipe: "constChain", depth: commonChainDepth },
     },
     entrypoints: ["c.capnp"],
-    generators: ["cpp", "rust", "zig"],
+    generators: ["cpp", "rust"],
   },
   {
     name: `const-chain-${failingConstChainDepth}`,
@@ -291,7 +291,7 @@ export const cases: CaseSpec[] = [
     op: "compile",
     filesRecipe: { recipe: "importChain", depth: commonChainDepth },
     entrypoints: ["f0.capnp"],
-    generators: ["cpp", "rust", "zig"],
+    generators: ["cpp", "rust"],
   },
   // Paths at and past the default pathBytes budget.
   {
@@ -404,7 +404,7 @@ export const cases: CaseSpec[] = [
     limits: { outputEntries: 1 },
   },
   // Malformed requests: every generator exits 1 with its own diagnostic.
-  ...(["cpp", "rust", "go", "zig"] as const).flatMap((language) =>
+  ...(["cpp", "rust", "go"] as const).flatMap((language) =>
     (["half", "one", "zeros8", "pattern4k"] as const).map((
       variant,
     ): CaseSpec => ({

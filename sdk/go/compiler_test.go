@@ -17,7 +17,7 @@ import (
 	capnpcwasm "github.com/nullstyle/capnpc-wasm/sdk/go"
 )
 
-var allLanguages = []capnpcwasm.Language{"cpp", "rust", "go", "zig"}
+var allLanguages = []capnpcwasm.Language{"cpp", "rust", "go"}
 
 func fixture(t testing.TB) capnpcwasm.Request {
 	r := root(t)
@@ -31,7 +31,7 @@ func fixture(t testing.TB) capnpcwasm.Request {
 			"go.capnp":        read(t, r+"/ref/go-capnp/std/go.capnp"),
 		},
 		Entrypoints: []string{"person.capnp", "types/common.capnp"},
-		Generators:  []capnpcwasm.Language{"cpp", "rust", "go", "zig"},
+		Generators:  []capnpcwasm.Language{"cpp", "rust", "go"},
 	}
 }
 
@@ -159,7 +159,7 @@ func TestCompiler(t *testing.T) {
 
 	t.Run("later generator failure discards all outputs", func(t *testing.T) {
 		req := fixture(t)
-		req.Generators = []capnpcwasm.Language{"cpp", "rust", "zig", "go"}
+		req.Generators = []capnpcwasm.Language{"cpp", "rust", "go"}
 		req.Files["person.capnp"] = bytes.Replace(req.Files["person.capnp"], []byte(`$Go.package("fixture");`), nil, 1)
 		got, err := c.Compile(t.Context(), req)
 		var failure *capnpcwasm.Error

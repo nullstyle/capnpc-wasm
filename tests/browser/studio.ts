@@ -75,7 +75,6 @@ for (
     cpp: "c++",
     rust: "rust",
     go: "go",
-    zig: "zig",
   })
 ) {
   const output = `${fixture}/${language}`;
@@ -245,7 +244,7 @@ const generateAll = async (page: Page) => {
   await page.waitForFunction(() =>
     document.body.dataset.busy === "false" &&
     document.querySelector("#status")?.textContent?.includes(
-      "C++, Rust, Go, Zig",
+      "C++, Rust, Go",
     )
   );
 };
@@ -274,7 +273,7 @@ try {
       await page.goto(url, { timeout: navigationTimeoutMs });
       await badgeIs(page, "Up to date");
       assert(
-        !requested.some((path) => /capnpc-(rust|go|zig)\.wasm/.test(path)),
+        !requested.some((path) => /capnpc-(rust|go)\.wasm/.test(path)),
         `${engine}: eagerly fetched unselected generators`,
       );
       assert(
@@ -331,8 +330,8 @@ try {
       const moduleRequests = () =>
         requested.filter((path) => /\.wasm\?v=/.test(path)).length;
       const loadedModules = moduleRequests();
-      assert(loadedModules === 5, `${engine}: expected five module fetches`);
-      for (const language of ["rust", "go", "zig", "cpp"]) {
+      assert(loadedModules === 4, `${engine}: expected four module fetches`);
+      for (const language of ["rust", "go", "cpp"]) {
         await page.locator(`#tab-${language}`).click();
         assert(
           await page.locator("#output-files").isEnabled(),
@@ -384,13 +383,13 @@ try {
         `${engine}: re-entering the tablist skipped the selected tab`,
       );
       await page.keyboard.press("End");
-      assert(await activeId(page) === "tab-zig", `${engine}: End key`);
+      assert(await activeId(page) === "tab-go", `${engine}: End key`);
       await page.keyboard.press("ArrowRight");
       assert(await activeId(page) === "tab-cpp", `${engine}: arrow wrap`);
       await page.keyboard.press("ArrowLeft");
       await page.keyboard.press("Enter");
       assert(
-        await page.locator("#tab-zig").getAttribute("aria-selected") ===
+        await page.locator("#tab-go").getAttribute("aria-selected") ===
             "true" &&
           await page.locator("#output-badge").textContent() === "Up to date",
         `${engine}: Enter did not select the focused tab`,
@@ -660,16 +659,16 @@ try {
           `${engine}: retry after an asset failure did not recover`,
         );
 
-        let releaseZig = () => {};
-        const zigHeld = new Promise<void>((resolve) => releaseZig = resolve);
-        await fresh.route("**/capnpc-zig.wasm*", async (route) => {
-          await zigHeld;
+        let releaseGo = () => {};
+        const goHeld = new Promise<void>((resolve) => releaseGo = resolve);
+        await fresh.route("**/capnpc-go.wasm*", async (route) => {
+          await goHeld;
           await route.continue().catch(() => {});
         });
         await fresh.locator("#generate-all").click();
         await fresh.waitForFunction(() =>
           document.querySelector("#status")?.textContent ===
-            "Loading Go, Zig generators…"
+            "Loading Go generator…"
         );
         await fresh.locator("#cancel").click();
         await fresh.waitForFunction(() =>
@@ -678,10 +677,10 @@ try {
           ) && document.body.dataset.busy === "false" &&
           document.querySelector<HTMLButtonElement>("#cancel")?.hidden === true
         );
-        releaseZig();
-        await fresh.unroute("**/capnpc-zig.wasm*");
+        releaseGo();
+        await fresh.unroute("**/capnpc-go.wasm*");
         await generateAll(fresh);
-        await fresh.locator("#tab-zig").click();
+        await fresh.locator("#tab-go").click();
         assert(
           await fresh.locator("#output-files").isEnabled(),
           `${engine}: recovery after a cancelled download failed`,
@@ -1001,7 +1000,7 @@ try {
         ) + "\n",
       );
       console.log(
-        `PASS ${engine}: Studio editing, four-language native parity, downloads, diagnostics, cancellation, keyboard flow, axe scans, imports, and responsive layout`,
+        `PASS ${engine}: Studio editing, three-language native parity, downloads, diagnostics, cancellation, keyboard flow, axe scans, imports, and responsive layout`,
       );
       await context.close();
     } finally {

@@ -36,7 +36,6 @@ const commands: Record<Language, string> = {
   cpp: "capnpc-c++",
   rust: "capnpc-rust",
   go: "capnpc-go",
-  zig: "capnpc-zig",
 };
 
 /** Wasmtime's own trap report, which follows whatever the guest wrote. */

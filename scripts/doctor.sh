@@ -84,7 +84,6 @@ tool_checks=(
   "ninja|ninja --version"
   "go|go version"
   "deno|deno --version"
-  "zig|zig version"
   "wasm-tools|wasm-tools --version"
   "wasmtime|wasmtime --version"
   "shellcheck|shellcheck --version"
@@ -207,15 +206,9 @@ done < <(git config -f .gitmodules --get-regexp '\.path$')
 banner git submodule status
 
 # Pins recorded in more than one place must agree.
-check "Zig pin matches ref/capnp-zig/mise.toml" \
-  "align the zig pin in mise.toml with the reference (see README: Tools)" \
-  check_zig_pin "$(mise current zig 2> /dev/null || true)" ref/capnp-zig/mise.toml
 check "wazero pins in sdk/go and tests/hosts/wazero match the ref/wazero gitlink" \
   "update sdk/go/go.mod to the pseudo-version at the gitlink and keep the replace in tests/hosts/wazero/go.mod" \
   check_wazero_pin "$(ref_revision wazero)" sdk/go/go.mod tests/hosts/wazero/go.mod ref/wazero
-check "historical capnp-zig commit is present in ref/capnp-zig" \
-  "run mise run refs:sync" \
-  check_historical_commit ref/capnp-zig generators/zig/historical-reference
 
 if [[ "$failures" -ne 0 ]]; then
   echo "Doctor found $failures problem(s)." >&2
