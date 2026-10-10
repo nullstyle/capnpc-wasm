@@ -94,10 +94,10 @@ jobs:
           retention-days: 7
       - name: Verify release archive and external package consumers
         run: mise run test:package
-      # The windows-launcher job runs the portable launcher on these
-      # Linux-built bytes: a tools candidate prepared from this clean
-      # checkout, and the Zig generator module.
-      - name: Stage the portable launcher inputs for Windows
+      # The windows-launcher job runs the launcher on these Linux-built
+      # bytes: a tools candidate prepared from this clean checkout, and the
+      # Zig generator module.
+      - name: Stage the launcher inputs for Windows
         if: matrix.os == 'ubuntu-24.04'
         run: |
           mise exec -- deno run --allow-read --allow-write=build --allow-run=git,go \
@@ -105,7 +105,7 @@ jobs:
           mkdir -p build/ci-windows/inputs/modules
           cp -R build/ci-windows/capnp-wasm-tools-*/package build/ci-windows/inputs/package
           cp dist/wasm/capnpc-zig.wasm build/ci-windows/inputs/modules/
-      - name: Upload the portable launcher inputs
+      - name: Upload the launcher inputs
         if: matrix.os == 'ubuntu-24.04'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -132,20 +132,24 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # The portable launcher (bin/capnp-wasm.py), the supported way to run the
-  # tools archive on Windows, against the candidate and module the Linux check
-  # job built: package verification, compiler and generator modes, the capnp
-  # and generate modes with Windows paths, exit statuses, and traps. mise has
-  # no Windows lock entries, so the job installs the pinned Wasmtime itself.
+  # The launcher (bin/capnp-wasm.ts) on Windows, against the candidate and
+  # module the Linux check job built: package verification, compiler and
+  # generator modes, the capnp and generate modes with Windows paths, exit
+  # statuses, and traps. mise has no Windows lock entries, so the job installs
+  # the pinned Deno and Wasmtime itself.
   windows-launcher:
-    name: Portable launcher (windows-latest)
+    name: Launcher (windows-latest)
     needs: check
     runs-on: windows-latest
     timeout-minutes: 20
     env:
+      # deno-x86_64-pc-windows-msvc.zip of denoland/deno and
       # wasmtime-v<version>-x86_64-windows.zip of bytecodealliance/wasmtime,
-      # with the sha256 GitHub records for that release asset. Change both
-      # with the wasmtime pin in mise.toml; the install step checks the pin.
+      # with the sha256 GitHub records for each release asset. Change them
+      # with the deno and wasmtime pins in mise.toml; the install step checks
+      # the pins.
+      DENO_VERSION: 2.9.6
+      DENO_SHA256: 15e5300b0ba3c3695a7621d90160a746ec9e710228cee639afa9d580f6e3cd11
       WASMTIME_VERSION: 48.0.1
       WASMTIME_SHA256: a9cb78e5f2705b35192052026138ee14eeb6983fe2d2aefed6b0c797f01d1a0f
     steps:
@@ -156,12 +160,24 @@ jobs:
         with:
           name: windows-launcher-inputs
           path: ${{ runner.temp }}/inputs
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13"
-      - name: Install the pinned Wasmtime
+      - name: Install the pinned Deno and Wasmtime
         shell: pwsh
         run: |
+          $pinned = (Select-String -Path mise.toml -Pattern '^deno = "(.*)"$').Matches[0].Groups[1].Value
+          if ($pinned -ne $env:DENO_VERSION) {
+            Write-Output "::error::mise.toml pins deno $pinned; update DENO_VERSION and DENO_SHA256 in this job"
+            exit 1
+          }
+          $zip = Join-Path $env:RUNNER_TEMP "deno.zip"
+          Invoke-WebRequest -Uri "https://github.com/denoland/deno/releases/download/v$($env:DENO_VERSION)/deno-x86_64-pc-windows-msvc.zip" -OutFile $zip
+          $actual = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+          if ($actual -ne $env:DENO_SHA256) {
+            Write-Output "::error::deno-x86_64-pc-windows-msvc.zip has sha256 $actual, not the pinned $($env:DENO_SHA256)"
+            exit 1
+          }
+          $deno = Join-Path $env:RUNNER_TEMP "deno"
+          Expand-Archive -Path $zip -DestinationPath $deno
+          Add-Content -Path $env:GITHUB_PATH -Value $deno
           $pinned = (Select-String -Path mise.toml -Pattern '^wasmtime = "(.*)"$').Matches[0].Groups[1].Value
           if ($pinned -ne $env:WASMTIME_VERSION) {
             Write-Output "::error::mise.toml pins wasmtime $pinned; update WASMTIME_VERSION and WASMTIME_SHA256 in this job"
@@ -177,15 +193,15 @@ jobs:
           }
           Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP
           Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:RUNNER_TEMP $name)
-      - name: Test the portable launcher on Windows
+      - name: Test the launcher on Windows
         shell: pwsh
         env:
           CAPNP_WASM_TEST_PACKAGE: ${{ runner.temp }}\inputs\package
           CAPNP_WASM_TEST_MODULES: ${{ runner.temp }}\inputs\modules
         run: |
           wasmtime --version
-          python --version
-          python -B -m unittest -v tests/package/portable_launcher_test.py
+          deno --version
+          deno test --allow-all --no-config tests/package/portable_launcher_test.ts
 
   # Report-only: are the Wasm modules byte-identical between the Linux and
   # macOS builds? Each host checks its own modules against the artifact

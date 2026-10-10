@@ -265,9 +265,9 @@ licenses, manifest, and provenance. No language generators, Go SDK, or launcher.
 ## capnp-wasm-tools
 
 Compiler-only toolchain for build systems: `wasm/capnp.wasm`, pinned `include/`,
-the Wasmtime launchers (`bin/capnp-wasm.py` from 0.1.0-rc.3, and the
-`bin/capnp-wasm` Bash launcher), licenses, manifest, and provenance. No SDK code
-or generator modules.
+the Wasmtime launcher (`bin/capnp-wasm.ts` for Deno from 0.1.0-rc.3, the Bash
+`bin/capnp-wasm` before), licenses, manifest, and provenance. No SDK code or
+generator modules.
 
 ### 0.1.0-rc.3
 
@@ -275,16 +275,19 @@ or generator modules.
   launcher contract and the path-independent, DWARF-stripped compiler that rc.2
   predates. The bundled schemas are unchanged, and on capnp-zig's committed
   requests the compiler writes the same bytes as rc.2.
-- Launcher: executable with `bin` entry, symlink/CDPATH-safe self-location, 256
-  MiB/8 MiB/300 s guest bounds with env overrides, Wasmtime patch-release
-  acceptance, `--help`/`--version`, exit-code contract, `argv[0]` `capnp`,
-  read-only workspace copy, staged generator output.
-- Launcher: `bin/capnp-wasm.py`, a portable launcher for Linux, macOS, and
-  Windows (Python 3.9 or newer, standard library only), ships next to the Bash
-  launcher in the tools and full SDK archives. It implements the same `compiler`
-  and `generator` contract, checks every packaged file against `manifest.json`
-  before each run (exit 74; `CAPNP_WASM_EXPECT_MANIFEST_SHA256` and `verify` pin
-  the published digest), and adds the `capnp` and `generate` modes, ported from
+- Launcher: executable with `bin` entry, symlink-safe self-location, 256 MiB/8
+  MiB/300 s guest bounds with env overrides, Wasmtime patch-release acceptance,
+  `--help`/`--version`, exit-code contract, `argv[0]` `capnp`, read-only
+  workspace copy, staged generator output.
+- Launcher, breaking: `bin/capnp-wasm.ts` replaces the Bash `bin/capnp-wasm`
+  that rc.2 shipped. It needs Deno 2.4.5 or newer, imports nothing, and runs on
+  Linux, macOS, and Windows as
+  `deno run --allow-all --no-config package/bin/capnp-wasm.ts` (its shebang runs
+  it directly on Linux and macOS; `package.json` `bin` names it). It keeps the
+  `compiler` and `generator` contract, checks every packaged file against
+  `manifest.json` before each run (exit 74; `CAPNP_WASM_EXPECT_MANIFEST_SHA256`
+  and `verify` pin the published digest), exits 78 on an older Deno or without
+  every permission, and adds the `capnp` and `generate` modes, ported from
   capnp-zig's `tools/capnp_tool.py`, which take paths relative to the current
   directory, add the bundled schemas, and compile and run a Wasm (`--module`) or
   native (`--plugin`) generator in one step. A new CI job tests it on
@@ -409,12 +412,15 @@ created by hand after the SDK API freeze. No `sdk/go/v*` tag exists.
   sha256 in `mise.lock`. The project's Zig mirror release, its
   `url_replacements` rule, `mise run mirror:zig`, and `check:zig-lock` are
   retired; `check:lock-urls` still checks every Zig tarball and `.minisig`.
-- Launcher: `bin/capnp-wasm.py`, a portable launcher for Linux, macOS, and
-  Windows (Python 3.9 or newer, standard library only), ships next to the Bash
-  launcher in the tools and full SDK archives. It implements the same `compiler`
-  and `generator` contract, checks every packaged file against `manifest.json`
-  before each run (exit 74; `CAPNP_WASM_EXPECT_MANIFEST_SHA256` and `verify` pin
-  the published digest), and adds the `capnp` and `generate` modes, ported from
+- Launcher, breaking: `bin/capnp-wasm.ts` replaces the Bash `bin/capnp-wasm`
+  that rc.5 shipped. It needs Deno 2.4.5 or newer, imports nothing, and runs on
+  Linux, macOS, and Windows as
+  `deno run --allow-all --no-config package/bin/capnp-wasm.ts` (its shebang runs
+  it directly on Linux and macOS; `package.json` `bin` names it). It keeps the
+  `compiler` and `generator` contract, checks every packaged file against
+  `manifest.json` before each run (exit 74; `CAPNP_WASM_EXPECT_MANIFEST_SHA256`
+  and `verify` pin the published digest), exits 78 on an older Deno or without
+  every permission, and adds the `capnp` and `generate` modes, ported from
   capnp-zig's `tools/capnp_tool.py`, which take paths relative to the current
   directory, add the bundled schemas, and compile and run a Wasm (`--module`) or
   native (`--plugin`) generator in one step. A new CI job tests it on

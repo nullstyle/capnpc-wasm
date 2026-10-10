@@ -1,9 +1,9 @@
-// Runs the corpus through the packaged Wasmtime launcher (bin/capnp-wasm):
+// Runs the corpus through the packaged Wasmtime launcher (bin/capnp-wasm.ts):
 // compile cases stage their workspace as the launcher's read-only root, the
 // generation cases feed the request on stdin, compiler guests run as generator
 // modules (compiler mode cannot swap the compiler), and deadline rows use
-// CAPNP_WASM_TIMEOUT. Called from tests/package/launcher.ts for every packaged
-// launcher the package gates exercise.
+// CAPNP_WASM_TIMEOUT. Called from tests/package/launcher.ts with the packaged
+// launcher.
 
 import {
   type CaseSpec,
@@ -24,7 +24,7 @@ import {
 } from "./outcome.ts";
 
 export interface LauncherSurface {
-  /** The command that runs the packaged launcher, for example `bash <path>`. */
+  /** The command that runs the packaged launcher, `deno run --allow-all --no-config <path>`. */
   launcher: readonly string[];
   /** The directory holding the generator modules (`capnpc-c++.wasm`, ...). */
   modules: string;

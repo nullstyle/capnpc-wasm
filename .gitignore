@@ -12,4 +12,3 @@ node_modules/
 .zig-cache/
 zig-out/
 .DS_Store
-__pycache__/

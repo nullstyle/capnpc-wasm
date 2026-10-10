@@ -123,21 +123,28 @@ guest's own validation.
   4,096 entries and path bytes; 256 MiB of linear memory. Context cancellation
   closes the running module.
 
-### Packaged launcher (`bin/capnp-wasm`)
+### Packaged launcher (`bin/capnp-wasm.ts`)
 
 - Runs
   `wasmtime run -W exceptions=y -W max-wasm-stack=8388608
   -W max-memory-size=268435456 -W timeout=300s -D max-backtrace=16 -S cwd=/
   --dir <root>::/ --argv0 <tool> <module>`
   with exactly one host directory mapped as guest `/`. The compiler's root is a
-  fresh write-protected copy of `--workspace` (`/` is refused, `$HOME` warns,
-  the copy is bounded); a generator's root is an empty staging directory whose
-  files move into `--output` only after exit 0, refusing directory conflicts,
-  read-only files, and symlinks at any destination or parent. Wasmtime gives the
-  guest no network and the guest environment is empty (`CAPNPC_ZIG_*` produces a
-  warning). `CAPNP_WASM_WASMTIME` and `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`,
-  which select and accept the runtime, are trusted; `CAPNP_WASM_TIMEOUT`,
-  `CAPNP_WASM_MAX_MEMORY`, and `CAPNP_WASM_MAX_WORKSPACE` are validated.
+  fresh write-protected copy of `--workspace` (a filesystem root is refused, the
+  home directory warns, the copy is bounded); a generator's root is an empty
+  staging directory whose files move into `--output` only after exit 0, refusing
+  directory conflicts, read-only files, and symlinks at any destination or
+  parent. Wasmtime gives the guest no network and the guest environment is empty
+  (`CAPNPC_ZIG_*` produces a warning). `CAPNP_WASM_WASMTIME` and
+  `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`, which select and accept the runtime, are
+  trusted; `CAPNP_WASM_TIMEOUT`, `CAPNP_WASM_MAX_MEMORY`, and
+  `CAPNP_WASM_MAX_WORKSPACE` are validated.
+- The launcher runs under Deno 2.4.5 or newer with `--allow-all`. It starts
+  Wasmtime and native generators, so Deno's permission checks would add no
+  boundary; the guest's confinement comes from Wasmtime. It imports nothing, so
+  it loads no code beyond the verified package and the Deno that runs it, which
+  is trusted; `--no-config` keeps a project's `deno.json` from changing how it
+  runs.
 - Memory, stack, and time are bounded by Wasmtime options; a timeout or stack
   exhaustion exits 134 with a bounded backtrace that names only the module
   basename, and memory exhaustion surfaces as the guest's own error. Confinement
@@ -145,17 +152,7 @@ guest's own validation.
   symlink, `..`, and traversal escapes in both modes
   (`tests/package/launcher.ts`); escaping workspace symlinks are reported by a
   launcher warning before the guest fails on them. Package-root resolution
-  ignores `CDPATH` and follows symlinks.
-- Running as root removes the copy's permission-based read-only guarantee; a
-  process killed with SIGKILL can leave a hidden `.capnp-wasm.*` staging
-  directory next to `--output` or a `capnp-wasm.*` workspace copy under
-  `$TMPDIR`.
-
-### Portable launcher (`bin/capnp-wasm.py`)
-
-- Its `compiler` and `generator` modes run the same Wasmtime command with the
-  same roots, bounds, staging, and publication checks as `bin/capnp-wasm`, and
-  the launcher test suite runs every check against both launchers.
+  follows symlinks.
 - Before every run it verifies the package against `manifest.json` (every file's
   length and SHA-256, no other file), and `CAPNP_WASM_EXPECT_MANIFEST_SHA256`
   (trusted, validated) ties it to a published digest. A party that can rewrite
@@ -175,6 +172,10 @@ guest's own validation.
   caller's environment and a staging directory as its working directory; it is
   as trusted as any program the caller runs. Its output passes the generator
   mode's publication checks.
+- Running as root removes the copy's permission-based read-only guarantee; a
+  process killed with SIGKILL can leave a hidden `.capnp-wasm.*` staging
+  directory next to `--output` or a `capnp-wasm.*` workspace copy in the
+  temporary directory.
 - On Windows the workspace copy's files are read-only but its directories are
   not, and Wasmtime's trap status (3) is told apart from a guest exit 3 by its
   standard error.
@@ -262,6 +263,6 @@ independent check.
 | Go limit reporting                      | Resolved: output, stdout, and stderr budget breaches name the exceeded limit instead of surfacing as opaque generator failures                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `GO-06`, `GAP3-V3` (fixed)                      |
 | Launcher output and inputs              | Resolved: staged output and a read-only workspace copy; `/` refused                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | `GAP1-01`, `GAP1-02` (fixed)                    |
 | Launcher ceilings and confinement tests | Resolved: 256 MiB, 8 MiB stack, 300 s bounds; escape regression tests; symlink warning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | `SEC-02`, `SEC-07`, `GAP1-V2` (fixed)           |
-| Launcher invocation                     | Resolved: `CDPATH`-safe, symlink-resolving, executable with `package.json` `bin`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | `SEC-06`, `GAP1-V1` (fixed)                     |
+| Launcher invocation                     | Resolved: symlink-resolving, executable through its shebang, listed under `package.json` `bin`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | `SEC-06`, `GAP1-V1` (fixed)                     |
 | Release trust                           | Unsigned, hand-built assets; CI token and download hardening                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       | `SEC-04`, `SEC-08`                              |
 | Names and diagnostics                   | Control characters pass through; host filesystems differ                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `SEC-05`, `GAP3-07`                             |

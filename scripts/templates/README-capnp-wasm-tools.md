@@ -3,11 +3,10 @@
 # {{name}} {{version}}
 
 The Cap'n Proto schema compiler as a WASI command (`wasm/capnp.wasm`), the
-standard schemas (`include/`), and two launchers that run the compiler and
-separately built WASI language generators under Wasmtime {{wasmtime}}:
-`bin/capnp-wasm.py` (Python 3.9 or newer, standard library only; Linux, macOS,
-and Windows) and `bin/capnp-wasm` (Bash; Linux and macOS). This archive contains
-no SDK code and no generator modules.
+standard schemas (`include/`), and `bin/capnp-wasm.ts`, a launcher that runs the
+compiler and separately built WASI language generators under Wasmtime
+{{wasmtime}} on Linux, macOS, and Windows. The launcher needs Deno 2.4.5 or newer
+and imports nothing. This archive contains no SDK code and no generator modules.
 Built from [nullstyle/capnpc-wasm](https://github.com/nullstyle/capnpc-wasm) at commit
 [`{{shortCommit}}`](https://github.com/nullstyle/capnpc-wasm/commit/{{commit}}) for the release
 [`{{tag}}`](https://github.com/nullstyle/capnpc-wasm/releases/tag/{{tag}}).
@@ -36,40 +35,41 @@ tar -xzf {{stem}}.tgz
 deno run --allow-read /path/to/capnpc-wasm/scripts/verify-release.ts --sums SHA256SUMS ./package
 ```
 
-Without Deno, and on Windows, check the archive digest against the published
-row (`Get-FileHash -Algorithm SHA256 {{stem}}.tgz` in PowerShell), extract it
-(`tar -xzf` works on Windows 10 and later), and let the Python launcher check
-the extracted files against the published manifest digest. It also checks
-every packaged file before each run, and `CAPNP_WASM_EXPECT_MANIFEST_SHA256`
-makes every run require that digest:
+On Windows, check the archive digest against the published row
+(`Get-FileHash -Algorithm SHA256 {{stem}}.tgz` in PowerShell) and extract it
+(`tar -xzf` works on Windows 10 and later). The launcher checks every packaged
+file against `manifest.json` before each run. Its `verify` mode checks the
+extracted files against the published manifest digest, and
+`CAPNP_WASM_EXPECT_MANIFEST_SHA256` makes every run require that digest:
 
 ```sh
-python3 package/bin/capnp-wasm.py verify --expect-manifest-sha256 <digest from the published releases row>
+deno run --allow-all --no-config package/bin/capnp-wasm.ts verify \
+  --expect-manifest-sha256 <digest from the published releases row>
 ```
 
 ## Compile a schema
 
-Both launchers need Wasmtime {{wasmtime}} (or a newer patch release of the same
-series) on `PATH` or in `CAPNP_WASM_WASMTIME`, and bound the guest's memory and
-time.
+The launcher needs Wasmtime {{wasmtime}} (or a newer patch release of the same
+series) on `PATH` or in `CAPNP_WASM_WASMTIME`, and bounds the guest's memory and
+time. Run it with `deno run --allow-all --no-config`; on Linux and macOS its
+shebang also runs it directly as `package/bin/capnp-wasm.ts`.
 
-From your project directory, on any of the three systems, the Python launcher's
-`capnp` mode takes paths relative to the current directory, like a native
-`capnp`. It adds the bundled schemas after your own `-I` paths, so imports such
-as `/capnp/c++.capnp` resolve, and it keeps requested file names relative to
-the current directory. With `example.capnp` in the current directory:
+From your project directory, the `capnp` mode takes paths relative to the
+current directory, like a native `capnp`. It adds the bundled schemas after your
+own `-I` paths, so imports such as `/capnp/c++.capnp` resolve, and it keeps
+requested file names relative to the current directory. With `example.capnp` in
+the current directory:
 
 ```sh example
 mkdir -p work/schema
 cp example.capnp work/schema/
 cd work
-python3 ../package/bin/capnp-wasm.py capnp -- \
+deno run --allow-all --no-config ../package/bin/capnp-wasm.ts capnp -- \
   compile -o- --src-prefix=schema schema/example.capnp > request.bin
 ```
 
-On Windows run `py -3` or `python` instead of `python3`, from `cmd.exe`, Git
-Bash, or PowerShell 7.4 or newer: Windows PowerShell 5.1 re-encodes redirected
-binary output.
+On Windows, run it from `cmd.exe`, Git Bash, or PowerShell 7.4 or newer: Windows
+PowerShell 5.1 re-encodes redirected binary output.
 
 `request.bin` is a standard unpacked `CodeGeneratorRequest`. The `generate`
 mode compiles and runs a generator in one step, and writes the output directory
@@ -78,33 +78,36 @@ only when both succeed. `--module` runs a WASI generator under Wasmtime;
 dependency builds:
 
 ```sh
-python3 package/bin/capnp-wasm.py generate --module /path/to/capnpc-zig.wasm \
-  --output src/gen -- --src-prefix=schema schema/example.capnp
+deno run --allow-all --no-config package/bin/capnp-wasm.ts generate \
+  --plugin zig-out/bin/capnpc-zig --output src/gen -- \
+  --src-prefix=schema schema/example.capnp
 ```
 
-The compiler and generator modes are the launcher contract that both launchers
-implement. The compiler reads a read-only copy of a workspace directory with
-absolute guest paths, and a generator writes into a staging directory that is
-moved into the output directory only when it exits 0:
+The compiler and generator modes are the launcher contract. The compiler reads a
+read-only copy of a workspace directory with absolute guest paths, and a
+generator writes into a staging directory that is moved into the output
+directory only when it exits 0:
 
 ```sh example
 mkdir -p "$PWD/work/input/include" "$PWD/work/output"
 cp -R package/include/. "$PWD/work/input/include/"
 cp example.capnp "$PWD/work/input/"
-package/bin/capnp-wasm compiler --workspace "$PWD/work/input" -- \
+deno run --allow-all --no-config package/bin/capnp-wasm.ts compiler \
+  --workspace "$PWD/work/input" -- \
   compile --no-standard-import -I/include --src-prefix=/ -o- /example.capnp \
   > "$PWD/work/request.bin"
 ```
 
 ```sh
-package/bin/capnp-wasm generator --module /path/to/capnpc-zig.wasm \
-  --output "$PWD/work/output" -- < "$PWD/work/request.bin"
+deno run --allow-all --no-config package/bin/capnp-wasm.ts generator \
+  --module /path/to/capnpc-zig.wasm --output "$PWD/work/output" -- \
+  < "$PWD/work/request.bin"
 ```
 
 Use the same archive version to compile a request and to generate from it, and
-key cached or committed requests by that version. `--help` on either launcher
-prints the complete contract: filesystem roots, bounds and their environment
-overrides, and exit statuses. `--version` prints this package's version and the
+key cached or committed requests by that version. `--help` prints the complete
+contract: filesystem roots, bounds and their environment overrides, and exit
+statuses. `--version` prints this package's version and the
 packaged Wasmtime version.
 
 ## Contents
@@ -113,7 +116,7 @@ packaged Wasmtime version.
 | --------------------------------------- | ----------------------------------------------------------------- |
 | `wasm/capnp.wasm`                       | The schema compiler (WASI Preview 1 command)                      |
 | `include/`                              | The standard schemas, resolved through `-I/include`               |
-| `bin/capnp-wasm.py`, `bin/capnp-wasm`   | The portable (Python) and the Bash Wasmtime launchers             |
+| `bin/capnp-wasm.ts`                     | The Wasmtime launcher (Deno 2.4.5 or newer)                       |
 | `runtime/wasmtime-version`              | The Wasmtime version the launcher accepts                         |
 | `manifest.json`, `verify-release.ts`    | Every file's length and SHA-256, and the verifier                 |
 | `provenance/`                           | Source-file digests, `mise.toml`, and `mise.lock` of the producer |

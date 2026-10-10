@@ -14,7 +14,7 @@
     "ts-direct": "sdk/typescript createCompiler on Deno",
     "ts-worker": "sdk/typescript createWorkerCompiler on Deno",
     "go": "sdk/go with default options (the compiler on wazero's interpreter)",
-    "launcher": "bin/capnp-wasm under Wasmtime; compiler guests run as generator modules",
+    "launcher": "bin/capnp-wasm.ts under Wasmtime; compiler guests run as generator modules",
     "browser-direct": "createCompiler in Chromium, Firefox, and WebKit",
     "browser-worker": "createWorkerCompiler in Chromium, Firefox, and WebKit; `browser-worker@<engine>` keys hold one engine's departures",
     "studio": "examples/browser/compiler.js in Chromium, Firefox, and WebKit"

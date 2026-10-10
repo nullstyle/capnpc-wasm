@@ -53,7 +53,7 @@ export interface Flavor {
   readonly typescript: boolean;
   /** Ships every Wasm command and the Zig historical reference, not only capnp.wasm. */
   readonly generators: boolean;
-  /** Ships bin/capnp-wasm, bin/capnp-wasm.py, and runtime/wasmtime-version. */
+  /** Ships bin/capnp-wasm.ts and runtime/wasmtime-version. */
   readonly launcher: boolean;
   /** Ships the Go SDK source and its dependency provenance. */
   readonly goSdk: boolean;
@@ -1084,8 +1084,7 @@ export async function prepareRelease(
     );
 
     if (flavor.launcher) {
-      await copy("bin/capnp-wasm", "bin/capnp-wasm");
-      await copy("bin/capnp-wasm.py", "bin/capnp-wasm.py");
+      await copy("bin/capnp-wasm.ts", "bin/capnp-wasm.ts");
       await write("runtime/wasmtime-version", `${wasmtimeVersion}\n`);
     }
     if (flavor.goSdk) {
@@ -1167,7 +1166,7 @@ export async function prepareRelease(
             ? { main: "./typescript/mod.js", types: "./typescript/mod.d.ts" }
             : {}),
           ...(flavor.launcher
-            ? { bin: { "capnp-wasm": "./bin/capnp-wasm" } }
+            ? { bin: { "capnp-wasm": "./bin/capnp-wasm.ts" } }
             : {}),
           exports: {
             ...(flavor.typescript

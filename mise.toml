@@ -78,7 +78,7 @@ _.source = { path = "{{config_root}}/scripts/lib/toolchain-env.sh", tools = true
 
 [vars]
 # Shared path lists so lint and fmt check and fix the same files.
-fmt_paths = "README.md AGENTS.md SECURITY.md CONTRIBUTING.md CHANGELOG.md ref/README.md patches/capnproto/README.md patches/capnp-zig/README.md generators/README.md generators/zig/README.md docs tests sdk examples scripts/*.ts"
+fmt_paths = "README.md AGENTS.md SECURITY.md CONTRIBUTING.md CHANGELOG.md ref/README.md patches/capnproto/README.md patches/capnp-zig/README.md generators/README.md generators/zig/README.md docs tests sdk examples scripts/*.ts bin/capnp-wasm.ts"
 go_dirs = "sdk/go tests/hosts/wazero tests/consumers/go tests/package"
 zig_dirs = "generators/zig tests/consumers/zig tests/wire tests/reflection tests/generator_api tests/rpc_codegen"
 # Environment the parity suites may read: the keep-test-dirs switch plus the
@@ -134,14 +134,14 @@ run = [
 [tasks.lint]
 description = "Static checks without a build: shell, formatting, lint, type checks, vet, clippy"
 run = [
-  "shellcheck bin/capnp-wasm $(find scripts -name '*.sh')",
+  "shellcheck $(find scripts -name '*.sh')",
   # Every workflow under .github/workflows, with shellcheck over run: scripts.
   "actionlint",
   "deno fmt --check {{vars.fmt_paths}}",
-  "deno lint tests sdk/typescript examples scripts/*.ts",
+  "deno lint tests sdk/typescript examples scripts/*.ts bin/capnp-wasm.ts",
   # examples/deno.ts imports the built dist/ bundle; example:deno, which test
   # depends on, type-checks it with --check after build:sdk.
-  "deno check scripts/*.ts",
+  "deno check scripts/*.ts bin/capnp-wasm.ts",
   "deno check --config tests/hosts/deno/deno.json --unstable-sloppy-imports tests/hosts/deno/main.ts",
   "deno check --config sdk/typescript/deno.json --unstable-sloppy-imports sdk/typescript/mod.ts sdk/typescript/worker.ts",
   "deno check --config sdk/typescript/deno.strict.json sdk/typescript/*.ts sdk/typescript/testdata/*.ts",
@@ -379,7 +379,7 @@ description = "Verify reproducible candidate packaging and clean external Deno/G
 # --allow-dirty), so it runs on a dirty tree and never touches dist/releases;
 # build:native is for the compiler-host gate it follows.
 depends = ["build:native", "build:sdk", "test:compiler-host-package"]
-run = "deno run --allow-read --allow-write=build --allow-run=deno,go,cmake,bash,python3,wasmtime scripts/test-package.ts"
+run = "deno run --allow-read --allow-write=build --allow-run=deno,go,cmake,bash,wasmtime scripts/test-package.ts"
 
 [tasks."test:launcher"]
 description = "Check the packaged Wasmtime launcher (binary streams, filesystem roots, failures, and the conformance corpus) in a candidate prepared under build/test/launcher"
@@ -388,7 +388,7 @@ description = "Check the packaged Wasmtime launcher (binary streams, filesystem 
 depends = ["build:sdk"]
 run = [
   "deno run --allow-read --allow-write=build --allow-run=git,go scripts/release.ts --out build/test/launcher --allow-dirty --allow-existing-tag",
-  "deno run --allow-read --allow-write=build --allow-run=bash,python3,wasmtime tests/package/launcher.ts",
+  "deno run --allow-read --allow-write=build --allow-run=bash,deno,wasmtime tests/package/launcher.ts",
 ]
 
 [tasks."release:tools"]

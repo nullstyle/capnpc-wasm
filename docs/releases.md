@@ -35,9 +35,9 @@ copied byte for byte to this repository the same day. Versions, archive hashes,
 manifests, and embedded provenance are unchanged; the original download URLs on
 that host remain available for consumers that already pin them. These archives
 were built by hand before the release workflow existed, and they predate the
-launcher contract below (`bin/capnp-wasm` bounds, exit statuses, `--help`, and
-`--version`) and the Wasm artifact changes (path-independent bytes, DWARF
-stripped); the next release of each flavor is the first to carry them.
+launcher contract below (bounds, exit statuses, `--help`, and `--version`) and
+the Wasm artifact changes (path-independent bytes, DWARF stripped); the next
+release of each flavor is the first to carry them.
 
 Published assets are immutable: changed bytes need a new version. GitHub's
 generated source archives are separate from the release assets.
@@ -230,36 +230,40 @@ files those components need.
 
 ## Repository toolchain launcher
 
-The tools archive and the full SDK archive include two launchers that implement
-one contract. `bin/capnp-wasm` is an executable Bash launcher for Linux and
-macOS (`package.json` lists it under `bin`). `bin/capnp-wasm.py` is the portable
-launcher for Linux, macOS, and Windows; it needs Python 3.9 or newer and nothing
-outside the Python standard library. The portable launcher is the supported way
-to run these archives on Windows, and it behaves the same on Linux and macOS;
-its additions are [below](#the-portable-launcher). The Bash launcher resolves
-its package root through symlinks, from a bare name, and with `CDPATH` set, so
-it can be linked onto `PATH` or run as `bash package/bin/capnp-wasm`. The
-packaged Wasmtime version is generated from `mise.toml` into
-`runtime/wasmtime-version`. Both launchers accept that version, any newer patch
-release of the same `major.minor` series (with a one-line warning), or exactly
-the version named by `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`; anything else fails
-before the guest starts. `CAPNP_WASM_WASMTIME` selects the executable, otherwise
-`wasmtime` on `PATH`. The Bash launcher leaves package integrity verification to
-the consumer's bootstrap step; the portable launcher checks the package before
-every run.
+The tools archive and the full SDK archive include `bin/capnp-wasm.ts`, one
+launcher for Linux, macOS, and Windows. It needs Deno 2.4.5 or newer (the first
+release with `Deno.chmod` on Windows) and imports nothing, so it runs offline
+from the package it verifies. Run it as
+`deno run --allow-all --no-config package/bin/capnp-wasm.ts MODE ...`; it runs
+Wasmtime and native generators, so narrower Deno permissions buy nothing, and it
+exits 78 before doing anything else on an older Deno or without every
+permission. On Linux and macOS its shebang
+(`#!/usr/bin/env -S deno run --allow-all --no-config`) also runs it directly,
+and `package.json` lists it under `bin`. It resolves its package root through
+symlinks and from any directory, so it can be linked onto `PATH`. The packaged
+Wasmtime version is generated from `mise.toml` into `runtime/wasmtime-version`.
+The launcher accepts that version, any newer patch release of the same
+`major.minor` series (with a one-line warning), or exactly the version named by
+`CAPNP_WASM_WASMTIME_ACCEPT_VERSION`; anything else fails before the guest
+starts. `CAPNP_WASM_WASMTIME` selects the executable, otherwise `wasmtime` on
+`PATH`. Every run first verifies the package, and two modes take paths relative
+to the current directory ([below](#verification-and-caller-relative-modes)).
 
 ```sh
 # Stage project schemas and the required bundled includes in a fresh workspace.
 mkdir -p /absolute/work/input/include /absolute/work/output
 cp -R package/include/. /absolute/work/input/include/
 cp project/schema/example.capnp /absolute/work/input/
-package/bin/capnp-wasm compiler --workspace /absolute/work/input -- \
+launcher=package/bin/capnp-wasm.ts
+deno run --allow-all --no-config "$launcher" compiler \
+  --workspace /absolute/work/input -- \
   compile --no-standard-import -I/include --src-prefix=/ -o- /example.capnp \
   > /absolute/work/request.bin
-package/bin/capnp-wasm generator \
+deno run --allow-all --no-config "$launcher" generator \
   --module /absolute/path/to/matching-capnpc-zig.wasm \
   --output /absolute/work/output -- < /absolute/work/request.bin
-package/bin/capnp-wasm compiler -- convert binary:canonical \
+deno run --allow-all --no-config "$launcher" compiler -- \
+  convert binary:canonical \
   < /absolute/work/statement.bin > /absolute/work/statement.canonical.bin
 ```
 
@@ -272,16 +276,17 @@ native compiler fallback and no shell evaluation of arguments.
 
 Inputs are read-only and outputs are transactional:
 
-- `compiler --workspace ABS_DIR` copies the workspace (a clone on APFS and
-  reflink filesystems, otherwise a plain copy), removes write permission from
+- `compiler --workspace ABS_DIR` copies the workspace (a clone where the
+  filesystem supports it, otherwise a plain copy), removes write permission from
   the copy, and maps only the copy as guest `/`. The original directory is never
   opened by the guest, so it is byte-identical after successful and failed runs.
-  The root must be an existing absolute directory; `/` is refused, `$HOME`
-  produces a warning, and the copy is limited to 65536 entries and
-  `CAPNP_WASM_MAX_WORKSPACE` bytes of disk usage (default 256 MiB). Without
-  `--workspace` the guest sees an empty root, which is enough for `convert`,
-  `id`, and `--version`. Wasmtime honors host permissions; a root user loses the
-  read-only guarantee of the copy.
+  The root must be an existing absolute directory; a filesystem root is refused,
+  the home directory produces a warning, and the copy is limited to 65536
+  entries and `CAPNP_WASM_MAX_WORKSPACE` bytes of disk usage (default 256 MiB).
+  Without `--workspace` the guest sees an empty root, which is enough for
+  `convert`, `id`, and `--version`. Wasmtime honors host permissions; a root
+  user loses the read-only guarantee of the copy. On Windows the copied files
+  are read-only and the directories are not.
 - `generator --output ABS_DIR` maps an empty staging directory (a hidden sibling
   of the output directory, or a hidden child when the parent is not writable) as
   guest `/`. Files move into `--output` only after the generator exits 0. Before
@@ -333,23 +338,21 @@ statuses:
 | 65    | `--module` is not a WebAssembly binary                                                                                                                              |
 | 66    | Missing or unreadable workspace, output directory, or module                                                                                                        |
 | 69    | Wasmtime executable not found, or its version could not be read                                                                                                     |
-| 70    | The launcher cannot resolve its own location (unreadable or overlong symlink chain)                                                                                 |
+| 70    | The launcher cannot resolve its own location (it was not run from a file, or its path cannot be resolved)                                                           |
 | 73    | Cannot stage the workspace, or cannot publish generator output (conflict, read-only, symlink, not writable); a move that fails part-way keeps the staging directory |
-| 74    | The package fails verification against its `manifest.json` (portable launcher only)                                                                                 |
-| 78    | Packaged runtime version missing, Wasmtime version rejected, or an invalid environment override                                                                     |
+| 74    | The package fails verification against its `manifest.json`                                                                                                          |
+| 78    | Packaged runtime version missing, Wasmtime version rejected, an invalid environment override, Deno older than 2.4.5, or a missing Deno permission                   |
 | 134   | Wasmtime trap: timeout (`wasm trap: interrupt`), stack exhaustion, or a guest fault; the module's basename and a bounded backtrace are printed on stderr            |
 | 1     | Wasmtime could not load or instantiate a module whose magic bytes were valid                                                                                        |
 | 128+N | The launcher was stopped by signal N after forwarding it to the guest and removing its staging directory                                                            |
-| other | Any other failure of one of the launcher's own commands exits with that command's status, usually 1, after its message                                              |
+| other | Any other failure of the launcher itself exits 1 after its message                                                                                                  |
 
-`capnp-wasm --help` prints this contract and `capnp-wasm --version` prints the
-package version and the packaged Wasmtime version, both with exit 0.
+`capnp-wasm.ts --help` prints this contract and `capnp-wasm.ts --version` prints
+the package version and the packaged Wasmtime version, both with exit 0.
 
-### The portable launcher
+### Verification and caller-relative modes
 
-`bin/capnp-wasm.py` implements the `compiler` and `generator` modes, the bounds,
-the environment overrides, and the exit statuses above, and the launcher test
-suite runs every check of the contract against both launchers. It adds:
+Beyond the `compiler` and `generator` modes, the launcher has:
 
 - Package verification. Before every mode except `--help` and `--version`, it
   checks every file that `manifest.json` lists, by length and SHA-256, and that
@@ -383,14 +386,13 @@ suite runs every check of the contract against both launchers. It adds:
   (`--plugin-arg=--no-reflection` for one that starts with `-`).
 
 On Windows, Wasmtime reports a trap with exit 3, the same status as a guest that
-exits 3, so the portable launcher reads Wasmtime's standard error as it passes
-it through and reports a trap as 134. Ctrl+C stops the guest and the launcher
-removes its staging directories. File permissions in the read-only workspace
-copy follow Windows semantics: the copied files are read-only, and the
-directories are not. The `windows-launcher` CI job runs
-`tests/package/portable_launcher_test.py` on `windows-latest` with Python 3.13
-against a tools candidate and the Zig generator built on Linux; `test:launcher`
-and `test:package` run the same test and the full contract on Linux and macOS.
+exits 3, so the launcher reads Wasmtime's standard error as it passes it through
+and reports a trap as 134. Ctrl+C stops the guest and the launcher removes its
+staging directories. The `windows-launcher` CI job runs
+`tests/package/portable_launcher_test.ts` on `windows-latest` with the pinned
+Deno against a tools candidate and the Zig generator built on Linux;
+`test:launcher` and `test:package` run the same test and the full contract on
+Linux and macOS.
 
 `mise run test:cli-parity` runs upstream `capnp-test.sh` plus conversion and
 eval matrices through the launcher, raw Wasmtime, wazero, and the Deno host,
@@ -398,7 +400,7 @@ byte-compared with the native compiler.
 
 `mise run release:tools` prepares
 `dist/releases/capnp-wasm-tools-<version>/capnp-wasm-tools-<version>.tgz`. This
-smaller archive includes the compiler, standard include schemas, both launchers,
+smaller archive includes the compiler, standard include schemas, the launcher,
 runtime version, licenses, and source provenance/integrity inventory. It omits
 SDK code and generator modules; repository consumers build generators matching
 their own runtime dependency pins. It uses the same `package/` extraction
@@ -526,9 +528,9 @@ checking, and runs a separate Go module against the included SDK. Both compile a
 schema and generate C++, Rust, Go, and Zig from the packaged assets. The Go
 consumer resolves wazero from its checksum-pinned public module version, with no
 replacement for that dependency. Negative controls modify a manifest digest and
-add a stale file; verification must reject both. Both extracted launchers
-execute the real compiler and C++/Zig generators, preserve binary requests and
-canonicalization bytes, accept paths with spaces, and reject malformed inputs,
+add a stale file; verification must reject both. The extracted launcher executes
+the real compiler and C++/Zig generators, preserves binary requests and
+canonicalization bytes, accepts paths with spaces, and rejects malformed inputs,
 invalid roots, and missing or mismatched runtimes.
 
 Hosted browser/platform checks, nightly fuzz/soak evidence, and application

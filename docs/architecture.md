@@ -29,7 +29,7 @@ schema text, binary embeds, standard include schemas
        v
 TypeScript SDK (browser_wasi_shim, in-memory files, direct or worker)
 Go SDK (wazero, private memory filesystem)
-bin/capnp-wasm(.py) launchers (Wasmtime, host directories)
+bin/capnp-wasm.ts launcher (Deno over Wasmtime, host directories)
 ```
 
 The `CodeGeneratorRequest` bytes are the contract between the stages. They are
@@ -47,7 +47,7 @@ any generator on any host. Both SDKs expose that as `generate`.
 | Zig generator and runtime | Upstream `capnp-zig` built pristine for native and `wasm32-wasi`; `sync.json` proves the exported tree matches the pinned commit                        | `generators/zig/`, `scripts/build-zig.sh`, `scripts/check-zig-sync.ts` |
 | TypeScript host           | `createCompiler` (direct) and `createWorkerCompiler` (worker) over `browser_wasi_shim` with bounded in-memory files and memory                          | `sdk/typescript/`                                                      |
 | Go host                   | `capnpcwasm.New`, `Compile`, `Generate` over wazero's compiler engine with a private memory filesystem per command                                      | `sdk/go/`                                                              |
-| Launchers                 | `bin/capnp-wasm.py` (Python; Linux, macOS, Windows) and `bin/capnp-wasm` (Bash); one host directory mapped as guest `/` over a pinned Wasmtime          | `bin/`, `docs/releases.md`                                             |
+| Launcher                  | `bin/capnp-wasm.ts` (Deno 2.4.5 or newer; Linux, macOS, Windows); one host directory mapped as guest `/` over a pinned Wasmtime                         | `bin/`, `docs/releases.md`                                             |
 | Schema Studio             | A static browser workbench over the worker SDK                                                                                                          | `examples/browser/`, `scripts/build-studio.ts`                         |
 | Development runners       | Command hosts over trusted staging directories for the Deno shim and wazero                                                                             | `tests/hosts/`                                                         |
 

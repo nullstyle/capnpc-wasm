@@ -98,13 +98,16 @@ function stage(): Promise<Staged> {
     const src = `${work}/src`;
     await copyTree(`${root}/ref/capnproto/c++/src/capnp`, `${src}/capnp`);
     // The launcher needs its package layout: the repository launcher, the
-    // packaged runtime version, and the built compiler.
+    // packaged runtime version, the built compiler, and the manifest the
+    // launcher verifies them against.
     const launcher = `${work}/launcher`;
     for (const directory of ["bin", "runtime", "wasm"]) {
       await Deno.mkdir(`${launcher}/${directory}`, { recursive: true });
     }
-    await Deno.copyFile(`${root}/bin/capnp-wasm`, `${launcher}/bin/capnp-wasm`);
-    await Deno.chmod(`${launcher}/bin/capnp-wasm`, 0o755);
+    await Deno.copyFile(
+      `${root}/bin/capnp-wasm.ts`,
+      `${launcher}/bin/capnp-wasm.ts`,
+    );
     const pin = /^wasmtime = "([0-9]+\.[0-9]+\.[0-9]+)"$/m.exec(
       await Deno.readTextFile(`${root}/mise.toml`),
     )?.[1];
@@ -114,12 +117,45 @@ function stage(): Promise<Staged> {
       `${pin}\n`,
     );
     await Deno.copyFile(`${wasmBin}/capnp.wasm`, `${launcher}/wasm/capnp.wasm`);
+    const identity = { name: "@nullstyle/capnp-wasm-tools", version: "0.0.0" };
+    await Deno.writeTextFile(
+      `${launcher}/package.json`,
+      JSON.stringify(identity),
+    );
+    const files = [];
+    for (
+      const path of [
+        "bin/capnp-wasm.ts",
+        "package.json",
+        "runtime/wasmtime-version",
+        "wasm/capnp.wasm",
+      ]
+    ) {
+      const data = await Deno.readFile(`${launcher}/${path}`);
+      const digest = new Uint8Array(
+        await crypto.subtle.digest("SHA-256", data),
+      );
+      files.push({
+        path,
+        bytes: data.length,
+        sha256: Array.from(digest, (b) => b.toString(16).padStart(2, "0"))
+          .join(""),
+      });
+    }
+    await Deno.writeTextFile(
+      `${launcher}/manifest.json`,
+      JSON.stringify({ format: 1, ...identity, files }),
+    );
     const hosts: CliHost[] = [
       { name: "native", command: [`${nativeBin}/capnp`], guestPaths: false },
       {
         name: "launcher",
         command: [
-          `${launcher}/bin/capnp-wasm`,
+          Deno.execPath(),
+          "run",
+          "--allow-all",
+          "--no-config",
+          `${launcher}/bin/capnp-wasm.ts`,
           "compiler",
           "--workspace",
           src,

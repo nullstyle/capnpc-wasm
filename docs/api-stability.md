@@ -89,13 +89,12 @@ limit names and defaults, stage names, error classes, and guest command lines.
 Raising a default limit is compatible; lowering one is a break.
 
 Archives: the package layout (`wasm/`, `include/`, `typescript/`, `sdk/go/`,
-`bin/capnp-wasm`, `bin/capnp-wasm.py`, `runtime/wasmtime-version`,
-`manifest.json` in format 1, and `verify-release.ts` with its options), and the
-launchers' modes, options, and exit statuses in the
-[launcher contract](releases.md#repository-toolchain-launcher), including the
-portable launcher's `capnp`, `generate`, and `verify` modes and its exit status
-74. The Python version floor of `bin/capnp-wasm.py` (3.9) rises only in a minor
-release.
+`bin/capnp-wasm.ts`, `runtime/wasmtime-version`, `manifest.json` in format 1,
+and `verify-release.ts` with its options), and the launcher's modes, options,
+and exit statuses in the
+[launcher contract](releases.md#repository-toolchain-launcher), including its
+`capnp`, `generate`, and `verify` modes and exit status 74. The launcher's Deno
+version floor (2.4.5) rises only in a minor release.
 
 These changes are compatible: a new optional field in a request or options type,
 a new field in a result or error, a new export, option, stage, or `Language`
@@ -114,7 +113,7 @@ may change them.
 An experimental interface may change or disappear in any release, including a
 patch release, with a CHANGELOG bullet and without a deprecation period.
 
-- The launchers' environment overrides: `CAPNP_WASM_WASMTIME`,
+- The launcher's environment overrides: `CAPNP_WASM_WASMTIME`,
   `CAPNP_WASM_WASMTIME_ACCEPT_VERSION`, `CAPNP_WASM_MAX_MEMORY`,
   `CAPNP_WASM_TIMEOUT`, `CAPNP_WASM_MAX_WORKSPACE`, and
   `CAPNP_WASM_EXPECT_MANIFEST_SHA256`.

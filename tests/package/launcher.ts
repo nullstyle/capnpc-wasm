@@ -438,14 +438,12 @@ function constantChain(depth: number, id: string): string {
   return lines.join("\n") + "\n";
 }
 
-/** The two packaged launchers, which implement one contract. */
-type Variant = "bash" | "python";
-
-/** The Python interpreter the tests run bin/capnp-wasm.py with, from PATH. */
-const python = "python3";
+/** The command that runs a launcher script with the Deno running this test. */
+function denoRun(script: string): string[] {
+  return [Deno.execPath(), "run", "--allow-all", "--no-config", script];
+}
 
 interface Context {
-  variant: Variant;
   temporary: string;
   pkg: string;
   launcherPath: string;
@@ -464,10 +462,11 @@ const SCHEMA_ARGS = [
 ];
 const COMPILE_ARGS = ["compile", "--src-prefix=/", "-o-", ...SCHEMA_ARGS];
 
+/**
+ * The launcher finds its package through symlinks, from any directory, and
+ * through its shebang, and it verifies the package before every run.
+ */
 async function checkSelfLocation(context: Context) {
-  if (context.variant === "python") {
-    return await checkPythonSelfLocation(context);
-  }
   const { temporary, pkg, launcherPath } = context;
   const info = await Deno.stat(launcherPath);
   assert(
@@ -478,7 +477,7 @@ async function checkSelfLocation(context: Context) {
     await Deno.readTextFile(`${pkg}/package.json`),
   );
   assert(
-    packageJson.bin?.["capnp-wasm"] === "./bin/capnp-wasm",
+    packageJson.bin?.["capnp-wasm"] === "./bin/capnp-wasm.ts",
     "package.json bin does not point at the launcher",
   );
   const version = ["compiler", "--", "--version"];
@@ -490,16 +489,16 @@ async function checkSelfLocation(context: Context) {
     );
   };
   expectVersion(
-    await run(["bash", "bin/capnp-wasm", ...version], {
-      cwd: pkg,
-      env: { CDPATH: `${temporary}:.` },
-    }),
-    "launcher with CDPATH set",
+    await run([...denoRun("bin/capnp-wasm.ts"), ...version], { cwd: pkg }),
+    "relative script path from the package root",
   );
   expectVersion(
-    await run(["bash", "capnp-wasm", ...version], { cwd: `${pkg}/bin` }),
-    "bare launcher name from inside bin/",
+    await run([...denoRun("capnp-wasm.ts"), ...version], {
+      cwd: `${pkg}/bin`,
+    }),
+    "bare script name from inside bin/",
   );
+  // The shebang runs the deno on PATH.
   expectVersion(
     await run(["bash", "-c", 'exec "$0" "$@"', launcherPath, ...version]),
     "direct execution through the shebang",
@@ -525,45 +524,8 @@ async function checkSelfLocation(context: Context) {
     "symlink on PATH",
   );
   expectVersion(
-    await run(["bash", `${chainDirectory}/capnp-wasm`, ...version]),
+    await run([...denoRun(`${chainDirectory}/capnp-wasm`), ...version]),
     "relative symlink chain",
-  );
-}
-
-/** The Python launcher finds its package through symlinks and from any directory. */
-async function checkPythonSelfLocation(context: Context) {
-  const { temporary, pkg, launcherPath } = context;
-  const info = await Deno.stat(launcherPath);
-  assert(
-    ((info.mode ?? 0) & 0o111) !== 0,
-    "packaged Python launcher is not executable",
-  );
-  const version = ["compiler", "--", "--version"];
-  const expectVersion = (output: Deno.CommandOutput, label: string) => {
-    assert(
-      output.success &&
-        text.decode(output.stdout).startsWith("Cap'n Proto version"),
-      `${label}: ${text.decode(output.stderr)}`,
-    );
-  };
-  expectVersion(
-    await run([python, "bin/capnp-wasm.py", ...version], { cwd: pkg }),
-    "relative script path from the package root",
-  );
-  expectVersion(
-    await run([python, "capnp-wasm.py", ...version], { cwd: `${pkg}/bin` }),
-    "bare script name from inside bin/",
-  );
-  expectVersion(
-    await run(["bash", "-c", 'exec "$0" "$@"', launcherPath, ...version]),
-    "direct execution through the shebang",
-  );
-  const linkDirectory = `${temporary}/python link dir`;
-  await Deno.mkdir(linkDirectory);
-  await symlink(launcherPath, `${linkDirectory}/capnp-wasm.py`);
-  expectVersion(
-    await run([python, `${linkDirectory}/capnp-wasm.py`, ...version]),
-    "symlink to the script",
   );
   // Verification: a changed, an extra, and a missing file each fail with 74
   // before the guest runs, and the expected manifest digest is enforced.
@@ -1390,65 +1352,7 @@ async function checkGeneratorSemantics(context: Context) {
     `guest-created symlink: ${linked.code} ${stderrOf(linked)}`,
   );
   sameSnapshot(beforeLink, await snapshot(temporary), "guest-created symlink");
-  // When a move fails part-way, the staged output is kept and named, and every
-  // generated file is in exactly one of the two places. The failure is
-  // simulated with a fake mv, which only the Bash launcher runs.
-  if (context.variant === "bash") await checkPartialMove(context, twoFiles);
   await checkGeneratorRefusals(context, twoFiles);
-}
-
-async function checkPartialMove(context: Context, twoFiles: Uint8Array) {
-  const { temporary, generatorPackage } = context;
-  const module = `${generatorPackage}/wasm/capnpc-c++.wasm`;
-  const fakeBin = `${temporary}/fake bin`;
-  await Deno.mkdir(fakeBin);
-  await writeExecutable(
-    `${fakeBin}/mv`,
-    '#!/bin/sh\nfor arg; do case $arg in *seco.capnp.h) echo "mv: simulated failure: $arg" >&2; exit 1;; esac; done\nPATH=${PATH#*:}\nexec mv "$@"\n',
-  );
-  const partial = `${temporary}/partial output`;
-  await Deno.mkdir(partial);
-  const interrupted = await run([
-    "bash",
-    "-c",
-    'PATH="$1:$PATH"; shift; exec "$@"',
-    "_",
-    fakeBin,
-    context.launcherPath,
-    "generator",
-    "--module",
-    module,
-    "--output",
-    partial,
-    "--",
-  ], { input: twoFiles });
-  const kept = /unpublished output kept in (.+)$/m.exec(
-    stderrOf(interrupted),
-  )?.[1];
-  assert(
-    interrupted.code === 73 && kept !== undefined,
-    `failed move: ${interrupted.code} ${stderrOf(interrupted)}`,
-  );
-  const keptTree = await snapshot(kept);
-  const partialTree = await snapshot(partial);
-  for (
-    const file of [
-      "first.capnp.c++",
-      "first.capnp.h",
-      "seco.capnp.c++",
-      "seco.capnp.h",
-    ]
-  ) {
-    assert(
-      keptTree.has(file) !== partialTree.has(file),
-      `${file} is not in exactly one of the output and the kept staging directory`,
-    );
-  }
-  assert(
-    keptTree.has("seco.capnp.h"),
-    "the file whose move failed is missing from the kept staging directory",
-  );
-  await Deno.remove(kept, { recursive: true });
 }
 
 async function checkGeneratorRefusals(context: Context, twoFiles: Uint8Array) {
@@ -1525,16 +1429,6 @@ export async function checkLauncher(
   packagePath: string,
   generatorPackagePath = packagePath,
 ): Promise<void> {
-  for (const variant of ["bash", "python"] as Variant[]) {
-    await checkLauncherVariant(packagePath, generatorPackagePath, variant);
-  }
-}
-
-async function checkLauncherVariant(
-  packagePath: string,
-  generatorPackagePath: string,
-  variant: Variant,
-): Promise<void> {
   await Deno.mkdir("build/test", { recursive: true });
   const temporary = await Deno.realPath(
     await Deno.makeTempDir({
@@ -1544,8 +1438,8 @@ async function checkLauncherVariant(
   );
   try {
     const pkg = `${temporary}/package with spaces`;
-    // The whole package: the Python launcher verifies it against
-    // manifest.json before every run.
+    // The whole package: the launcher verifies it against manifest.json
+    // before every run.
     for (const file of await packageFiles(packagePath)) {
       const destination = `${pkg}/${file}`;
       await Deno.mkdir(destination.slice(0, destination.lastIndexOf("/")), {
@@ -1569,12 +1463,9 @@ async function checkLauncherVariant(
       `${workspace}/schema with spaces.capnp`,
       '@0xece4bf9c1f867623; using Cxx = import "/capnp/c++.capnp"; $Cxx.namespace("candidate"); struct Candidate { value @0 :Data; }\n',
     );
-    const launcherPath = variant === "bash"
-      ? `${pkg}/bin/capnp-wasm`
-      : `${pkg}/bin/capnp-wasm.py`;
-    const launcher = [variant === "bash" ? "bash" : python, launcherPath];
+    const launcherPath = `${pkg}/bin/capnp-wasm.ts`;
+    const launcher = denoRun(launcherPath);
     const context: Context = {
-      variant,
       temporary,
       pkg,
       launcherPath,
@@ -1662,30 +1553,26 @@ async function checkLauncherVariant(
       modules: `${generatorPackage}/wasm`,
       scratch: temporary,
     });
-    if (variant === "python") {
-      // The Python launcher's own modes and path translation, the same test
-      // the Windows CI job runs.
-      success(
-        await run([
-          python,
-          "-B",
-          "-m",
-          "unittest",
-          "tests/package/portable_launcher_test.py",
-        ], {
-          env: {
-            CAPNP_WASM_TEST_PACKAGE: pkg,
-            CAPNP_WASM_TEST_MODULES: `${generatorPackage}/wasm`,
-          },
-          timeoutMs: 600_000,
-        }),
-      );
-    }
+    // The launcher's own modes, path translation, and partial publication,
+    // the same test the Windows CI job runs.
+    success(
+      await run([
+        Deno.execPath(),
+        "test",
+        "--allow-all",
+        "--no-config",
+        "tests/package/portable_launcher_test.ts",
+      ], {
+        env: {
+          CAPNP_WASM_TEST_PACKAGE: pkg,
+          CAPNP_WASM_TEST_MODULES: `${generatorPackage}/wasm`,
+        },
+        timeoutMs: 600_000,
+      }),
+    );
     const skipped = conformance.filter((row) => row.skipped).length;
     console.log(
-      `Packaged ${
-        variant === "bash" ? "Bash" : "Python"
-      } launcher passed: self-location, CLI contract and exit codes, bounds, argv[0], read-only workspace, staged output, confinement, and ${
+      `Packaged Deno launcher passed: self-location, CLI contract and exit codes, bounds, argv[0], read-only workspace, staged output, confinement, and ${
         conformance.length - skipped
       } conformance rows (${skipped} not expressible)`,
     );
