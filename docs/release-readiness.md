@@ -14,10 +14,9 @@ release workflow, with build-provenance and SBOM attestations), and tools rc.3
 and the full SDK rc.6 (2026-10-10, the first with the Deno launcher; the full
 SDK no longer ships the Zig generator) — listed with their digests under
 [published releases](releases.md#published-releases). `release.json` holds one
-version per flavor (`capnpc-wasm` 0.1.0-rc.6, `capnp-wasm-tools` 0.1.0-rc.3,
-`capnp-wasm-compiler-host` 0.1.0-rc.4) until the two releases are published and
-their entries move on, and `scripts/release.ts` refuses to package anything that
-is not a private release candidate.
+version per flavor (`capnpc-wasm` 0.1.0-rc.7, `capnp-wasm-tools` 0.1.0-rc.4,
+`capnp-wasm-compiler-host` 0.1.0-rc.4), and `scripts/release.ts` refuses to
+package anything that is not a private release candidate.
 
 ## Gates
 
