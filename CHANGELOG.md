@@ -14,13 +14,6 @@ every flavor it applies to has shipped it.
   requirements, published-release digests, security policy, threat model,
   contributor guide, architecture overview, and a dated release-readiness gate
   table; historical sprint and audit records moved to `docs/history/`.
-- Launcher: executable with `bin` entry, symlink/CDPATH-safe self-location, 256
-  MiB/8 MiB/300 s guest bounds with env overrides, Wasmtime patch-release
-  acceptance, `--help`/`--version`, exit-code contract, `argv[0]` `capnp`,
-  read-only workspace copy, staged generator output.
-- Tests: `test:cli-parity` runs upstream `capnp-test.sh` and conversion/eval
-  matrices on native, the launcher, Wasmtime, wazero, and the Deno host,
-  byte-compared with native.
 - Documentation: `docs/sdk-contract.md` defines the shared SDK contract, with
   the limit defaults pinned in `tests/fixtures/contract/limits.json`; the Go
   package consumer compares complete digest maps and the compiler-path fixture.
@@ -39,11 +32,6 @@ every flavor it applies to has shipped it.
   sidebar, and the page has an `h1`; the pure `state.js` module has Deno unit
   tests (`test:studio-unit`), and the browser driver adds keyboard, axe-core
   (4.13.0), cancellation, and asset-failure coverage.
-- Toolchain: `mise.lock` records the sha256 and minisign provenance of the
-  pinned Zig development build for all four platforms (ziglang.org no longer
-  serves it; mise verifies the community-mirror download against them), and
-  `mise run mirror:zig` stages, verifies, and records checksums for a
-  project-owned mirror of the tarballs.
 - Browsers: `mise run browser:install` verifies every Playwright archive against
   a recorded sha256 before extracting it (Linux and macOS, x64 and arm64);
   `--print-digests` prints the entries to record after a Playwright bump.
@@ -247,41 +235,6 @@ every flavor it applies to has shipped it.
   accepts advisories for 2.6.8, the full SDK and compiler-host package READMEs
   no longer say worker execution requires that release, and `lint` also runs the
   strict SDK type check.
-- Toolchain: the pinned Zig development build installs from this repository's
-  pre-release `toolchain-zig-0.17.0-dev.1683+5ceec001b` instead of a randomly
-  chosen Zig community mirror. `mise.toml` turns the mirrors off and redirects
-  core:zig's downloads there with `url_replacements`; mise still verifies the
-  ZSF minisign signature and the locked sha256. `mise.lock` names the release
-  URLs, `mise run mirror:zig -- verify` checks the lock, the rule, and the
-  release against each other (`check:zig-lock`, in `lint`, checks the rule, the
-  mirrors setting, and the lock entries offline), and `check:lock-urls` also
-  checks each Zig `.minisig`.
-
-- Toolchain: Zig is the tagged release 0.17.0, downloaded from ziglang.org with
-  the community mirrors off and verified against its minisign signature and the
-  sha256 in `mise.lock`. The project's Zig mirror release, its
-  `url_replacements` rule, `mise run mirror:zig`, and `check:zig-lock` are
-  retired; `check:lock-urls` still checks every Zig tarball and `.minisig`.
-
-- Zig generator, breaking for generated Zig: `ref/capnp-zig` advances from
-  `295ff5e` (0.18.0-era, untagged) to the release tag `v0.24.0` (`a37ff29`, Zig
-  0.17.0). Generated Zig now needs the capnp-zig v0.24.0 runtime (fetch
-  `git+https://github.com/nullstyle/capnp-zig.git#v0.24.0` and import its
-  `capnpc-zig-core` or `capnpc-zig` module as `capnpc-zig`); each file checks
-  the runtime's codegen ABI when it compiles. `capnpc-zig.wasm` gains upstream's
-  `--output-dir=` option, and its size budget rises to 2,200,000 bytes
-  (1,917,601 bytes at v0.24.0, from 1,668,492 in the full SDK rc.5).
-
-- Launcher: `bin/capnp-wasm.py`, a portable launcher for Linux, macOS, and
-  Windows (Python 3.9 or newer, standard library only), ships next to the Bash
-  launcher in the tools and full SDK archives. It implements the same `compiler`
-  and `generator` contract, checks every packaged file against `manifest.json`
-  before each run (exit 74; `CAPNP_WASM_EXPECT_MANIFEST_SHA256` and `verify` pin
-  the published digest), and adds the `capnp` and `generate` modes, ported from
-  capnp-zig's `tools/capnp_tool.py`, which take paths relative to the current
-  directory, add the bundled schemas, and compile and run a Wasm (`--module`) or
-  native (`--plugin`) generator in one step. A new CI job tests it on
-  `windows-latest`.
 - Documentation: `docs/api-stability.md` states the supported pattern for saved
   requests (compile and generate with one archive version, and key cached or
   committed requests by it).
@@ -312,8 +265,119 @@ licenses, manifest, and provenance. No language generators, Go SDK, or launcher.
 ## capnp-wasm-tools
 
 Compiler-only toolchain for build systems: `wasm/capnp.wasm`, pinned `include/`,
-the `bin/capnp-wasm` Bash launcher for Wasmtime, licenses, manifest, and
-provenance. No SDK code or generator modules.
+the Wasmtime launchers (`bin/capnp-wasm.py` from 0.1.0-rc.3, and the
+`bin/capnp-wasm` Bash launcher), licenses, manifest, and provenance. No SDK code
+or generator modules.
+
+### 0.1.0-rc.3
+
+- First tools archive built and attested by the release workflow; it carries the
+  launcher contract and the path-independent, DWARF-stripped compiler that rc.2
+  predates. The bundled schemas are unchanged, and on capnp-zig's committed
+  requests the compiler writes the same bytes as rc.2.
+- Launcher: executable with `bin` entry, symlink/CDPATH-safe self-location, 256
+  MiB/8 MiB/300 s guest bounds with env overrides, Wasmtime patch-release
+  acceptance, `--help`/`--version`, exit-code contract, `argv[0]` `capnp`,
+  read-only workspace copy, staged generator output.
+- Launcher: `bin/capnp-wasm.py`, a portable launcher for Linux, macOS, and
+  Windows (Python 3.9 or newer, standard library only), ships next to the Bash
+  launcher in the tools and full SDK archives. It implements the same `compiler`
+  and `generator` contract, checks every packaged file against `manifest.json`
+  before each run (exit 74; `CAPNP_WASM_EXPECT_MANIFEST_SHA256` and `verify` pin
+  the published digest), and adds the `capnp` and `generate` modes, ported from
+  capnp-zig's `tools/capnp_tool.py`, which take paths relative to the current
+  directory, add the bundled schemas, and compile and run a Wasm (`--module`) or
+  native (`--plugin`) generator in one step. A new CI job tests it on
+  `windows-latest`.
+- Wasm modules: byte-identical from any checkout path for a given WASI SDK
+  platform tarball (C++ `-ffile-prefix-map`, Rust `--remap-path-prefix` and a
+  staged workspace; the sysroot bakes its own build root into two libc++abi
+  strings, so the macOS and Linux tarballs differ); the C++ modules ship without
+  the sysroot's DWARF (`capnp.wasm` 3,004,843 to 1,986,544 bytes) and keep their
+  name section; `scripts/check-wasm-artifacts.ts` and `check:wasm-artifacts`
+  (part of `test`) enforce one feature allow-list per module class, the declared
+  target features, no DWARF or build-host paths, and size budgets.
+- Compiler port: under WASI `main()` always returns its status (no WASI call
+  after `proc_exit` on JavaScript hosts), a missing `/` preopen is reported as
+  `*** Uncaught exception ***` naming the preopen with exit 1 instead of an
+  opaque trap; the build compiles as gnu++23 with upstream's warnings, `-Werror`
+  for patched units, and a configure-time check of the source lists; the port
+  README documents the runtime profile and minimum engines.
+- Tests: `test:cli-parity` runs upstream `capnp-test.sh` and conversion/eval
+  matrices on native, the launcher, Wasmtime, wazero, and the Deno host,
+  byte-compared with native.
+- Tests: a failure and limit conformance corpus (`tests/fixtures/conformance`,
+  `test:conformance` in `test`) runs one set of failing and budget-breaching
+  inputs through TypeScript direct and worker execution, the Go SDK, the
+  packaged launcher, Chromium, Firefox, and WebKit in both modes, and the Schema
+  Studio adapter, against one table whose every departure carries a reason; the
+  TypeScript `defaultLimits` are asserted against the contract fixture, and the
+  external Deno and Go package consumers must compile the compiler-path fixture
+  to identical bytes.
+- Notices: `licenses/` is generated per artifact from the build graph (Go
+  modules, Rust crates, the WASI SDK 34 wasi-libc and LLVM runtime texts
+  vendored under `third_party/`, musl's COPYRIGHT included) with a
+  `THIRD_PARTY_NOTICES-<flavor>.md` per archive flavor and `components.json`;
+  the misattributed Zig libc/libc++ texts are gone.
+- Notices and SBOM: every component license in `components.json` is an SPDX
+  expression (Rust std `MIT OR Apache-2.0`; wasi-libc
+  `(Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT) AND MIT AND BSD-2-Clause AND CC0-1.0 AND BSD-3-Clause`,
+  its own code and its portions), with prose in a separate `note` that the
+  notices print and the SBOM keeps in `licenseComments`, so the SBOM declares
+  every component's license instead of `NOASSERTION`. The gate follows SPDX 2.3
+  with allow-listed license and exception identifiers (no `LicenseRef-`,
+  `NOASSERTION`, or `NONE`); `build:sdk` only warns, and `test:package`, which
+  `ci` and the release workflow run before any upload, fails on a component
+  without an accepted expression. The SBOM's `capnpc-wasm` component (the
+  project's own code) is versioned by the producer commit, not by the flavor's
+  version.
+- Release pipeline: `.github/workflows/release.yml` builds each flavor from its
+  tag (`capnp-wasm-tools-v*`, `capnp-wasm-compiler-host-v*`, `capnpc-wasm-v*`)
+  on a clean checkout with a green CI run (or the full check), runs the package
+  gates, attaches build-provenance and SBOM attestations, and drafts the
+  prerelease; a `workflow_dispatch` run is a dry run. `scripts/release.ts` gains
+  `--publish` (requires the tag at `HEAD`, a clean tree, and a CHANGELOG entry),
+  refuses dirty trees and versions whose tag exists at another commit in
+  candidate mode (`--allow-dirty`, `--allow-existing-tag`), and takes
+  `--out <dir>`; the package tests prepare under `build/test/` and never touch
+  `dist/releases/`.
+- Release assets: `SHA256SUMS` lists the archive, `<stem>.manifest.json` (the
+  manifest as its own asset, so `sha256sum -c` passes before extraction), and
+  `<stem>.spdx.json`, an SPDX 2.3 SBOM built from the manifest,
+  `components.json`, and the tool pins; `<stem>.notes.md` carries the release
+  notes. `scripts/verify-release.ts` takes `--sums`, `--expect-manifest-sha256`,
+  `--expect-commit`, and `--require-clean`.
+- Packaged documents: each archive's `README.md` is generated per flavor from
+  `scripts/templates/` (verification, package-relative usage, links to the
+  repository at the producer commit; no status claims) and its examples run in
+  `test:package` and `test:compiler-host-package`; `docs/typescript.md` and the
+  packaged `sdk/go/README.md` have their relative links rewritten to the
+  repository at that commit; `docs/releases.md` is no longer copied into
+  archives. `THIRD_PARTY_NOTICES.md` ships at the package root and `licenses/`
+  holds only the flavor's texts. The full SDK archive packages every non-test
+  `.go` file of the Go SDK.
+- Release versions: each archive flavor has its own version under `versions` in
+  `release.json` (`capnpc-wasm` 0.1.0-rc.4, `capnp-wasm-tools` 0.1.0-rc.3,
+  `capnp-wasm-compiler-host` 0.1.0-rc.4). `scripts/release.ts` rejects a missing
+  or unknown flavor and the old single `version`, and refuses a flavor version
+  whose own tag, or for the full SDK the Go module tag `sdk/go/v<version>`,
+  exists at another commit, so `release:compiler-host` builds again without
+  `--allow-existing-tag`. The launcher's `--version` reads only the packaged
+  `package.json`, and the package receipt starts with `schemaVersion: 1` and
+  records the tools archive's version.
+- Documentation: `docs/api-stability.md` lists the stable and experimental
+  interfaces of both SDKs, the archives, and the launcher; states the 0.x
+  version rules (a minor release may break, with a CHANGELOG bullet marked
+  breaking; a patch release never breaks; `X.Y.Z-rc.N` are candidates of one
+  version) and the deprecation window (announced in the CHANGELOG and the
+  documentation comment, removed no earlier than the next minor release); and
+  records the naming rule: `capnp-wasm-<part>` for compiler-only artifacts,
+  `capnpc-wasm` for the full SDK package, its archive, and the Go module tag.
+  `docs/sdk-contract.md` now defers to those version rules instead of freezing
+  the contract at the first tag.
+- Documentation: `docs/api-stability.md` states the supported pattern for saved
+  requests (compile and generate with one archive version, and key cached or
+  committed requests by it).
 
 ### 0.1.0-rc.2 (2026-09-15)
 
@@ -329,6 +393,35 @@ Candidates were prepared locally at `0.1.0-rc.1` (commit `94ba6b2`; receipt in
 `0.1.0-rc.3`, while one version covered every flavor; `0.1.0-rc.4` was never
 used. The Go module tag `sdk/go/v<version>` takes the same version and is
 created by hand after the SDK API freeze. No `sdk/go/v*` tag exists.
+
+### 0.1.0-rc.6
+
+- Zig generator, breaking for generated Zig: `ref/capnp-zig` advances from
+  `295ff5e` (0.18.0-era, untagged) to the release tag `v0.24.0` (`a37ff29`, Zig
+  0.17.0). Generated Zig now needs the capnp-zig v0.24.0 runtime (fetch
+  `git+https://github.com/nullstyle/capnp-zig.git#v0.24.0` and import its
+  `capnpc-zig-core` or `capnpc-zig` module as `capnpc-zig`); each file checks
+  the runtime's codegen ABI when it compiles. `capnpc-zig.wasm` gains upstream's
+  `--output-dir=` option, and its size budget rises to 2,200,000 bytes
+  (1,917,601 bytes at v0.24.0, from 1,668,492 in the full SDK rc.5).
+- Toolchain: Zig is the tagged release 0.17.0, downloaded from ziglang.org with
+  the community mirrors off and verified against its minisign signature and the
+  sha256 in `mise.lock`. The project's Zig mirror release, its
+  `url_replacements` rule, `mise run mirror:zig`, and `check:zig-lock` are
+  retired; `check:lock-urls` still checks every Zig tarball and `.minisig`.
+- Launcher: `bin/capnp-wasm.py`, a portable launcher for Linux, macOS, and
+  Windows (Python 3.9 or newer, standard library only), ships next to the Bash
+  launcher in the tools and full SDK archives. It implements the same `compiler`
+  and `generator` contract, checks every packaged file against `manifest.json`
+  before each run (exit 74; `CAPNP_WASM_EXPECT_MANIFEST_SHA256` and `verify` pin
+  the published digest), and adds the `capnp` and `generate` modes, ported from
+  capnp-zig's `tools/capnp_tool.py`, which take paths relative to the current
+  directory, add the bundled schemas, and compile and run a Wasm (`--module`) or
+  native (`--plugin`) generator in one step. A new CI job tests it on
+  `windows-latest`.
+- Documentation: `docs/api-stability.md` states the supported pattern for saved
+  requests (compile and generate with one archive version, and key cached or
+  committed requests by it).
 
 ### 0.1.0-rc.5 (2026-10-07)
 
