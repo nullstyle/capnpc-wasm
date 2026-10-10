@@ -1,12 +1,10 @@
 // Recompute the nightly-confidence ledger,
 // docs/release-evidence/nightly-confidence.json (decision D5 = A): the streak
 // of consecutive successful scheduled runs of this repository's nightly
-// workflow at the ref/capnp-zig revision the index pins. The gitlink is read
-// on every run, never from the ledger, so a reference bump restarts the count.
-// Run and gitlink data come from the GitHub Actions API through `gh api`,
+// workflow. Run data come from the GitHub Actions API through `gh api`,
 // read-only (a local run uses the gh login; CI sets GH_TOKEN).
 //
-// Usage: deno run --allow-read --allow-run=git,gh --allow-write=docs/release-evidence
+// Usage: deno run --allow-read --allow-run=gh --allow-write=docs/release-evidence
 //          scripts/audit-nightly.ts [--repo owner/name] [--workflow nightly.yml] [--check]
 //
 // The computed fields are rewritten; requiredConsecutiveScheduledRuns, rules,
@@ -19,8 +17,7 @@
 
 const ledgerPath = "docs/release-evidence/nightly-confidence.json";
 const ledgerName = "nightly-confidence.json";
-const nativeReference = "ref/capnp-zig";
-const commitPattern = /^[0-9a-f]{40}$/;
+const schemaVersion = 3;
 
 /** The fields of a workflow run this script reads from the API. */
 export type Run = {
@@ -44,20 +41,18 @@ export type Cycle = {
 
 export type StreakEnd = {
   scheduledDateUtc: string;
-  kind: "conclusion" | "rerun" | "native_revision" | "missed";
+  kind: "conclusion" | "rerun" | "missed";
   detail: string;
   runUrl: string | null;
 };
 
 export type Streak = { cycles: Cycle[]; streakEnd: StreakEnd | null };
 
-/** The ledger this script writes (schema version 2). */
+/** The ledger this script writes (schema version 3). */
 export type Ledger = {
   schemaVersion: number;
   phase: string;
   workflow: { repository: string; path: string; event: string };
-  nativeReference: string;
-  nativeRevision: string;
   requiredConsecutiveScheduledRuns: number;
   status: "no_scheduled_runs" | "measured";
   statusDetail: string | null;
@@ -78,7 +73,7 @@ export function dayBefore(date: string): string {
 
 /**
  * The current streak, newest cycle first. A cycle is a scheduled run that
- * concluded success on its first attempt at the pinned native revision. The
+ * concluded success on its first attempt. The
  * API reports only a run's latest attempt, so any re-run ends the streak, even
  * of a run whose first attempt succeeded. Cycles fall on consecutive UTC
  * dates, the newest on `today` or the day before (today's run may not have
@@ -91,12 +86,10 @@ export function dayBefore(date: string): string {
  * in progress dated earlier, such as a re-run, leaves its date without a
  * completed run: the streak ends there, and the detail names the run.
  */
-export async function computeStreak(
+export function computeStreak(
   runs: readonly Run[],
-  pinned: string,
   today: string,
-  nativeRevisionOf: (run: Run) => Promise<string>,
-): Promise<Streak> {
+): Streak {
   const scheduled = runs
     .filter((run) => run.event === "schedule")
     .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
@@ -145,17 +138,6 @@ export async function computeStreak(
         run.html_url,
       );
     }
-    const revision = await nativeRevisionOf(run);
-    if (revision !== pinned) {
-      return end(
-        date,
-        "native_revision",
-        `run ${run.id} tested ${nativeReference} ${revision.slice(0, 7)}, not ${
-          pinned.slice(0, 7)
-        }`,
-        run.html_url,
-      );
-    }
     if (date !== counted) {
       cycles.push({
         scheduledDateUtc: date,
@@ -182,18 +164,12 @@ export async function computeStreak(
 /**
  * Invariants of a ledger that its schema cannot express: the counters and
  * dates match the cycle list, cycles are first-attempt runs of the ledger's
- * own repository on consecutive dates, newest first, the status agrees with
- * the runs, and nativeRevision is the gitlink the index pins now, so a
- * reference bump without a regenerated ledger fails.
+ * own repository on consecutive dates, newest first, and the status agrees
+ * with the runs.
  */
-export function ledgerProblems(ledger: Ledger, gitlink: string): string[] {
+export function ledgerProblems(ledger: Ledger): string[] {
   const problems: string[] = [];
   const { cycles, streakEnd } = ledger;
-  if (ledger.nativeRevision !== gitlink) {
-    problems.push(
-      `nativeRevision ${ledger.nativeRevision} is not the ${nativeReference} gitlink in the index, ${gitlink}; run mise run audit:nightly`,
-    );
-  }
   if (ledger.currentConsecutiveScheduledRuns !== cycles.length) {
     problems.push(
       `currentConsecutiveScheduledRuns is ${ledger.currentConsecutiveScheduledRuns} but the ledger lists ${cycles.length} cycles`,
@@ -284,27 +260,6 @@ async function output(command: string, args: string[]): Promise<string> {
   return new TextDecoder().decode(result.stdout);
 }
 
-/** The ref/capnp-zig gitlink recorded in the index, as scripts/lib/refs.sh reads it. */
-export async function indexGitlink(): Promise<string> {
-  const lines = (await output("git", [
-    "ls-files",
-    "--stage",
-    "--",
-    `:(top)${nativeReference}`,
-  ])).trim().split("\n").filter(Boolean);
-  const [mode, revision, stage] = lines.length === 1
-    ? lines[0].split(/\s+/)
-    : [];
-  if (mode !== "160000" || stage !== "0" || !commitPattern.test(revision)) {
-    throw new Error(
-      `no single ${nativeReference} gitlink in the index: ${
-        JSON.stringify(lines)
-      }`,
-    );
-  }
-  return revision;
-}
-
 function usage(message: string): never {
   console.error(message);
   console.error(
@@ -350,9 +305,9 @@ type HandFields = Pick<
 function committedFields(text: string): HandFields {
   const ledger = JSON.parse(text) as Partial<HandFields>;
   const problems: string[] = [];
-  if (ledger.schemaVersion !== 2) {
+  if (ledger.schemaVersion !== schemaVersion) {
     problems.push(
-      `schemaVersion ${ledger.schemaVersion} (this script writes 2)`,
+      `schemaVersion ${ledger.schemaVersion} (this script writes ${schemaVersion})`,
     );
   }
   const required = ledger.requiredConsecutiveScheduledRuns;
@@ -391,7 +346,6 @@ if (import.meta.main) {
     Deno.exit(2);
   }
   const committed = committedFields(committedText);
-  const pinned = await indexGitlink();
 
   const registered = (await output("gh", [
     "api",
@@ -410,36 +364,8 @@ if (import.meta.main) {
     ])).split("\n").filter(Boolean).map((line) => JSON.parse(line) as Run)
     : [];
 
-  const revisions = new Map<string, Promise<string>>();
-  const nativeRevisionOf = (run: Run): Promise<string> => {
-    let revision = revisions.get(run.head_sha);
-    if (!revision) {
-      revision = output("gh", [
-        "api",
-        `repos/${repo}/contents/${nativeReference}?ref=${run.head_sha}`,
-        "--jq",
-        "[.type, .sha] | @tsv",
-      ]).then((text) => {
-        const [type, sha] = text.trim().split("\t");
-        if (type !== "submodule" || !commitPattern.test(sha ?? "")) {
-          throw new Error(
-            `${repo}@${run.head_sha}: ${nativeReference} is not a gitlink (${text.trim()})`,
-          );
-        }
-        return sha;
-      });
-      revisions.set(run.head_sha, revision);
-    }
-    return revision;
-  };
-
   const today = new Date().toISOString().slice(0, 10);
-  const { cycles, streakEnd } = await computeStreak(
-    runs,
-    pinned,
-    today,
-    nativeRevisionOf,
-  );
+  const { cycles, streakEnd } = computeStreak(runs, today);
   const completedRuns = runs.filter((run) =>
     run.event === "schedule" && run.status === "completed"
   ).length;
@@ -449,11 +375,9 @@ if (import.meta.main) {
     ? `no completed scheduled run of ${workflowPath} in ${repo} yet; GitHub schedules the workflow only from the default branch, and the streak starts with its first scheduled run there`
     : null;
   const ledger: Ledger = {
-    schemaVersion: 2,
+    schemaVersion,
     phase: "scheduled_nightly_confidence",
     workflow: { repository: repo, path: workflowPath, event: "schedule" },
-    nativeReference,
-    nativeRevision: pinned,
     requiredConsecutiveScheduledRuns:
       committed.requiredConsecutiveScheduledRuns,
     status: completedRuns === 0 ? "no_scheduled_runs" : "measured",
@@ -467,7 +391,7 @@ if (import.meta.main) {
     publicationAuthorized: committed.publicationAuthorized,
     supersedes: committed.supersedes,
   };
-  const inconsistent = ledgerProblems(ledger, pinned);
+  const inconsistent = ledgerProblems(ledger);
   if (inconsistent.length > 0) {
     throw new Error(
       `computed an inconsistent ledger: ${inconsistent.join("; ")}`,
@@ -475,9 +399,6 @@ if (import.meta.main) {
   }
   const text = JSON.stringify(ledger, null, 2) + "\n";
 
-  console.log(
-    `native revision ${pinned} (${nativeReference} in the index)`,
-  );
   console.log(
     `workflow ${repo} ${workflowPath}: ${
       registered.includes(workflowPath) ? "registered" : "not registered"

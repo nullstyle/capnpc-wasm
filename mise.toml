@@ -553,13 +553,13 @@ depends = ["build:sdk"]
 run = "deno run --allow-read --allow-env=HOME --allow-run=wasm-tools scripts/check-wasm-artifacts.ts"
 
 [tasks."check:evidence"]
-description = "Validate every receipt under docs/release-evidence against its schema, the receipts it names, and the ledger's counters and ref/capnp-zig gitlink (offline)"
-run = "deno run --allow-read --allow-run=git scripts/check-evidence.ts"
+description = "Validate every receipt under docs/release-evidence against its schema, the receipts it names, and the ledger's counters (offline)"
+run = "deno run --allow-read scripts/check-evidence.ts"
 
 [tasks."audit:nightly"]
-description = "Recompute the nightly-confidence ledger for the pinned ref/capnp-zig revision from the GitHub API (network, read-only gh; `-- --check` writes nothing)"
-run = "deno run --allow-read --allow-run=git,gh --allow-write=docs/release-evidence scripts/audit-nightly.ts"
+description = "Recompute the nightly-confidence ledger from the GitHub API (network, read-only gh; `-- --check` writes nothing)"
+run = "deno run --allow-read --allow-run=gh --allow-write=docs/release-evidence scripts/audit-nightly.ts"
 
 [tasks."test:evidence"]
 description = "Test the nightly streak computation and the evidence checker against planted defects (offline)"
-run = "deno test --allow-read=docs/release-evidence,build/test --allow-write=build/test --allow-run=git tests/audit_nightly_test.ts tests/check_evidence_test.ts"
+run = "deno test --allow-read=docs/release-evidence,build/test --allow-write=build/test tests/audit_nightly_test.ts tests/check_evidence_test.ts"

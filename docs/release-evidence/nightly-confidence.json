@@ -1,13 +1,11 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "phase": "scheduled_nightly_confidence",
   "workflow": {
     "repository": "nullstyle/capnpc-wasm",
     "path": ".github/workflows/nightly.yml",
     "event": "schedule"
   },
-  "nativeReference": "ref/capnp-zig",
-  "nativeRevision": "a37ff29726173babbb9341ed5563d1da8a62ec82",
   "requiredConsecutiveScheduledRuns": 7,
   "status": "measured",
   "statusDetail": null,
@@ -23,10 +21,10 @@
   },
   "rules": [
     "A cycle is a run of the workflow named in workflow, triggered by schedule; GitHub runs scheduled workflows on the default branch only.",
-    "A cycle qualifies when the run concluded success on its first attempt and was never re-run, so every job without continue-on-error succeeded, and the ref/capnp-zig gitlink at the run's head commit equals nativeRevision, the gitlink the index pins when the ledger is computed.",
+    "A cycle qualifies when the run concluded success on its first attempt and was never re-run, so every job without continue-on-error succeeded.",
     "Manually dispatched runs, runs of other workflows, and local runs are never cycles.",
-    "The streak counts qualifying cycles on consecutive UTC dates, newest first, starting on the current or the previous UTC date. A scheduled run that did not conclude success or that tested another native revision ends it, and so does a UTC date without a completed scheduled run. Any re-run ends the streak, even of a run whose first attempt succeeded, because the API reports only the latest attempt; do not re-run scheduled nightly runs. A run that has not completed is never counted: a run in progress dated today leaves the streak to the completed runs before it, and one dated earlier leaves its date without a completed run.",
-    "Bumping the ref/capnp-zig gitlink restarts the count at zero. Changes to this repository's other sources do not; per-push CI gates them.",
+    "The streak counts qualifying cycles on consecutive UTC dates, newest first, starting on the current or the previous UTC date. A scheduled run that did not conclude success ends it, and so does a UTC date without a completed scheduled run. Any re-run ends the streak, even of a run whose first attempt succeeded, because the API reports only the latest attempt; do not re-run scheduled nightly runs. A run that has not completed is never counted: a run in progress dated today leaves the streak to the completed runs before it, and one dated earlier leaves its date without a completed run.",
+    "Changes to this repository's sources, reference pins included, do not restart the count; per-push CI gates them. Until 2026-10-09 the ledger counted only runs at the pinned ref/capnp-zig revision; the Zig generator then moved to capnp-zig and the reference was removed.",
     "scripts/audit-nightly.ts (mise run audit:nightly) computes every other field from the GitHub API; only requiredConsecutiveScheduledRuns, rules, publicationAuthorized, and supersedes are edited by hand."
   ],
   "publicationAuthorized": false,

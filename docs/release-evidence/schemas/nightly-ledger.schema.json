@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Nightly-confidence ledger",
-  "description": "The streak of consecutive successful scheduled runs of this repository's nightly workflow at the pinned ref/capnp-zig revision (decision D5 = A). scripts/audit-nightly.ts computes every field except requiredConsecutiveScheduledRuns, rules, publicationAuthorized, and supersedes, which are maintained by hand.",
+  "description": "The streak of consecutive successful scheduled runs of this repository's nightly workflow (decision D5 = A). scripts/audit-nightly.ts computes every field except requiredConsecutiveScheduledRuns, rules, publicationAuthorized, and supersedes, which are maintained by hand.",
   "x-fileNamePattern": "^nightly-confidence\\.json$",
   "type": "object",
   "additionalProperties": false,
@@ -9,8 +9,6 @@
     "schemaVersion",
     "phase",
     "workflow",
-    "nativeReference",
-    "nativeRevision",
     "requiredConsecutiveScheduledRuns",
     "status",
     "statusDetail",
@@ -24,7 +22,7 @@
     "supersedes"
   ],
   "properties": {
-    "schemaVersion": { "const": 2 },
+    "schemaVersion": { "const": 3 },
     "phase": { "const": "scheduled_nightly_confidence" },
     "workflow": {
       "type": "object",
@@ -36,8 +34,6 @@
         "event": { "const": "schedule" }
       }
     },
-    "nativeReference": { "const": "ref/capnp-zig" },
-    "nativeRevision": { "$ref": "#/$defs/commit" },
     "requiredConsecutiveScheduledRuns": { "type": "integer", "minimum": 1 },
     "status": { "enum": ["no_scheduled_runs", "measured"] },
     "statusDetail": { "type": ["string", "null"], "minLength": 1 },
@@ -57,7 +53,7 @@
       "properties": {
         "scheduledDateUtc": { "$ref": "#/$defs/date" },
         "kind": {
-          "enum": ["conclusion", "rerun", "native_revision", "missed"]
+          "enum": ["conclusion", "rerun", "missed"]
         },
         "detail": { "type": "string", "minLength": 1 },
         "runUrl": {

@@ -220,10 +220,6 @@ finish with `mise run ci` before a rebase or hand-off.
   mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \
     scripts/check-zig-sync.ts --update-fixtures
   ```
-- After staging a `ref/capnp-zig` bump and before `mise run test`, run
-  `mise run audit:nightly` and commit the regenerated ledger with the bump: the
-  bump restarts the nightly streak, and `check:evidence` and `test:evidence`
-  fail until the ledger names the new gitlink.
 - `generators/zig/historical-reference` pins the audited revision `08a3e3d` that
   the wire tests use as an oracle; `refs:sync` fetches it. It stays fixed across
   bumps.

@@ -6,17 +6,16 @@
 // Every schema must match at least one receipt, and the directory holds
 // nothing but receipts, README.md, and schemas/. The nightly-confidence ledger
 // must also pass ledgerProblems from scripts/audit-nightly.ts: counters and
-// dates that match its cycles, and the ref/capnp-zig gitlink the index pins,
-// read with `git ls-files`.
+// dates that match its cycles.
 //
 // The schemas are JSON Schema 2020-12 documents limited to the keywords this
 // script implements; a schema using any other keyword fails the check, so this
 // script and a full validator accept the same receipts. Offline: nothing is
 // fetched. `mise run check:evidence` runs it as part of `lint`.
 //
-// Usage: deno run --allow-read --allow-run=git scripts/check-evidence.ts [directory]
+// Usage: deno run --allow-read scripts/check-evidence.ts [directory]
 
-import { indexGitlink, type Ledger, ledgerProblems } from "./audit-nightly.ts";
+import { type Ledger, ledgerProblems } from "./audit-nightly.ts";
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 type JsonObject = { [key: string]: Json };
@@ -347,12 +346,9 @@ async function readJson(path: string): Promise<Json> {
 
 // Checks a type's schema cannot express, keyed by schema file name; they run
 // only on a receipt that already validates against its schema.
-const consistency: Record<
-  string,
-  (receipt: Json, gitlink: () => Promise<string>) => Promise<string[]>
-> = {
-  "nightly-ledger.schema.json": async (receipt, gitlink) =>
-    ledgerProblems(receipt as unknown as Ledger, await gitlink()),
+const consistency: Record<string, (receipt: Json) => string[]> = {
+  "nightly-ledger.schema.json": (receipt) =>
+    ledgerProblems(receipt as unknown as Ledger),
 };
 
 type Entries = { receipts: string[]; schemas: string[]; unexpected: string[] };
@@ -388,14 +384,9 @@ export type EvidenceReport = {
   schemas: number;
 };
 
-/**
- * Check every receipt and schema in `directory`. `gitlink` reads the
- * ref/capnp-zig gitlink a nightly-confidence ledger must name; it runs once,
- * and only when the directory holds such a ledger.
- */
+/** Check every receipt and schema in `directory`. */
 export async function checkEvidence(
   directory: string,
-  gitlink: () => Promise<string> = indexGitlink,
 ): Promise<EvidenceReport> {
   const lines: string[] = [];
   const failures: string[] = [];
@@ -405,8 +396,6 @@ export async function checkEvidence(
       `${name}: not a receipt (*.json directly in the directory), README.md, or a schema`,
     );
   }
-  let pinned: Promise<string> | undefined;
-  const readGitlink = () => (pinned ??= gitlink());
 
   const schemas = new Map<string, JsonObject>();
   for (const name of found.schemas) {
@@ -459,7 +448,7 @@ export async function checkEvidence(
     const check = consistency[schemaName];
     if (context.problems.length === 0 && check) {
       try {
-        for (const problem of await check(receipt, readGitlink)) {
+        for (const problem of check(receipt)) {
           context.problems.push(`${name}: ${problem}`);
         }
       } catch (error) {

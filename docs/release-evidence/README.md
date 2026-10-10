@@ -5,11 +5,11 @@ Machine-readable receipts behind the
 in this directory, and its file name selects its type. [`schemas/`](schemas/)
 holds one JSON Schema (draft 2020-12) per type. `mise run check:evidence`, part
 of `mise run lint`, validates every receipt against its schema, checks that
-every receipt a receipt names exists, checks the ledger's counters, dates, and
-`ref/capnp-zig` gitlink against its cycles and the index, and fails on a file
-that no schema claims or anything else in the directory. It runs offline.
-`mise run test:evidence`, part of `mise run test`, runs the streak computation
-on synthetic runs and the checker on copies with planted defects.
+every receipt a receipt names exists, checks the ledger's counters and dates
+against its cycles, and fails on a file that no schema claims or anything else
+in the directory. It runs offline. `mise run test:evidence`, part of
+`mise run test`, runs the streak computation on synthetic runs and the checker
+on copies with planted defects.
 
 | Receipt                             | Type                                                                                      | Producer                                                   |
 | ----------------------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
@@ -27,18 +27,17 @@ on synthetic runs and the checker on copies with planted defects.
 
 `mise run audit:nightly` recomputes `nightly-confidence.json` from the GitHub
 API with read-only `gh` calls: the streak of successful scheduled runs of
-`.github/workflows/nightly.yml` whose head commit pins the `ref/capnp-zig`
-revision the index pins. It rewrites the computed fields and keeps the
-hand-maintained ones (`requiredConsecutiveScheduledRuns`, `rules`,
+`.github/workflows/nightly.yml`. Until 2026-10-09 it counted only runs whose
+head commit pinned the `ref/capnp-zig` revision the index pinned; schema version
+3 drops that key with the reference. It rewrites the computed fields and keeps
+the hand-maintained ones (`requiredConsecutiveScheduledRuns`, `rules`,
 `publicationAuthorized`, `supersedes`). `mise run audit:nightly -- --check`
 writes nothing and fails when the committed ledger is stale. The nightly
 workflow, on `main` since 2026-10-07, runs the task in a `ledger` job after its
 other jobs and uploads the result as an artifact; CI never commits it. Commit a
-regenerated ledger with any `ref/capnp-zig` bump, since the bump restarts the
-streak; until then `check:evidence` fails because the ledger names the previous
-gitlink. Any re-run ends the streak, even of a run whose first attempt
-succeeded, because the API reports only the latest attempt; do not re-run
-scheduled nightly runs.
+regenerated ledger to record progress. Any re-run ends the streak, even of a run
+whose first attempt succeeded, because the API reports only the latest attempt;
+do not re-run scheduled nightly runs.
 
 ## Versions
 

@@ -424,8 +424,8 @@ jobs:
           ./...
 
   # The nightly-confidence ledger (decision D5 = A): the streak of successful
-  # scheduled runs of this workflow at the pinned ref/capnp-zig revision,
-  # recomputed from the Actions API once the other jobs have finished. This
+  # scheduled runs of this workflow, recomputed from the Actions API once the
+  # other jobs have finished. This
   # run is still in progress here, so the ledger counts the runs before it;
   # the next run, or `mise run audit:nightly` afterwards, counts this one.
   # The regenerated ledger is an artifact: CI never commits or pushes it.

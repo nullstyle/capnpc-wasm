@@ -27,7 +27,7 @@ candidate.
 | Browser matrix: offline SDK parity and cancellation in Chromium, Firefox, and WebKit, plus Schema Studio                                                                | Green for all three engines                                                                                                 | Passing on `f6a9509` (Linux, [run 37571913174](https://github.com/nullstyle/capnpc-wasm/actions/runs/37571913174)); on macOS, every job of a manual run of the nightly on the merged tip passed, browsers and soak included ([run 37570711941](https://github.com/nullstyle/capnpc-wasm/actions/runs/37570711941))                                                                                                                                                                                                                    | 2026-09-15    | `ci.yml` job `browsers`                                                                         |
 | Checks leave tracked sources unchanged                                                                                                                                  | `git diff --exit-code` after the check job                                                                                  | Passing on `f6a9509`. Failed on `a5ccaae`, the compiler-host rc.3 producer commit, on both hosts; fixed by `672679a`                                                                                                                                                                                                                                                                                                                                                                                                                  | 2026-09-15    | `ci.yml` step "Verify checks leave tracked sources unchanged"                                   |
 | Zig source synchronization: the prepared source tree and 36 mirrored fixtures match the `ref/capnp-zig` gitlink (`mise run check:zig-sync`)                             | `check:zig-sync` passes for native commit `a37ff29` (tag `v0.24.0`)                                                         | Passing; it runs inside every `build:zig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | 2026-09-24    | `scripts/check-zig-sync.ts`, invoked by `scripts/build-zig.sh`                                  |
-| Nightly confidence: seven consecutive successful scheduled runs of this repository's nightly workflow at the pinned `ref/capnp-zig` revision (decision D5 = A)          | The generated [ledger](release-evidence/nightly-confidence.json) (`mise run audit:nightly`) with seven consecutive cycles   | Not met: 0 of 7 for `a37ff29` (`v0.24.0`), pinned on 2026-10-09. The scheduled runs of 2026-10-07 and 10-08 passed at `295ff5e`; the run of 10-09 failed (a WebKit page crash in the macOS soak and a 906 ms deadline overrun of the `tableFill` step on macos-15-intel), and the bump restarted the count. See [Nightly ledger](#nightly-ledger)                                                                                                                                                                                     | 2026-10-09    | `scripts/audit-nightly.ts`; job `ledger` of `.github/workflows/nightly.yml`, 11:17 UTC daily    |
+| Nightly confidence: seven consecutive successful scheduled runs of this repository's nightly workflow (decision D5 = A)                                                 | The generated [ledger](release-evidence/nightly-confidence.json) (`mise run audit:nightly`) with seven consecutive cycles   | Not met: 0 of 7. The scheduled runs of 2026-10-07 and 10-08 passed; the run of 10-09 failed (a WebKit page crash in the macOS soak and a 906 ms deadline overrun of the `tableFill` step on macos-15-intel), which ended the streak. See [Nightly ledger](#nightly-ledger)                                                                                                                                                                                                                                                            | 2026-10-09    | `scripts/audit-nightly.ts`; job `ledger` of `.github/workflows/nightly.yml`, 11:17 UTC daily    |
 | Published asset integrity: archive and manifest SHA-256 recorded in this repository, independent of the download host                                                   | A row per published archive in the release guide                                                                            | Recorded for all three archives. The manifest digest of tools rc.2 is not recorded because no byte-identical local copy exists; the digest of its `SHA256SUMS` asset, which lists it, is recorded instead                                                                                                                                                                                                                                                                                                                             | 2026-09-22    | None. `scripts/release.ts` writes `SHA256SUMS`; the table is maintained by hand                 |
 | Release signing or attestation                                                                                                                                          | Signed `SHA256SUMS` or a provenance attestation, plus verification instructions                                             | `.github/workflows/release.yml`, on `main` since 2026-10-07, attests build provenance for the archive, its manifest, its SPDX SBOM, and `SHA256SUMS`, and the SBOM for the archive; the [release guide](releases.md#release-process) documents `gh attestation verify`. The workflow first ran 2026-10-07 for the full SDK rc.5: the archive and SBOM attestations on the published assets verified with `gh attestation verify`. Immutable releases and tag rulesets are not enabled                                                 | 2026-10-07    | `release.yml`                                                                                   |
 | Registry publication path: npm or JSR package and a `sdk/go/v…` module tag                                                                                              | A tag-triggered release job that builds, verifies, and publishes with provenance                                            | A tag-triggered release job (`release.yml`, on `main`; it drafted and published the full SDK rc.5) builds, verifies, and drafts GitHub prereleases with provenance, each flavor at its own `release.json` version; `scripts/release.ts` still accepts only `X.Y.Z-rc.N` with `private: true`. No npm or JSR package is published; decision D2 = A defers registries until after the API freeze and the nightly gate. The Go module tag `sdk/go/v<version>` takes the `capnpc-wasm` version at the commit of that release; none exists | 2026-09-24    | `release.yml` (GitHub prereleases only)                                                         |
@@ -56,11 +56,10 @@ candidate.
   resolution, and either transactional output with a read-only workspace or
   documented native-equivalent semantics; `test:launcher` covers each item.
 - Nightly streak: seven consecutive successful scheduled runs of this
-  repository's nightly workflow at the pinned `ref/capnp-zig` revision (decision
-  D5 = A), recorded in the generated ledger (`mise run audit:nightly`). This
-  repository's nightly runs no fuzz jobs; capnp-zig's own nightly fuzz receipts
-  are supporting evidence only. The maintainer settled the open question on
-  2026-10-07: no fuzz leg in this repository's nightly for `0.1.0`.
+  repository's nightly workflow (decision D5 = A), recorded in the generated
+  ledger (`mise run audit:nightly`). This repository's nightly runs no fuzz
+  jobs. The maintainer settled the open question on 2026-10-07: no fuzz leg in
+  this repository's nightly for `0.1.0`.
 - Signing: `SHA256SUMS` for every published asset is signed or attested, and the
   release guide tells consumers how to verify it.
 - Registry workflow: a tag-triggered CI job builds the archives from a clean
@@ -79,13 +78,15 @@ candidate.
 ## Nightly ledger
 
 The nightly gate is measured in this repository (decision D5 = A): seven
-consecutive successful scheduled runs of `.github/workflows/nightly.yml` at the
-`ref/capnp-zig` revision this repository pins, now the release tag `v0.24.0`
-(`a37ff29726173babbb9341ed5563d1da8a62ec82`, since 2026-10-09; before that
-`295ff5e`). The workflow runs daily at 11:17 UTC. The held workflows reached
-`main` on 2026-10-07 (`bbc59ba`), and GitHub schedules a workflow only from the
-default branch, so the streak starts with the first scheduled run from `main`,
-on 2026-10-07. A manual run of the merged tip the same morning
+consecutive successful scheduled runs of `.github/workflows/nightly.yml`. Until
+2026-10-09 the gate counted only runs at the `ref/capnp-zig` revision this
+repository pinned (last `a37ff29`, tag `v0.24.0`; before that `295ff5e`), and a
+bump restarted the count. That day the Zig generator moved to capnp-zig and the
+reference was removed, so the ledger (schema version 3) counts runs without a
+pin. The workflow runs daily at 11:17 UTC. The held workflows reached `main` on
+2026-10-07 (`bbc59ba`), and GitHub schedules a workflow only from the default
+branch, so the streak starts with the first scheduled run from `main`, on
+2026-10-07. A manual run of the merged tip the same morning
 ([run 37570711941](https://github.com/nullstyle/capnpc-wasm/actions/runs/37570711941),
 `f6a9509`) passed every job: all four cold bootstraps, the browsers and soak
 jobs on Linux and macOS, the Go floor and wazero drift, the Windows Go SDK, the
@@ -124,41 +125,36 @@ pin moved to the tagged Zig 0.17.0, which ziglang.org keeps, and the mirror
 release, its rule, and the `mirror:zig` and `check:zig-lock` tasks were retired.
 
 The ledger, [nightly-confidence.json](release-evidence/nightly-confidence.json),
-is generated. `mise run audit:nightly` reads the gitlink from the index and the
-workflow's scheduled runs from the GitHub API with read-only `gh` calls, then
-rewrites the counters: `status`, `currentConsecutiveScheduledRuns`,
-`firstQualifyingScheduledDateUtc`, `lastQualifyingScheduledDateUtc`, the
-qualifying `cycles`, and `streakEnd`, the run or missed date that ends the
-streak. `mise run audit:nightly -- --check` fails when the committed ledger is
-stale. `mise run check:evidence` validates it against its
-[schema](release-evidence/schemas/nightly-ledger.schema.json) and checks,
-offline, that its counters and dates match its cycles and that it names the
-gitlink the index pins, so a bump without a regenerated ledger fails `lint`. The
-workflow's `ledger` job runs the audit after the other jobs and uploads the
-regenerated ledger as an artifact; CI never commits it. Commit a regenerated
-ledger to record progress and with every `ref/capnp-zig` bump, which restarts
-the count. The scheduled runs of 2026-10-07 and 2026-10-08 passed at `295ff5e`.
-The run of 2026-10-09
+is generated. `mise run audit:nightly` reads the workflow's scheduled runs from
+the GitHub API with read-only `gh` calls, then rewrites the counters: `status`,
+`currentConsecutiveScheduledRuns`, `firstQualifyingScheduledDateUtc`,
+`lastQualifyingScheduledDateUtc`, the qualifying `cycles`, and `streakEnd`, the
+run or missed date that ends the streak. `mise run audit:nightly -- --check`
+fails when the committed ledger is stale. `mise run check:evidence` validates it
+against its [schema](release-evidence/schemas/nightly-ledger.schema.json) and
+checks, offline, that its counters and dates match its cycles. The workflow's
+`ledger` job runs the audit after the other jobs and uploads the regenerated
+ledger as an artifact; CI never commits it. Commit a regenerated ledger to
+record progress. The scheduled runs of 2026-10-07 and 2026-10-08 passed at
+`295ff5e`. The run of 2026-10-09
 ([37923718435](https://github.com/nullstyle/capnpc-wasm/actions/runs/37923718435))
 failed in two jobs: on macos-15, WebKit's main page crashed in soak round 3
 (worker abort recovery cycle 3), and on macos-15-intel, `test:sdk-ts` saw a
 direct job's `tableFill` step stop 906 ms past its deadline, beyond the test's
-500 ms allowance. The bump to `v0.24.0` on 2026-10-09 restarted the count: the
-ledger records a streak of 0 of 7 for `a37ff29`, ended by that run.
+500 ms allowance. The ledger records a streak of 0 of 7, ended by that run.
 `publicationAuthorized` remains `false`.
 
 Rules, from the JSON: a cycle is a scheduled run of the workflow. It qualifies
 when the run concluded `success` on its first attempt and was never re-run, so
-every job without `continue-on-error` succeeded, and the gitlink at its head
-commit is the pinned revision. Manual and local runs never count. Qualifying
-cycles fall on consecutive UTC dates, the newest today or yesterday; a scheduled
-run that failed, was cancelled, or tested another native revision ends the
-streak, and so does a date without a completed scheduled run. Any re-run ends
-the streak, even of a run whose first attempt succeeded, because the API reports
-only the latest attempt; do not re-run scheduled nightly runs. A run in progress
-dated today is not counted yet; one dated earlier leaves its date without a
-completed run. A gitlink bump restarts the count; changes to this repository's
-other sources do not, because per-push CI gates them.
+every job without `continue-on-error` succeeded. Manual and local runs never
+count. Qualifying cycles fall on consecutive UTC dates, the newest today or
+yesterday; a scheduled run that failed or was cancelled ends the streak, and so
+does a date without a completed scheduled run. Any re-run ends the streak, even
+of a run whose first attempt succeeded, because the API reports only the latest
+attempt; do not re-run scheduled nightly runs. A run in progress dated today is
+not counted yet; one dated earlier leaves its date without a completed run.
+Changes to this repository's sources, reference pins included, do not restart
+the count, because per-push CI gates them.
 
 ### capnp-zig scheduled Nightly
 
@@ -168,8 +164,8 @@ capnp-zig `main`, with every fuzz receipt audited by hand. That ledger is kept
 unchanged as
 [capnp-zig-nightly-confidence.json](release-evidence/capnp-zig-nightly-confidence.json):
 one audited cycle (2026-09-09, native `0fb8df4`), last updated in commit
-`b8d8e3f`. capnp-zig's runs remain supporting evidence for the pinned revision;
-they do not count toward the gate. Runs observed on 2026-09-24 with
+`b8d8e3f`. capnp-zig's runs do not count toward the gate. Runs observed on
+2026-09-24 with
 `gh run list --repo nullstyle/capnp-zig --workflow nightly.yml --event schedule`.
 Only the 2026-09-09 run has audited receipts
 ([hosted](release-evidence/nightly-2026-09-09-hosted.json),

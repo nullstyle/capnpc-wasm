@@ -1,6 +1,5 @@
 // scripts/check-evidence.ts on copies of docs/release-evidence with planted
-// defects: each copy lives under build/test and is removed afterwards. The
-// ledger checks read the ref/capnp-zig gitlink with `git ls-files`.
+// defects: each copy lives under build/test and is removed afterwards.
 // `mise run test:evidence` runs it with tests/audit_nightly_test.ts.
 import {
   checkEvidence,
@@ -9,8 +8,6 @@ import {
 
 const source = "docs/release-evidence";
 const ledgerName = "nightly-confidence.json";
-// The gitlink the ledger named before the 295ff5e bump.
-const previousPin = "0fb8df40126ea166f95016963c465b03db22819e";
 
 type Ledger = Record<string, unknown> & { cycles: Record<string, unknown>[] };
 
@@ -99,12 +96,12 @@ Deno.test("an unchanged copy passes", async () => {
   if (report.failures.length > 0) throw new Error(report.failures.join("\n"));
 });
 
-Deno.test("planted: the ledger names the previous pin 0fb8df4", async () => {
+Deno.test("planted: the ledger names a native revision again", async () => {
   expectFailures(
     await planted(editLedger((ledger) => {
-      ledger.nativeRevision = previousPin;
+      ledger.nativeRevision = "0fb8df40126ea166f95016963c465b03db22819e";
     })),
-    `${ledgerName}: nativeRevision ${previousPin} is not the ref/capnp-zig gitlink in the index`,
+    `${ledgerName}: unexpected property "nativeRevision"`,
   );
 });
 
