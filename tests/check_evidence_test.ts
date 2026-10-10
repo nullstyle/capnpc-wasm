@@ -113,6 +113,8 @@ Deno.test("planted: the ledger counts 7 runs with no cycles", async () => {
     await planted(editLedger((ledger) => {
       ledger.currentConsecutiveScheduledRuns = 7;
       ledger.status = "measured";
+      // Planted here, so the case holds whatever the committed ledger says.
+      ledger.statusDetail = "planted detail";
     })),
     `${ledgerName}: currentConsecutiveScheduledRuns is 7 but the ledger lists 0 cycles`,
     `${ledgerName}: status measured takes no statusDetail`,
