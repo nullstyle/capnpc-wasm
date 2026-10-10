@@ -257,6 +257,12 @@ every flavor it applies to has shipped it.
   mirrors setting, and the lock entries offline), and `check:lock-urls` also
   checks each Zig `.minisig`.
 
+- Toolchain: Zig is the tagged release 0.17.0, downloaded from ziglang.org with
+  the community mirrors off and verified against its minisign signature and the
+  sha256 in `mise.lock`. The project's Zig mirror release, its
+  `url_replacements` rule, `mise run mirror:zig`, and `check:zig-lock` are
+  retired; `check:lock-urls` still checks every Zig tarball and `.minisig`.
+
 ## capnp-wasm-compiler-host
 
 Compiler and TypeScript host for Deno and browser workers: `wasm/capnp.wasm`,

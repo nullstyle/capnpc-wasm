@@ -88,41 +88,25 @@ mise run test:studio chromium firefox webkit
    (`mise --cd`) and CI installs the pinned tools with `--locked`.
 3. Run `mise run check`.
 
-Zig must equal the `zig` line of `ref/capnp-zig/mise.toml` (both are
-`0.17.0-dev.1683+5ceec001b` today). ziglang.org no longer serves that
-development build, so mise installs it from this repository's pre-release
-`toolchain-zig-<version>`, which holds the Zig Software Foundation's signed
-tarballs: `mise.toml` turns the Zig community mirrors off, and its
-`url_replacements` rule sends core:zig's ziglang.org requests for each tarball
-and its `.minisig` to the release. mise still verifies the minisign signature
-and the sha256 that `mise.lock` records. A Zig bump therefore publishes the new
-release before it locks:
+Zig must equal the `zig` line of `ref/capnp-zig/mise.toml` (both are `0.17.0`
+today; `doctor` checks it). Pin tagged Zig releases only. ziglang.org keeps
+every tagged release, and deletes development builds within weeks, after which a
+cold install fails. `mise.toml` turns the Zig community mirrors off, so core:zig
+downloads the tarball and its `.minisig` from ziglang.org itself; mise verifies
+the Zig Software Foundation's minisign signature and the sha256 that `mise.lock`
+records. A Zig bump is the tool-pin procedure above: `mise lock zig`, a review
+of the four platform entries against the `shasum` values in
+<https://ziglang.org/download/index.json>, and `mise run check`.
+`mise run check:lock-urls` confirms that every locked file is served.
 
-1. `mise run mirror:zig -- stage` downloads the four tarballs and their
-   signatures (from ziglang.org or a community mirror), verifies them, and
-   prints the `gh release create` command.
-2. A maintainer runs that command to publish `toolchain-zig-<version>`.
-3. `mise run mirror:zig -- verify <release URL>` checks the published copies.
-4. `mise lock zig` records the new version with ziglang.org URLs and no
-   checksums; `mise run mirror:zig -- lock --write` replaces them with the
-   release URLs and the verified sha256 digests. Run it after any `mise lock`
-   that includes zig (`mise lock zig` or a full `mise lock`), which drops them
-   again.
-5. `mise run mirror:zig -- verify` checks that the lock, the rule, and the
-   release agree (`mise run lint` runs its offline half, `check:zig-lock`), and
-   `mise run check:lock-urls` that every locked file and signature is served.
-
-The rule has side effects inside this repository. It captures every Zig
-development build, so `mise install zig@master` or any other dev build fails
-with a 404 from the release unless it holds that build. mise does not merge
-`url_replacements` tables: the project's table replaces one in your global
-config, and a table in `mise.local.toml` or `MISE_URL_REPLACEMENTS` replaces the
-project's, drops the Zig rule, and makes a cold install fail with a bare 404 for
-the ziglang.org URL (`check:zig-lock` warns about both). `MISE_SAFE=1` ignores
-the project's settings, so Zig then comes from the community mirrors, still
-signature-checked. mise's own error messages name the ziglang.org URL even when
-the request went to the release; `MISE_LOG_LEVEL=trace` shows the rewritten
-request.
+Until 2026-10, the pin was a development build that ziglang.org had deleted, and
+the project served it from its own release
+`toolchain-zig-0.17.0-dev.1683+5ceec001b` through a `url_replacements` rule and
+the `mirror:zig` and `check:zig-lock` tasks. That machinery is gone; the release
+stays published, because the producer provenance of earlier archives names it.
+If capnp-zig ever pins a development build again, restore it from Git history
+(`scripts/mirror-zig.ts` before the Zig 0.17.0 bump) rather than pinning a build
+that ziglang.org will delete.
 
 The Wasmtime pin is copied into every tools archive as the required runtime
 version, so bumping it changes the launcher contract for consumers. The Deno pin
@@ -168,16 +152,14 @@ Per reference:
   `mise exec -- go -C <dir> mod tidy` in both directories so `go.sum` matches;
   builds use `-mod=readonly`.
 - `capnp-zig`, in this order: (a) if `ref/capnp-zig/mise.toml` changed its `zig`
-  line, bump the tool pin with the Zig steps above (publish the new mirror
-  release, then `mise lock zig` and `mise run mirror:zig -- lock --write`); (b)
-  with the new gitlink staged, run `mise run audit:nightly` (network, read-only
-  `gh`) and commit the regenerated
-  `docs/release-evidence/nightly-confidence.json` with the bump: the bump
-  restarts the nightly streak, and `check:evidence` in `lint` and
-  `test:evidence` in `test` fail until the ledger names the new gitlink; (c) run
-  `mise run build:zig`, which exports the tree at the gitlink and fails in
-  `check-zig-sync.ts` for every mirrored fixture that differs from its native
-  file; (d) refresh the mirrors from the gitlink and review the diff:
+  line, bump the tool pin with the Zig steps above (`mise lock zig`); (b) with
+  the new gitlink staged, run `mise run audit:nightly` (network, read-only `gh`)
+  and commit the regenerated `docs/release-evidence/nightly-confidence.json`
+  with the bump: the bump restarts the nightly streak, and `check:evidence` in
+  `lint` and `test:evidence` in `test` fail until the ledger names the new
+  gitlink; (c) run `mise run build:zig`, which exports the tree at the gitlink
+  and fails in `check-zig-sync.ts` for every mirrored fixture that differs from
+  its native file; (d) refresh the mirrors from the gitlink and review the diff:
 
   ```sh
   mise exec -- deno run --allow-read --allow-write=tests --allow-run=git \

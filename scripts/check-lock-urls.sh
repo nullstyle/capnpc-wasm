@@ -2,14 +2,14 @@
 #
 # Check that every download URL recorded in mise.lock is still served, so that
 # upstream pruning is caught by the nightly workflow before a cold bootstrap
-# fails. For an entry that requires minisign provenance (the pinned Zig), the
-# .minisig beside the URL is checked too: mise verifies it on every install.
+# fails. For a Zig tarball from ziglang.org, and any entry that records minisign
+# provenance, the .minisig beside the URL is checked too: core:zig downloads
+# and verifies it on every install, and `mise lock zig` records no provenance.
 # Exit status 1 when any file is unavailable.
 #
-# The Zig entries name the project's mirror release, the URLs that mise.toml's
-# url_replacements rule sends core:zig to, with the community mirrors off. A
-# ziglang.org build URL in the lock is a regression (`mise lock zig` writes
-# one): mise would request it, and ziglang.org prunes development builds.
+# The pinned Zig is a tagged release from ziglang.org, which keeps tagged
+# releases; a ziglang.org/builds/ URL names a development build, which
+# ziglang.org deletes within weeks, so the hint below says to pin a tag.
 #
 # Usage: bash scripts/check-lock-urls.sh [mise.lock]
 set -euo pipefail
@@ -68,13 +68,13 @@ while IFS=$'\t' read -r url provenance; do
   if [[ "$code" != 2* ]]; then
     hint=""
     if [[ "$url" == https://ziglang.org/builds/* ]]; then
-      hint="; the pinned Zig comes from the project's mirror release: run \`mise run mirror:zig -- lock --write\`"
+      hint="; ziglang.org deletes development builds: pin a tagged Zig release (CONTRIBUTING.md, Tool pins)"
     fi
     fail "$url returned HTTP $code$hint"
     continue
   fi
   served=$((served + 1))
-  if [[ "$provenance" == minisign ]]; then
+  if [[ "$provenance" == minisign || "$url" == https://ziglang.org/* ]]; then
     code="$(status_of "$url.minisig")"
     if [[ "$code" == 2* ]]; then
       signatures=$((signatures + 1))
