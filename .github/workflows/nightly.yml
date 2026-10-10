@@ -68,6 +68,9 @@ jobs:
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
+          # Nightly 38048300416 exhausted the 30s HTTP timeout downloading
+          # the Intel WASI SDK. Allow slower reads on this cold install.
+          MISE_HTTP_TIMEOUT: "120s"
         with:
           version: 2026.9.1
           cache: false

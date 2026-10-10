@@ -154,6 +154,13 @@ passed. This is a tool-download failure, separate from the 10-09 test failures.
 The ledger records a streak of 0 of 7, ended by the 10-10 run.
 `publicationAuthorized` remains `false`.
 
+The tool-install steps in the nightly cold bootstrap and the per-push CI check
+use `MISE_HTTP_TIMEOUT=120s`, up from mise's 30-second default. The timeout
+applies to connecting and waiting between HTTP reads; retries and locked digest
+verification still apply. The change gives slower downloads more time. Its
+effect on hosted runners awaits a run with this change; a successful local check
+does not prove that the download failure is fixed.
+
 Rules, from the JSON: a cycle is a scheduled run of the workflow. It qualifies
 when the run concluded `success` on its first attempt and was never re-run, so
 every job without `continue-on-error` succeeded. Manual and local runs never

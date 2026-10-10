@@ -56,6 +56,8 @@ jobs:
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4
         env:
           MISE_GITHUB_TOKEN: ${{ github.token }}
+          # A cache miss downloads the same tools as the nightly bootstrap.
+          MISE_HTTP_TIMEOUT: "120s"
         with:
           version: 2026.9.1
       - name: Initialize only pinned top-level references
